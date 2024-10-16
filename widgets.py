@@ -2,6 +2,7 @@
 from kivy.uix.image import Image as CoreImage
 from kivy.properties import BooleanProperty
 from kivy.uix.widget import Widget
+from kivy.graphics import Ellipse, Color
 
 from images import IMAGE_SOURCE_5, IMAGE_SOURCE_DIRECTION, IMAGE_SOURCE_BUTTON_DOWN, IMAGE_SOURCE_BUTTON_UP
 class StickImage(CoreImage):
@@ -11,6 +12,22 @@ class StickImage(CoreImage):
     
     def update_state(self, direction):
         self.source =  IMAGE_SOURCE_DIRECTION[direction]
+
+class DirectionalPromptWidget(Widget):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        with self.canvas:
+            Color(1,1,1,0.25)
+            self.border = Ellipse(pos=self.pos, size=self.size)
+    
+        self.bind(pos=self.update_canvas)
+        self.bind(size=self.update_canvas)
+        self.update_canvas()
+    
+    def update_canvas(self, *args):
+        self.border.pos = self.pos
+        self.border.size = self.size
+    
 
 
 class ButtonImage(CoreImage):

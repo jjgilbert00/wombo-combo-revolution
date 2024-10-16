@@ -36,7 +36,7 @@ class WomboComboApp(App):
         # Set the window background color to transparent (RGBA)
         Window.clearcolor = (0.2, 0.2, 0.2, 0)
         Window.opacity= 0.5
-        Window.size = (1000, 1000)
+        Window.size = (1920, 1080)
         Window.borderless = False
         Window.fullscreen = False
 

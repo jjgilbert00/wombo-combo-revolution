@@ -1,0 +1,6 @@
+10/16/24
+So the current level of functionality is a window with widgets that display the joystick and controller button states. The controller inputs are read using pygame but everything else (windows, layouts, timing, etc) is done with kivy. The wcr.py file represents some experimentation with the pygame window but I couldn't get it to support transparency which is somewhat vital to this app. 
+
+Wrestling with the pos_hint, size_hint, and other positioning/sizing attributes proved to be somewhat complicated and confusing but I think we got there. The joystick has a fixed position because it needs to be large enough for readability and centered within its layout so there's time/space for the prompts to move through. The Button columns are still widgets but they will be refactored into Layouts like the JoystickLayout.
+
+The PlayalongLayout displays the input-responsive widgets as well as some Layout based setup for the input prompts. A white circle is drawn to represent the space through which the input prompts will travel. Blue columns are drawn around/above the buttons for the input prompts to fall down through. The columns are draggable as the desired interface/layout for buttons is going to be very user-dependent. 
