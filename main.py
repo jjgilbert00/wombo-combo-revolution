@@ -63,7 +63,8 @@ class WomboComboApp(App):
 
     def refresh(self, dt):
         self.controller_reader.update_state()
-        self.controller_display.update_display(dt)
+        self.controller_display.update_display()
+        self.playalong_layout.update_controller_display()
 
     def on_stop(self):
         # Clean up when closing the app

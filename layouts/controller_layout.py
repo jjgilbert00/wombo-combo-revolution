@@ -47,7 +47,7 @@ class ControllerDisplay(BoxLayout):
         layout.add_widget(self.button_displays["LT"])
         self.add_widget(layout)
 
-    def update_display(self, dt):
+    def update_display(self):
         controller_state = self.controller_reader.get_controller_state()
         for button in controller_state:
             self.button_displays[button].update_state(controller_state[button])

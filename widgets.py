@@ -40,9 +40,6 @@ class DraggableWidget(Widget):
         if self.dragging:
             self.pos = ((touch.x + self._touch_offset_x) // 1 , (touch.y + self._touch_offset_y) // 1)
             self.pos_hint = {}
-            # self.x = touch.x + self._touch_offset_x
-            # self.y = touch.y + self._touch_offset_y
-            print(f"Moved to {self.x}, {self.y}")
             self.update_canvas()
             return True
         return super().on_touch_move(touch)
