@@ -4,7 +4,7 @@ from kivy.uix.widget import Widget
 from kivy.graphics import Rectangle, Color
 
 from controller import ControllerReader
-from widgets import ButtonImage, StickImage, DraggableWidget, DirectionalPromptWidget
+from widgets import ButtonImage, ButtonPromptWidget, StickImage, DraggableWidget, DirectionalPromptWidget
 
 
 
@@ -24,37 +24,20 @@ class JoystickLayout(RelativeLayout):
         self.stick_image.update_state(direction)
 
 
-class ColumnWidget(DraggableWidget):
-    button_image = None
+class ColumnLayout(RelativeLayout):
     border = None
+    button_prompt_widget = None
+
     def __init__(self, **kwargs):
-        super(ColumnWidget, self).__init__(**kwargs)
+        super(ColumnLayout, self).__init__(**kwargs)
         with self.canvas:
             Color(0,0,1,0.25)
             self.border = Rectangle(pos=self.pos, size=self.size)
-            self.button_image = ButtonImage(pos=self.pos, size_hint=(1, 1))
-        self.bind(pos=self.update_canvas)
-        self.bind(size=self.update_canvas)
-        self.update_canvas()
-    
-    def update_state(self, pressed):
-        self.button_image.update_state(pressed)
-        self.canvas.ask_update()
+            self.button_prompt_widget = ButtonPromptWidget(pos_hint={"center_x": 0.5, "center_y": 0.5}, size=self.size)
+            self.add_widget(self.button_prompt_widget)
 
-    def update_canvas(self, *args):
-        # Draw the border of the column
-        Color(0,0,1,0.25)
-
-        self.border.pos = self.pos
-        self.border.size = self.size
-
-        # Draw the descending inputs
-        # print("TODO: Draw the descending inputs")
-
-        # Draw the button silhouette at the bottom of the screen
-        self.button_image.size = (self.width, self.width)
-        self.button_image.pos = self.pos
-
+    def update_state(self, state):
+        self.button_prompt_widget.update_state(state)
 
 class PlayAlongLayout(RelativeLayout):
     def __init__(self, controller_reader: ControllerReader, **kwargs):
@@ -65,7 +48,7 @@ class PlayAlongLayout(RelativeLayout):
         }
         button_names = ["A", "X", "B", "Y", "RT", "RB", "LT", "LB"]
         for i in range(len(button_names)):
-            self.button_displays[button_names[i]] = ColumnWidget(size_hint=(0.1, 1), pos_hint={'x': 0.5 + i * (0.4/8), 'y': 0 if i%2==0 else 0.1})
+            self.button_displays[button_names[i]] = ColumnLayout(size_hint=(0.1, 1), pos_hint={'x': 0.5 + i * (0.4/8), 'y': 0 if i%2==0 else 0.1})
         [self.add_widget(self.button_displays[button]) for button in self.button_displays]
         self.bind(size=self.update_joystick_layout_size)
         self.update_controller_display()
