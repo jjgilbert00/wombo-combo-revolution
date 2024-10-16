@@ -1,1 +1,4 @@
-__pycache__/\n*.pyc\n.env\n.venv\n*.log\n*__pycache__*\n
+.env
+.venv
+*.log
+*__pycache__*

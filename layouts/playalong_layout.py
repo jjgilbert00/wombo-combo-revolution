@@ -4,27 +4,38 @@ from kivy.uix.widget import Widget
 from kivy.graphics import Rectangle, Color
 
 from controller import ControllerReader
-from widgets import ButtonImage, StickImage
+from widgets import ButtonImage, StickImage, DraggableWidget
 
 
 class JoystickWidget(Widget):
     # TODO: Design the joystick widget and animate the joystick inputs over time
     pass
 
-class ColumnWidget(Widget):
+class ColumnWidget(DraggableWidget):
     button_image = None
+    border = None
     def __init__(self,  **kwargs):
         super(ColumnWidget, self).__init__(**kwargs)
         with self.canvas:
+            Color(0,0,1,0.25)
+            self.border = Rectangle(pos=self.pos, size=self.size)
             self.button_image = ButtonImage(pos=self.pos, size_hint=(1, 1))
             # self.button_image = ButtonImage(pos=self.pos, size_hint=(self.size_hint_x, self.size_hint_x))
         self.bind(pos=self.update_canvas)
         self.bind(size=self.update_canvas)
-        self.update_canvas()  
+        self.update_canvas()
+    
     
     def update_canvas(self, *args):
+        print(f"Updating canvas for {self} pos: {self.pos}, size: {self.size}")
+        # Draw the border of the column
+        Color(0,0,1,0.25)
+
+        self.border.pos = self.pos
+        self.border.size = self.size
+
         # Draw the descending inputs
-        print("TODO: Draw the descending inputs")
+        # print("TODO: Draw the descending inputs")
 
         # Draw the button silhouette at the bottom of the screen
         self.button_image.size = (self.width, self.width)
