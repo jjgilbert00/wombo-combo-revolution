@@ -1,0 +1,15 @@
+
+
+The idea for this app is to simultaneously capture game controller inputs and a video stream for the purposes of supporting user-created mechanical drills/trials. Planned features include:
+
+* Capture a simultaneous recording of controller inputs and video.
+* Visualize the inputs over the screen recording as a kind of Demonstration
+* An input display overlay with a visual representation of timing (think Dance Dance Revolution/Guitar Hero). The background of this overlay should be transparent (adjustable opacity?) so it can be viewied on top of the game client.
+* Pulse the input display with user inputs to provide timing feedback.
+* Long term goal: an editor for cleaning the input recording
+
+
+Supporting libraries:
+kivy: This is supposedly a very easy gui framework for python. Let's find out.
+pygame: This is the go-to for python game stuff. Game input recording is a small component of that but maybe we can find more things to use.
+mss: 
