@@ -54,11 +54,11 @@ class WomboComboApp(App):
             self.controller_display = ControllerDisplay(self.controller_reader)
             Clock.schedule_interval(self.refresh, 1.0/60.0)
 
-        # self.playalong_layout = PlayAlongLayout(self.controller_reader)
+        self.playalong_layout = PlayAlongLayout(self.controller_reader)
 
         layout = BoxLayout(orientation="vertical")
         layout.add_widget(self.playalong_layout)
-        layout.add_widget(self.controller_display)
+        # layout.add_widget(self.controller_display)
         return layout
 
     def refresh(self, dt):

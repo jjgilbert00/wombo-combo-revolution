@@ -47,6 +47,7 @@ class PlayAlongLayout(RelativeLayout):
         super().__init__(**kwargs)
         self.joystick = JoystickWidget(size_hint=(0.4, 1), pos_hint={'center_x': 0.5, 'center_y': 0.8})
         self.add_widget(self.joystick)
+        self.controller_reader = controller_reader
 
         self.button_displays = {
             "direction": StickImage(),
@@ -60,22 +61,11 @@ class PlayAlongLayout(RelativeLayout):
             "RT": ButtonImage(),
         }
 
-        initial_positions = [
-            (0.5, 0),
-            (0.575, 0.05625),
-            (0.65, 0),
-            (0.725, 0.05625),
-            (0.8, 0),
-            (0.875, 0.05625),
-            (0.95, 0),
-            (1.025, 0.05625),
-        ]
         for i in range(8):
             width = 0.1
             height = 1 
             x= 0.5 + i * (0.4/8)
             y= 0 if i%2==0 else 0.1
-            print(f"X: {x}, Y: {y} Width: {width}, Height: {height}")
             column = ColumnWidget(size_hint=(width, height), pos_hint={'x': x, 'y': y})
             self.add_widget(column)
         
