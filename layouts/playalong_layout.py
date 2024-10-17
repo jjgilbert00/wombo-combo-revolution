@@ -5,7 +5,6 @@ from kivy.graphics import Rectangle, Color
 from widgets import ButtonImage, StickImage, DraggableWidget, DirectionalPromptWidget
 from images import IMAGE_SOURCE_BUTTON_UP, get_standard_button_icon
 
-PLAYALONG_FRAMELENGTH = 120
 
 
 # Draws the user-controlled joystick as well as the input prompts.
@@ -29,26 +28,24 @@ class ButtonLayout(RelativeLayout):
         self.button_source = button_source
         self.input_pool =[]
         with self.canvas:
-            self.controller_button = ButtonImage(source=self.button_source, pos_hint={"center_x": 0.5, "bottom": 0}, size_hint=(1, None), opacity=0.3)
+            self.controller_button = ButtonImage(source=self.button_source, pos_hint={"center_x": 0.5, "bottom": 0}, size_hint=(1, None), opacity=0.5)
             self.add_widget(self.controller_button)
 
     
     def update_state(self, controller_state, input_frames):
         if input_frames:
             input_counter = 0
-            reversed = input_frames.copy()[0:PLAYALONG_FRAMELENGTH]
-            reversed.reverse()
-            for i in range(min(PLAYALONG_FRAMELENGTH, len(input_frames))):
-                frame_state = reversed[i]
+            for i in range(len(input_frames)-1, -1, -1):
+                frame_state = input_frames[i]
                 if frame_state:
                     if len(self.input_pool) <= input_counter:
                         print(f"Creating new {self.button_source} button at index {i}.  input_counter: {input_counter}.  len(self.input_pool): {len(self.input_pool)}")
-                        button = ButtonImage(source=self.button_source, size_hint=(1,None), opacity=0.8)
+                        button = ButtonImage(source=self.button_source, size_hint=(1,None), opacity=0.5)
                         self.input_pool.append(button)
                         self.add_widget(button)
                     else:
                         button = self.input_pool[input_counter]
-                    button.y = self.height * (1-i/PLAYALONG_FRAMELENGTH)
+                    button.y = self.height * (i/len(input_frames))
                     input_counter += 1
             for i in range(input_counter, len(self.input_pool)):
                 self.input_pool[i].y = -self.height
@@ -68,7 +65,7 @@ class PlayAlongLayout(RelativeLayout):
         }
         button_names = ["A", "X", "B", "Y", "RT", "RB", "LT", "LB"]
         for i in range(len(button_names)):
-            self.button_displays[button_names[i]] = ButtonLayout(button_source=get_standard_button_icon(self.controller_type, self.button_icon_style, button_names[i]), size_hint=(0.07, 1), pos_hint={'x': 0.5 + i * (0.48/8), 'y': 0 if i%2==0 else 0.1})
+            self.button_displays[button_names[i]] = ButtonLayout(button_source=get_standard_button_icon(self.controller_type, self.button_icon_style, button_names[i]), size_hint=(0.07, 1), pos_hint={'x': 0.5 + i * (0.48/8), 'y': 0 if i%2==0 else 0})
         [self.add_widget(self.button_displays[button]) for button in self.button_displays]
         self.bind(size=self.update_joystick_layout_size)
 

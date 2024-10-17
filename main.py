@@ -9,7 +9,7 @@ from kivy.uix.boxlayout import BoxLayout
 from kivy.config import Config
 from kivy.clock import Clock
 from kivy.core.window import Window
-from controller import ControllerRecorder, ControllerReader
+from controller import get_neutral_controller_state, ControllerRecorder, ControllerReader
 from layouts.controller_layout import ControllerDisplay
 from layouts.playalong_layout import PlayAlongLayout
 import pygame
@@ -38,7 +38,16 @@ def get_random_controller_state():
         "LT": round(0.51*random.random()),
         "LB": round(0.51*random.random()),
     }
-TEST_INPUTS = [get_random_controller_state() for _ in range(60 * 10)] # 10 seconds of random inputs
+TEST_INPUTS = [get_neutral_controller_state() for _ in range(120)]
+TEST_INPUTS[10]['X'] = 1
+TEST_INPUTS[20]['Y'] = 1
+TEST_INPUTS[30]['A'] = 1
+TEST_INPUTS[40]['B'] = 1
+TEST_INPUTS[50]['LB'] = 1
+TEST_INPUTS[60]['RB'] = 1
+TEST_INPUTS[70]['LT'] = 1
+TEST_INPUTS[80]['RT'] = 1
+# TEST_INPUTS = [get_random_controller_state() for _ in range(60 * 2)] # 10 seconds of random inputs
 
 
 

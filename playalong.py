@@ -1,6 +1,6 @@
 from kivy.clock import Clock
-
-
+from controller import get_neutral_controller_state
+PLAYALONG_FRAMELENGTH = 120
 class PlayalongController:
     def __init__(self, controller_reader, view=None, input_track=[]):
         self.view = view
@@ -48,8 +48,7 @@ class PlayalongController:
         self.current_frame = 0
 
     def get_playalong_frames(self):
-        return self.input_track[self.current_frame:]
-    
+        return self.input_track[self.current_frame:] + [get_neutral_controller_state() for _ in range(PLAYALONG_FRAMELENGTH - len(self.input_track[self.current_frame:]))]
     def refresh(self):
         if self.playing:
             self.next_frame()
