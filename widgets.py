@@ -56,58 +56,58 @@ class DirectionalPromptWidget(Widget):
         self.border.pos = self.pos
         self.border.size = self.size
     
-class ButtonPromptWidget(DraggableWidget):
-    controller_button = None
-    border = None
-    button_pool = []
-    active_buttons = []
-    button_source = None
-    def __init__(self, button_source, **kwargs):
-        super(ButtonPromptWidget, self).__init__(**kwargs)
-        self.button_source = button_source
-        with self.canvas:
-            Color(0,0,1,0.25)
-            self.border = Rectangle(pos=self.pos, size=self.size)
-            self.controller_button = ButtonImage(source=self.button_source, pos=self.pos, size_hint=(1, 1))
-        self.bind(pos=self.update_canvas)
-        self.bind(size=self.update_canvas)
-        self.update_canvas()
+# class ButtonPromptWidget(DraggableWidget):
+#     border = None
+#     input_pool = []
+#     active_buttons = []
+#     button_source = None
+#     def __init__(self, button_source, **kwargs):
+#         super(ButtonPromptWidget, self).__init__(**kwargs)
+#         self.button_source = button_source
+#         with self.canvas:
+#             Color(1,1,1,0.07)
+#             self.border = Rectangle(pos=self.pos, size=self.size)
+#         self.bind(pos=self.update_canvas)
+#         self.bind(size=self.update_canvas)
+#         self.update_canvas()
     
-    def spawn_input(self):
-        if self.button_pool:
-            button = self.button_pool.pop()
-        else:
-            button = ButtonImage(source=self.button_source)
-            self.add_widget(button)
-        button.y = self.height
-        button.x = self.width // 2 - button.width // 2
-        self.active_buttons.append(button)
+#     def spawn_input(self):
+#         if self.input_pool:
+#             input = self.input_pool.pop()
+#         else:
+#             input = ButtonImage(source=self.button_source, pos=(self.pos[0], self.pos[1] + self.height), size_hint=(1,1))
+#             self.add_widget(input)
+        
+#         # input.y = self.height
+#         # input.x = self.width // 2 - input.width // 2
+#         self.active_buttons.append(input)
     
-    def update_state(self, pressed, ):
-        self.controller_button.update_state(pressed)
-        self.canvas.ask_update()
+#     def update_state(self, ):
+#         self.canvas.ask_update()
 
-    def update_canvas(self, *args):
-        # Draw the border of the column
-        Color(0,0,1,0.25)
+#     def update_canvas(self, *args):
+#         #Resize/repostion the inputs
+#         for i, input in enumerate(self.active_buttons):
+#             input.size = (self.width, self.width)
+#             input.x = self.x
 
-        self.border.pos = self.pos
-        self.border.size = self.size
 
-        # Draw the descending inputs
-        # print("TODO: Draw the descending inputs")
+#         # Draw the border of the column
+#         self.border.pos = self.pos
+#         self.border.size = self.size
 
-        # Draw the button silhouette at the bottom of the screen
-        self.controller_button.size = (self.width, self.width)
-        self.controller_button.pos = self.pos
+#         # Draw the descending inputs
+#         # print("TODO: Draw the descending inputs")
 
-        if not self.active_buttons:
-            self.spawn_input()
+
+#         if not self.active_buttons:
+#             self.spawn_input()
 
 class ButtonImage(Image):
-    def __init__(self, *args, source=IMAGE_SOURCE_BUTTON_UP, **kwargs):
+    def __init__(self, *args, opacity=1, source=IMAGE_SOURCE_BUTTON_UP, **kwargs):
         super().__init__(*args, **kwargs)
         self.source = source
+        self.color[3] = opacity
 
     def update_state(self, pressed):
         if pressed:

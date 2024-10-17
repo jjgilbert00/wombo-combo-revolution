@@ -15,7 +15,6 @@ import cv2
 import numpy as np
 import queue
 import logging
-import threading
 from KivyOnTop import register_topmost, unregister_topmost
 
 logger = logging.getLogger(__name__)
@@ -64,7 +63,7 @@ class WomboComboApp(App):
     def refresh(self, dt):
         self.controller_reader.update_state()
         self.controller_display.update_display()
-        self.playalong_layout.update_controller_display()
+        self.playalong_layout.update_state()
 
     def on_stop(self):
         # Clean up when closing the app
