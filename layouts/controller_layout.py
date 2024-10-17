@@ -7,11 +7,10 @@ logger = logging.getLogger(__name__)
 
 
 class ControllerDisplay(BoxLayout):
-    controller_reader = None
-    running = False
 
     def __init__(self, controller_reader):
         super().__init__(orientation="horizontal", opacity=1)
+        self.running = False
         self.controller_reader = controller_reader
 
         self.button_displays = {

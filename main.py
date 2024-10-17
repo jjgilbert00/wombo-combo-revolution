@@ -1,4 +1,7 @@
 import os
+import math
+import random
+from playalong import PlayalongController
 os.environ["SDL_JOYSTICK_ALLOW_BACKGROUND_EVENTS"] = "1"
 from kivy.app import App
 from kivy.uix.label import Label
@@ -20,12 +23,33 @@ from KivyOnTop import register_topmost, unregister_topmost
 logger = logging.getLogger(__name__)
 TITLE = "Wombo Combo"
 
+
+
+
+def get_random_controller_state():
+    return {
+        "direction": math.floor(random.random() * 8) + 1,
+        "A": round(0.51*random.random()),
+        "B": round(0.51*random.random()),
+        "X": round(0.51*random.random()),
+        "Y": round(0.51*random.random()),
+        "RT": round(0.51*random.random()),
+        "RB": round(0.51*random.random()),
+        "LT": round(0.51*random.random()),
+        "LB": round(0.51*random.random()),
+    }
+TEST_INPUTS = [get_random_controller_state() for _ in range(60 * 10)] # 10 seconds of random inputs
+
+
+
+
 class WomboComboApp(App):
     def __init__(self):
         super().__init__()
         self.controller_display = None
         self.controller_reader = None
         self.controller_recorder = None
+        self.playalong_controller = None
 
     def on_start(self, *args):
         Window.set_title(TITLE)
@@ -51,19 +75,21 @@ class WomboComboApp(App):
                 pygame.joystick.Joystick(0)
             )
             self.controller_display = ControllerDisplay(self.controller_reader)
-            Clock.schedule_interval(self.refresh, 1.0/60.0)
 
-        self.playalong_layout = PlayAlongLayout(self.controller_reader)
+        self.playalong_layout = PlayAlongLayout()
+        self.playalong_controller = PlayalongController(controller_reader=self.controller_reader, view=self.playalong_layout, input_track=TEST_INPUTS)
+        self.playalong_controller.set_looping(True)
 
         layout = BoxLayout(orientation="vertical")
         layout.add_widget(self.playalong_layout)
         # layout.add_widget(self.controller_display)
         return layout
 
-    def refresh(self, dt):
-        self.controller_reader.update_state()
-        self.controller_display.update_display()
-        self.playalong_layout.update_state()
+    # def refresh(self, dt):
+    #     controller_state = self.controller_reader.update_state()
+    #     playalong_state = 
+    #     self.controller_display.update_display()
+    #     self.playalong_layout.update_state()
 
     def on_stop(self):
         # Clean up when closing the app
@@ -75,6 +101,8 @@ class WomboComboApp(App):
             Window.opacity = min(Window.opacity + 0.1, 1)
         elif key == 45:  # Minus key
             Window.opacity = max(Window.opacity - 0.1, 0)
+        elif key == 32:  # Space key
+            self.playalong_controller.play()
 
     # def screen_record(self, dt):
     #     with mss.mss() as sct:

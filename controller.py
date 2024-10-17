@@ -33,6 +33,7 @@ class ControllerReader():
                 "LT": int((round(self.joystick.get_axis(4)) + 1) / 2),
                 "RT": int((round(self.joystick.get_axis(5)) + 1) / 2),
             }
+        return self.state
     
     def get_controller_state(self):
         return self.state
@@ -40,11 +41,6 @@ class ControllerReader():
 
 
 class ControllerRecorder():
-    controller_reader = None
-    recorded_inputs = []
-    recording = False
-    recording_thread = None
-    
 
     def __init__(self, controller_reader):
         self.controller_reader = controller_reader
