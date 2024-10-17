@@ -5,6 +5,7 @@ from kivy.graphics import Rectangle, Color
 
 from controller import ControllerReader
 from widgets import ButtonImage, ButtonPromptWidget, StickImage, DraggableWidget, DirectionalPromptWidget
+from images import IMAGE_SOURCE_BUTTON_UP, get_standard_button_icon
 
 
 
@@ -24,31 +25,31 @@ class JoystickLayout(RelativeLayout):
         self.stick_image.update_state(direction)
 
 
-class ColumnLayout(RelativeLayout):
+class ButtonLayout(RelativeLayout):
     border = None
     button_prompt_widget = None
 
-    def __init__(self, **kwargs):
-        super(ColumnLayout, self).__init__(**kwargs)
+    def __init__(self, button_source=IMAGE_SOURCE_BUTTON_UP, **kwargs):
+        super(ButtonLayout, self).__init__(**kwargs)
         with self.canvas:
-            Color(0,0,1,0.25)
-            self.border = Rectangle(pos=self.pos, size=self.size)
-            self.button_prompt_widget = ButtonPromptWidget(pos_hint={"center_x": 0.5, "center_y": 0.5}, size=self.size)
+            self.button_prompt_widget = ButtonPromptWidget(button_source=button_source, pos_hint={"center_x": 0.5, "center_y": 0.5}, size=self.size)
             self.add_widget(self.button_prompt_widget)
 
     def update_state(self, state):
         self.button_prompt_widget.update_state(state)
 
 class PlayAlongLayout(RelativeLayout):
-    def __init__(self, controller_reader: ControllerReader, **kwargs):
+    def __init__(self, controller_reader: ControllerReader, controller_type="XGamepad", button_icon_style='Alt', **kwargs):
         super().__init__(**kwargs)
+        self.controller_type = controller_type
+        self.button_icon_style = button_icon_style
         self.controller_reader = controller_reader
         self.button_displays = {
             "direction": JoystickLayout(size_hint=(0.5, None), height=self.width * 0.5, pos_hint={'center_x': 0.25, 'bottom': 0})
         }
         button_names = ["A", "X", "B", "Y", "RT", "RB", "LT", "LB"]
         for i in range(len(button_names)):
-            self.button_displays[button_names[i]] = ColumnLayout(size_hint=(0.1, 1), pos_hint={'x': 0.5 + i * (0.4/8), 'y': 0 if i%2==0 else 0.1})
+            self.button_displays[button_names[i]] = ButtonLayout(button_source=get_standard_button_icon(self.controller_type, self.button_icon_style, button_names[i]), size_hint=(0.07, 1), pos_hint={'x': 0.5 + i * (0.48/8), 'y': 0 if i%2==0 else 0.1})
         [self.add_widget(self.button_displays[button]) for button in self.button_displays]
         self.bind(size=self.update_joystick_layout_size)
         self.update_controller_display()

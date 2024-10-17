@@ -1,10 +1,10 @@
 
-from kivy.uix.image import Image as CoreImage
+from kivy.uix.image import Image
 from kivy.properties import BooleanProperty
 from kivy.uix.widget import Widget
 from kivy.graphics import Ellipse, Rectangle, Color
 
-from images import IMAGE_SOURCE_5, IMAGE_SOURCE_DIRECTION, IMAGE_SOURCE_BUTTON_DOWN, IMAGE_SOURCE_BUTTON_UP
+from images import  IMAGE_SOURCE_DIRECTION, IMAGE_SOURCE_BUTTON_UP
 
 
 class DraggableWidget(Widget):
@@ -33,10 +33,10 @@ class DraggableWidget(Widget):
         return super().on_touch_up(touch)
 
 
-class StickImage(CoreImage):
+class StickImage(Image):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self.source = IMAGE_SOURCE_5
+        self.source = IMAGE_SOURCE_DIRECTION[5]
     
     def update_state(self, direction):
         self.source =  IMAGE_SOURCE_DIRECTION[direction]
@@ -62,18 +62,28 @@ class ButtonPromptWidget(DraggableWidget):
     button_pool = []
     active_buttons = []
     button_source = None
-    def __init__(self, button_source=IMAGE_SOURCE_BUTTON_UP, **kwargs):
+    def __init__(self, button_source, **kwargs):
         super(ButtonPromptWidget, self).__init__(**kwargs)
         self.button_source = button_source
         with self.canvas:
             Color(0,0,1,0.25)
             self.border = Rectangle(pos=self.pos, size=self.size)
-            self.controller_button = ButtonImage(pos=self.pos, size_hint=(1, 1))
+            self.controller_button = ButtonImage(source=self.button_source, pos=self.pos, size_hint=(1, 1))
         self.bind(pos=self.update_canvas)
         self.bind(size=self.update_canvas)
         self.update_canvas()
     
-    def update_state(self, pressed):
+    def spawn_input(self):
+        if self.button_pool:
+            button = self.button_pool.pop()
+        else:
+            button = ButtonImage(source=self.button_source)
+            self.add_widget(button)
+        button.y = self.height
+        button.x = self.width // 2 - button.width // 2
+        self.active_buttons.append(button)
+    
+    def update_state(self, pressed, ):
         self.controller_button.update_state(pressed)
         self.canvas.ask_update()
 
@@ -91,15 +101,18 @@ class ButtonPromptWidget(DraggableWidget):
         self.controller_button.size = (self.width, self.width)
         self.controller_button.pos = self.pos
 
-class ButtonImage(CoreImage):
-    def __init__(self, *args, **kwargs):
+        if not self.active_buttons:
+            self.spawn_input()
+
+class ButtonImage(Image):
+    def __init__(self, *args, source=IMAGE_SOURCE_BUTTON_UP, **kwargs):
         super().__init__(*args, **kwargs)
-        self.source = IMAGE_SOURCE_BUTTON_UP
+        self.source = source
 
     def update_state(self, pressed):
         if pressed:
-            self.source = IMAGE_SOURCE_BUTTON_DOWN
+            self.color[3] = 1
         else:
-            self.source = IMAGE_SOURCE_BUTTON_UP
+            self.color[3] = 0.3
 
     
