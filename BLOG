@@ -4,3 +4,13 @@ So the current level of functionality is a window with widgets that display the 
 Wrestling with the pos_hint, size_hint, and other positioning/sizing attributes proved to be somewhat complicated and confusing but I think we got there. The joystick has a fixed position because it needs to be large enough for readability and centered within its layout so there's time/space for the prompts to move through. The Button columns are still widgets but they will be refactored into Layouts like the JoystickLayout.
 
 The PlayalongLayout displays the input-responsive widgets as well as some Layout based setup for the input prompts. A white circle is drawn to represent the space through which the input prompts will travel. Blue columns are drawn around/above the buttons for the input prompts to fall down through. The columns are draggable as the desired interface/layout for buttons is going to be very user-dependent. 
+
+
+10/20/24
+* Refactored the playlong layouts & widgets. Nothing is draggable anymore but it makes a bit more sense. It should be easy to reimplement that at the layout level.
+* I found some pretty button icons to use: https://www.artstation.com/marketplace/p/8ydVY/input-prompts-pack-1000-icons-for-pc-and-consoles-for-eunreal-engine-or-unity
+* Implemented the directional input thing as a spiral descending toward the joystick. Not sure how to feel about it. Will probably need feedback from users.
+
+It's ugly as sin but we can address that once the recorder is functioning and we are playing back recorded gameplay.
+
+
