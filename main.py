@@ -28,7 +28,7 @@ TITLE = "Wombo Combo"
 
 def get_random_controller_state():
     return {
-        "direction": math.floor(random.random() * 8) + 1,
+        "direction": math.floor(random.random() * 9) + 1,
         "A": round(0.51*random.random()),
         "B": round(0.51*random.random()),
         "X": round(0.51*random.random()),
@@ -36,17 +36,23 @@ def get_random_controller_state():
         "RT": round(0.51*random.random()),
         "RB": round(0.51*random.random()),
         "LT": round(0.51*random.random()),
-        "LB": round(0.51*random.random()),
+        "LB": round(0.51*random.random())
     }
-TEST_INPUTS = [get_neutral_controller_state() for _ in range(120)]
-TEST_INPUTS[10]['X'] = 1
-TEST_INPUTS[20]['Y'] = 1
-TEST_INPUTS[30]['A'] = 1
-TEST_INPUTS[40]['B'] = 1
-TEST_INPUTS[50]['LB'] = 1
-TEST_INPUTS[60]['RB'] = 1
-TEST_INPUTS[70]['LT'] = 1
-TEST_INPUTS[80]['RT'] = 1
+
+circles = [1,2,3,6,9,8,7,4]
+TEST_INPUTS = [get_random_controller_state() for _ in range(60*3)]
+for input in TEST_INPUTS[0:len(TEST_INPUTS)//2]:
+    curdir = circles.pop()
+    circles.insert(0, curdir)
+    input["direction"] = curdir
+
+for input in TEST_INPUTS[len(TEST_INPUTS)//2 :]:
+    curdir = circles.pop(0)
+    circles.append(curdir)
+    input["direction"] = curdir
+
+
+
 # TEST_INPUTS = [get_random_controller_state() for _ in range(60 * 2)] # 10 seconds of random inputs
 
 
@@ -111,7 +117,10 @@ class WomboComboApp(App):
         elif key == 45:  # Minus key
             Window.opacity = max(Window.opacity - 0.1, 0)
         elif key == 32:  # Space key
-            self.playalong_controller.play()
+            if self.playalong_controller.is_playing():
+                self.playalong_controller.pause()
+            else:
+                self.playalong_controller.play()
 
     # def screen_record(self, dt):
     #     with mss.mss() as sct:

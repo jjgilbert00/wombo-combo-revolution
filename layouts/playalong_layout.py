@@ -12,13 +12,14 @@ class JoystickLayout(RelativeLayout):
     def __init__(self, **kwargs):
         super(JoystickLayout, self).__init__(**kwargs)
         with self.canvas:
-            self.directional_prompt_widget = DirectionalPromptWidget(pos_hint={"center_x": 0.5, "center_y": 0.5}, size=self.size)
-            self.add_widget(self.directional_prompt_widget)
             self.stick_image = StickImage(pos_hint={"center_x": 0.5, "center_y": 0.5}, size_hint=(0.25, 0.25))
             self.add_widget(self.stick_image)
+            self.directional_prompt_widget = DirectionalPromptWidget(pos_hint={"center_x": 0.5, "center_y": 0.5}, size=self.size)
+            self.add_widget(self.directional_prompt_widget)
 
     def update_state(self, direction, input_frames):
         self.stick_image.update_state(direction)
+        self.directional_prompt_widget.update_state(input_frames)
 
 
 # Draws the user-controlled buttons as well as the input prompts.
@@ -39,7 +40,6 @@ class ButtonLayout(RelativeLayout):
                 frame_state = input_frames[i]
                 if frame_state:
                     if len(self.input_pool) <= input_counter:
-                        print(f"Creating new {self.button_source} button at index {i}.  input_counter: {input_counter}.  len(self.input_pool): {len(self.input_pool)}")
                         button = ButtonImage(source=self.button_source, size_hint=(1,None), opacity=0.5)
                         self.input_pool.append(button)
                         self.add_widget(button)

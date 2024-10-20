@@ -1,6 +1,9 @@
 from kivy.clock import Clock
 from controller import get_neutral_controller_state
+
 PLAYALONG_FRAMELENGTH = 120
+
+
 class PlayalongController:
     def __init__(self, controller_reader, view=None, input_track=[]):
         self.view = view
@@ -9,11 +12,13 @@ class PlayalongController:
         self.current_frame = 0
         self.loop = False
         self.playing = False
-        self.frame_duration = 1/20  # Duration of each frame in seconds
-        self._refresh_event = Clock.schedule_interval(lambda x: self.refresh(), self.frame_duration)
+        self.frame_duration = 1 / 20  # Duration of each frame in seconds
+        self._refresh_event = Clock.schedule_interval(
+            lambda x: self.refresh(), self.frame_duration
+        )
 
     def set_frame(self, frame):
-        self.current_frame = max(0, min(frame, len(self.input_track)-1))
+        self.current_frame = max(0, min(frame, len(self.input_track) - 1))
 
     def next_frame(self, dt=None):
         self.current_frame += 1
@@ -48,11 +53,18 @@ class PlayalongController:
         self.current_frame = 0
 
     def get_playalong_frames(self):
-        return self.input_track[self.current_frame:] + [get_neutral_controller_state() for _ in range(PLAYALONG_FRAMELENGTH - len(self.input_track[self.current_frame:]))]
+        playalong_frames = self.input_track[self.current_frame : self.current_frame + PLAYALONG_FRAMELENGTH]
+        if len(playalong_frames) < PLAYALONG_FRAMELENGTH:
+            playalong_frames += [
+                get_neutral_controller_state()
+                for _ in range(PLAYALONG_FRAMELENGTH - len(playalong_frames))
+            ]
+        return  playalong_frames
+
     def refresh(self):
         if self.playing:
             self.next_frame()
         self.controller_reader.update_state()
-        self.view.update_state(self.controller_reader.get_controller_state(), self.get_playalong_frames())
-
-
+        self.view.update_state(
+            self.controller_reader.get_controller_state(), self.get_playalong_frames()
+        )
