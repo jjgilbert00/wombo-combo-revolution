@@ -12,4 +12,4 @@ The idea for this app is to simultaneously capture game controller inputs and a 
 Supporting libraries:
 kivy: This is supposedly a very easy gui framework for python. Let's find out.
 pygame: This is the go-to for python game stuff. Game input recording is a small component of that but maybe we can find more things to use.
-mss: 
+mss: Maybe we use this for screenshotting but it'd be nice to have audio too. Maybe keep looking.

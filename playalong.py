@@ -68,3 +68,8 @@ class PlayalongController:
         self.view.update_state(
             self.controller_reader.get_controller_state(), self.get_playalong_frames()
         )
+
+    def clear_track(self):
+        self.input_track = []
+        self.current_frame = 0
+        self.playing = False

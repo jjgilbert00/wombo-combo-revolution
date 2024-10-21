@@ -41,12 +41,18 @@ def get_random_controller_state():
 
 circles = [1,2,3,6,9,8,7,4]
 TEST_INPUTS = [get_random_controller_state() for _ in range(60*3)]
-for input in TEST_INPUTS[0:len(TEST_INPUTS)//2]:
+for i, input in enumerate(TEST_INPUTS[0:len(TEST_INPUTS)//2]):
+    if i % 10 != 1:
+        input["direction"] = TEST_INPUTS[i-1]["direction"]
+        continue
     curdir = circles.pop()
     circles.insert(0, curdir)
     input["direction"] = curdir
 
-for input in TEST_INPUTS[len(TEST_INPUTS)//2 :]:
+for i, input in enumerate(TEST_INPUTS[len(TEST_INPUTS)//2 :]):
+    if i % 10 != 1:
+        input["direction"] = TEST_INPUTS[len(TEST_INPUTS)//2 + i-1]["direction"]
+        continue
     curdir = circles.pop(0)
     circles.append(curdir)
     input["direction"] = curdir
@@ -121,6 +127,10 @@ class WomboComboApp(App):
                 self.playalong_controller.pause()
             else:
                 self.playalong_controller.play()
+        elif key == 8:  # Backspace key
+            self.playalong_controller.clear_track()
+        elif key == 114:  # 'r' key
+            self.playalong_controller.start_recording()
 
     # def screen_record(self, dt):
     #     with mss.mss() as sct:
