@@ -123,7 +123,7 @@ class WomboComboApp(App):
         elif key == 45:  # Minus key
             Window.opacity = max(Window.opacity - 0.1, 0)
         elif key == 32:  # Space key
-            if self.playalong_controller.is_playing():
+            if self.playalong_controller.is_playing() or self.playalong_controller.is_recording():
                 self.playalong_controller.pause()
             else:
                 self.playalong_controller.play()
