@@ -1,6 +1,7 @@
 import os
 import math
 import random
+from pynput import keyboard
 from playalong import PlayalongController
 os.environ["SDL_JOYSTICK_ALLOW_BACKGROUND_EVENTS"] = "1"
 from kivy.app import App
@@ -63,7 +64,6 @@ for i, input in enumerate(TEST_INPUTS[len(TEST_INPUTS)//2 :]):
 
 
 
-
 class WomboComboApp(App):
     def __init__(self):
         super().__init__()
@@ -75,6 +75,10 @@ class WomboComboApp(App):
     def on_start(self, *args):
         Window.set_title(TITLE)
         register_topmost(Window, TITLE)
+
+        # Global keyboard listener for when the window isn't selected.
+        self.listener = keyboard.Listener(on_press=self.on_key_press)
+        self.listener.start()
 
     def build(self):
         # Set the window background color to transparent (RGBA)
@@ -114,23 +118,30 @@ class WomboComboApp(App):
 
     def on_stop(self):
         # Clean up when closing the app
+        self.listener.stop()
         cv2.destroyAllWindows()
         pygame.quit()
+    
+    def on_key_press(self, key):
+        if key == keyboard.Key.f10:
+            self.playalong_controller.clear_track()
+        if key == keyboard.Key.f5:
+            self.playalong_controller.set_frame(0)
+        if key == keyboard.Key.f6:
+            self.playalong_controller.play()
+        if key == keyboard.Key.f7:
+            self.playalong_controller.pause()
+        if key == keyboard.Key.f8:
+            if self.playalong_controller.is_recording():
+                self.playalong_controller.pause()
+            elif not self.playalong_controller.is_playing():
+                self.playalong_controller.start_recording()
     
     def on_key_down(self, window, key, scancode, codepoint, modifier):
         if key == 61:  # Equals key
             Window.opacity = min(Window.opacity + 0.1, 1)
         elif key == 45:  # Minus key
             Window.opacity = max(Window.opacity - 0.1, 0)
-        elif key == 32:  # Space key
-            if self.playalong_controller.is_playing() or self.playalong_controller.is_recording():
-                self.playalong_controller.pause()
-            else:
-                self.playalong_controller.play()
-        elif key == 8:  # Backspace key
-            self.playalong_controller.clear_track()
-        elif key == 114:  # 'r' key
-            self.playalong_controller.start_recording()
 
     # def screen_record(self, dt):
     #     with mss.mss() as sct:
