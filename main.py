@@ -8,7 +8,6 @@ from kivy.app import App
 from kivy.uix.label import Label
 from kivy.uix.boxlayout import BoxLayout
 from kivy.config import Config
-from kivy.clock import Clock
 from kivy.core.window import Window
 from controller import get_neutral_controller_state, ControllerRecorder, ControllerReader
 from layouts.controller_layout import ControllerDisplay
@@ -110,11 +109,6 @@ class WomboComboApp(App):
         # layout.add_widget(self.controller_display)
         return layout
 
-    # def refresh(self, dt):
-    #     controller_state = self.controller_reader.update_state()
-    #     playalong_state = 
-    #     self.controller_display.update_display()
-    #     self.playalong_layout.update_state()
 
     def on_stop(self):
         # Clean up when closing the app

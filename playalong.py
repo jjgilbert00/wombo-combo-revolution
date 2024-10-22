@@ -16,7 +16,7 @@ class PlayalongController:
         self.input_track = input_track
         self.current_frame = 0
         self.loop = False
-        self.frame_duration = 1 / 20  # Duration of each frame in seconds
+        self.frame_duration = 1.0 / 60.0  # Duration of each frame in seconds
         self._refresh_event = Clock.schedule_interval(
             lambda x: self.refresh(), self.frame_duration
         )
@@ -71,15 +71,18 @@ class PlayalongController:
         return playalong_frames
 
     def refresh(self):
+
         if self.running_state == RUNNING_STATES.PLAYING:
             self.next_frame()
+
         self.controller_reader.update_state()
+
         controller_state = self.controller_reader.get_controller_state()
-        self.view.update_state(
-           controller_state, self.get_playalong_frames()
-        )
+
         if self.running_state == RUNNING_STATES.RECORDING:
             self.input_track.append(controller_state)
+
+        self.view.update_state(controller_state, self.get_playalong_frames())
 
     def clear_track(self):
         self.running_state = RUNNING_STATES.STOPPED
