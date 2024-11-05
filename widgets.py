@@ -205,6 +205,7 @@ class DirectionalPromptWidget(Widget):
                 
 
                 if len(self.arcs) <= arc_counter:
+                    Color(0,1,0,1)
                     arc = Line(bezier=[start_x, start_y, mid_x, mid_y, end_x, end_y], width=2)
                     self.arcs.append(arc)
                     self.canvas.add(arc)

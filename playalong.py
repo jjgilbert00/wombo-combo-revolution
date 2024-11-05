@@ -16,10 +16,6 @@ class PlayalongController:
         self.input_track = input_track
         self.current_frame = 0
         self.loop = False
-        self.frame_duration = 1.0 / 60.0  # Duration of each frame in seconds
-        self._refresh_event = Clock.schedule_interval(
-            lambda x: self.refresh(), self.frame_duration
-        )
 
     def set_frame(self, frame):
         self.current_frame = max(0, min(frame, len(self.input_track) - 1))
@@ -81,6 +77,7 @@ class PlayalongController:
 
         if self.running_state == RUNNING_STATES.RECORDING:
             self.input_track.append(controller_state)
+            self.current_frame = max(0, len(self.input_track) - PLAYALONG_FRAMELENGTH)
 
         self.view.update_state(controller_state, self.get_playalong_frames())
 
@@ -94,3 +91,22 @@ class PlayalongController:
         self.running_state = RUNNING_STATES.RECORDING
         self.input_track = []
         self.current_frame = 0
+
+    def clean_track(self):
+        self.running_state = RUNNING_STATES.STOPPED
+        for i in range(len(self.input_track)):
+            if self.input_track[i] != get_neutral_controller_state():
+                break
+        if i > 120:
+            self.input_track = self.input_track[i- 120:] # Trim any more than 2 seconds of neutral input at the start
+        for i in range(len(self.input_track) - 1, 0, -1):
+            for button in self.input_track[i]:
+                if button == "direction":
+                    continue
+                if self.input_track[i][button] == self.input_track[i-1][button]:
+                    self.input_track[i][button] = 0
+        self.current_frame = 0
+
+    def save_track(self):
+        with open("input_track.json", "w") as f:
+            json.dump(self.input_track, f)

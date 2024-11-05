@@ -6,6 +6,7 @@ from playalong import PlayalongController
 os.environ["SDL_JOYSTICK_ALLOW_BACKGROUND_EVENTS"] = "1"
 from kivy.app import App
 from kivy.uix.label import Label
+from kivy.clock import Clock
 from kivy.uix.boxlayout import BoxLayout
 from kivy.config import Config
 from kivy.core.window import Window
@@ -78,6 +79,7 @@ class WomboComboApp(App):
         # Global keyboard listener for when the window isn't selected.
         self.listener = keyboard.Listener(on_press=self.on_key_press)
         self.listener.start()
+        Clock.schedule_interval(lambda x: self.refresh(), 1.0 / 60.0)
 
     def build(self):
         # Set the window background color to transparent (RGBA)
@@ -110,6 +112,10 @@ class WomboComboApp(App):
         return layout
 
 
+    def refresh(self):
+        self.playalong_controller.refresh()
+
+
     def on_stop(self):
         # Clean up when closing the app
         self.listener.stop()
@@ -130,6 +136,8 @@ class WomboComboApp(App):
                 self.playalong_controller.pause()
             elif not self.playalong_controller.is_playing():
                 self.playalong_controller.start_recording()
+        if key == keyboard.Key.f9:
+            self.playalong_controller.clean_track()
     
     def on_key_down(self, window, key, scancode, codepoint, modifier):
         if key == 61:  # Equals key
