@@ -94,6 +94,7 @@ class PlayalongController:
 
     def clean_track(self):
         self.running_state = RUNNING_STATES.STOPPED
+        i=0
         for i in range(len(self.input_track)):
             if self.input_track[i] != get_neutral_controller_state():
                 break

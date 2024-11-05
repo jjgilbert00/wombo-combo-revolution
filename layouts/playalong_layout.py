@@ -2,7 +2,7 @@ from kivy.app import App
 from kivy.uix.relativelayout import RelativeLayout
 from kivy.uix.widget import Widget
 from kivy.graphics import Rectangle, Color
-from widgets import ButtonImage, StickImage, DraggableWidget, DirectionalPromptWidget
+from widgets import ButtonImage, StickImage, DirectionalPromptWidget
 from images import IMAGE_SOURCE_BUTTON_UP, get_standard_button_icon
 
 

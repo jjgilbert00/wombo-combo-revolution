@@ -1,7 +1,7 @@
-import pygame
 import threading
 import time
-import os
+import math
+import random
 
 
 def get_neutral_controller_state():
@@ -16,6 +16,41 @@ def get_neutral_controller_state():
         "LT": 0,
         "LB": 0,
     }
+
+
+def get_random_controller_state():
+    return {
+        "direction": math.floor(random.random() * 9) + 1,
+        "A": round(0.51*random.random()),
+        "B": round(0.51*random.random()),
+        "X": round(0.51*random.random()),
+        "Y": round(0.51*random.random()),
+        "RT": round(0.51*random.random()),
+        "RB": round(0.51*random.random()),
+        "LT": round(0.51*random.random()),
+        "LB": round(0.51*random.random())
+    }
+
+
+def get_cool_controller_pattern(frames = 180):
+    circles = [1,2,3,6,9,8,7,4]
+    inputs = [get_random_controller_state() for _ in range(frames)]
+    for i, input in enumerate(inputs[0:len(inputs)//2]):
+        if i % 10 != 1:
+            input["direction"] = inputs[i-1]["direction"]
+            continue
+        curdir = circles.pop()
+        circles.insert(0, curdir)
+        input["direction"] = curdir
+
+    for i, input in enumerate(inputs[len(inputs)//2 :]):
+        if i % 10 != 1:
+            input["direction"] = inputs[len(inputs)//2 + i-1]["direction"]
+            continue
+        curdir = circles.pop(0)
+        circles.append(curdir)
+        input["direction"] = curdir
+    return inputs
 
 
 class ControllerReader:

@@ -6,36 +6,6 @@ import math
 
 from images import IMAGE_SOURCE_DIRECTION, IMAGE_SOURCE_BUTTON_UP
 
-
-class DraggableWidget(Widget):
-    dragging = BooleanProperty(False)
-
-    def on_touch_down(self, touch):
-        if self.collide_point(*touch.pos):
-            self.dragging = True
-            self._touch_offset_x = self.x - touch.x
-            self._touch_offset_y = self.y - touch.y
-            return True
-        return super().on_touch_down(touch)
-
-    def on_touch_move(self, touch):
-        if self.dragging:
-            self.pos = (
-                (touch.x + self._touch_offset_x) // 1,
-                (touch.y + self._touch_offset_y) // 1,
-            )
-            self.pos_hint = {}
-            self.update_canvas()
-            return True
-        return super().on_touch_move(touch)
-
-    def on_touch_up(self, touch):
-        if self.dragging:
-            self.dragging = False
-            return True
-        return super().on_touch_up(touch)
-
-
 class StickImage(Image):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -107,6 +77,10 @@ class DirectionalPromptWidget(Widget):
         Color(0,1,0,1)
         while i < len(input_frames):
             if input_frames[i] != 5:
+                if i > 0 and input_frames[i] == input_frames[i - 1]:
+                    if i < len(input_frames) - 1 and input_frames[i] == input_frames[i + 1]:
+                        i += 1
+                        continue
                 # Draw a dot
                 dx, dy = self.polar_to_cartesian(
                     self.direction_to_angle[input_frames[i]], self.inner_circle_radius + (i/len(input_frames) * (self.outer_circle_radius - self.inner_circle_radius))
@@ -170,9 +144,7 @@ class DirectionalPromptWidget(Widget):
             self.lines[i].points = [-self.width, 0, -self.width, 0] # Move stale lines offscreen.
 
 
-    '''
-    This function is not performant. Forcing a continuous spiral caused this to chug a bit. Will need to optimize.
-    '''
+
     def draw_arcs(self, input_frames):
         arc_counter = 0
         Color(0, 1, 0, 1)
