@@ -79,7 +79,9 @@ class PlayalongController:
             self.input_track.append(controller_state)
             self.current_frame = max(0, len(self.input_track) - PLAYALONG_FRAMELENGTH)
             self.view.update_state(controller_state, [])
+            # print(f"Recording frame {self.current_frame}. len playalongframes {len(self.input_track)}")
         else:
+            # print(f"Displaying frame {self.current_frame} of len playalongframes {len(self.input_track)}")
             self.view.update_state(controller_state, self.get_playalong_frames())
 
     def clear_track(self):

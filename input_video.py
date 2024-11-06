@@ -1,18 +1,15 @@
 from controller import get_cool_controller_pattern, get_neutral_controller_state
 from input_drawer import InputDrawer
 import cv2
-# from moviepy.editor import ImageSequenceClip
+from moviepy.editor import ImageSequenceClip
 import numpy as np
 
 
 # TODO Make this asynchronous
 def save_images_as_video(frames, output_path, fps=60):
     if frames:
-        
-        video = cv2.VideoWriter(output_path, cv2.VideoWriter_fourcc(*'mp4v'), fps, (frames[0].shape[1], frames[0].shape[0]))
-        for frame in frames:
-            video.write(cv2.cvtColor(frame, cv2.COLOR_RGBA2BGR))
-        video.release()
+        clip = ImageSequenceClip([cv2.cvtColor(frame, cv2.COLOR_RGBA2RGB) for frame in frames], fps=fps)
+        clip.write_videofile(output_path, codec='libx264', fps=fps)
 
 
 def write_video_file(inputs, output_path, playalong_length=120):
@@ -34,13 +31,14 @@ def write_capture_and_overlay(capture_frames, inputs, output_path, playalong_len
     images = [drawer.draw(extended_inputs[i:i+playalong_length], width=width, height=height) for i in range(len(extended_inputs) - playalong_length)]
     input_frames = [np.array(image) for image in images]
 
-    video = cv2.VideoWriter(output_path, cv2.VideoWriter_fourcc(*'mp4v'), 60, (width, height))
+    frames = []
     for i in range(min(len(capture_frames), len(input_frames))):
         capture_frame = capture_frames[i]
-        overlay_frame = cv2.cvtColor(input_frames[i], cv2.COLOR_RGBA2BGRA)
+        overlay_frame = cv2.cvtColor(input_frames[i], cv2.COLOR_RGBA2RGB)
         combined_frame = cv2.addWeighted(capture_frame, 0.7, overlay_frame, 0.3, 0)
-        video.write(cv2.cvtColor(combined_frame, cv2.COLOR_BGRA2BGR))
-    video.release()
+        frames.append(combined_frame)
+    clip = ImageSequenceClip(frames, fps=60)
+    clip.write_videofile(output_path, codec='libx264', fps=60)
 
 
 if __name__ == "__main__":
@@ -51,4 +49,3 @@ if __name__ == "__main__":
     images = [drawer.draw(animated_inputs[i:i+120]) for i in range(len(animated_inputs) - playalong_length)]
     frames = [np.array(image) for image in images]
     save_images_as_video(frames, "output_video.mp4")
-    

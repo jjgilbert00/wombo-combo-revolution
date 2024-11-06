@@ -4,6 +4,7 @@ import cv2
 import numpy as np
 import time
 import dxcam
+from moviepy.editor import ImageSequenceClip
 
 class ScreenRecorder:
     def __init__(self, fps=60):
@@ -51,20 +52,19 @@ class ScreenRecorder:
             print("No frames to save.")
             return
         frames_written = 0
-        if self.video:
-            self.video.release()
-        self.video = cv2.VideoWriter(output_path, cv2.VideoWriter_fourcc(*'mp4v'), self.fps, (width, height))
         if not target_frames:
             target_frames = len(self.frames)
+        frames = []
         for i in range(len(self.frames)):
             if self.frames[i] is None:
                 continue
             frame = self.frames[i][:, :, :3]
-            # Frame interpolation. If we can't get screenshots at 60fps, we need to fill in gaps. 
+            # Frame interpolation. If we can't get screenshots at 60fps, we need to fill in gaps.
             while frames_written < (i + 1) / len(self.frames) * target_frames:
-                self.video.write(frame)
+                frames.append(frame)
                 frames_written += 1
-        self.video.release()
+        clip = ImageSequenceClip(frames, fps=self.fps)
+        clip.write_videofile(output_path, codec='libx264', fps=self.fps)
 
     def __del__(self):
         if self.video:
