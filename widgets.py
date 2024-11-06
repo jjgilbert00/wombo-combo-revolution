@@ -210,4 +210,4 @@ class ButtonImage(Image):
         if pressed:
             self.color[3] = 1
         else:
-            self.color[3] = 0.3
+            self.color[3] = 0.6

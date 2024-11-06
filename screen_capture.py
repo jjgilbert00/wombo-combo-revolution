@@ -30,6 +30,22 @@ class ScreenRecorder:
         else:
             self.frames.append(self.camera.grab())
     
+    def get_frames(self, target_frames=None):
+        if not self.frames:
+            return None
+        frames = []
+        if not target_frames:
+            target_frames = len(self.frames)
+        total_frames = 0
+        for i in range(len(self.frames)):
+            if self.frames[i] is None:
+                continue
+            # Frame interpolation. If we can't get screenshots at 60fps, we need to fill in gaps. 
+            while total_frames < (i + 1) / len(self.frames) * target_frames:
+                frames.append(self.frames[i])
+                total_frames += 1
+        return frames
+        
     def save_video(self, output_path, width=2560, height=1440, target_frames=None):
         if not self.frames:
             print("No frames to save.")
@@ -38,6 +54,8 @@ class ScreenRecorder:
         if self.video:
             self.video.release()
         self.video = cv2.VideoWriter(output_path, cv2.VideoWriter_fourcc(*'mp4v'), self.fps, (width, height))
+        if not target_frames:
+            target_frames = len(self.frames)
         for i in range(len(self.frames)):
             if self.frames[i] is None:
                 continue

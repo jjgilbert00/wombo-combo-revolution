@@ -16,7 +16,7 @@ class DirectionalPromptDrawer:
         8: 90,
         9: 45,
     }
-    dot_radius = 2
+    dot_radius = 4
     ring_width = 5
     line_width = 5
 
@@ -69,7 +69,7 @@ class DirectionalPromptDrawer:
                         (x - self.dot_radius, y - self.dot_radius),
                         (x + self.dot_radius, y + self.dot_radius),
                     ],
-                    outline="blue",
+                    outline="white",
                     width=self.dot_radius * 2,
                 )
 
@@ -111,7 +111,7 @@ class DirectionalPromptDrawer:
                     draw.line(
                         [start_x, start_y, end_x, end_y],
                         width=self.line_width,
-                        fill="green",
+                        fill="white",
                     )
             else:
                 start = None
@@ -186,7 +186,7 @@ class DirectionalPromptDrawer:
                     20, (start_x, start_y), (mid_x, mid_y), (end_x, end_y)
                 )
                 draw.line(
-                    bezier_points, fill="green", width=self.line_width, joint="curve"
+                    bezier_points, fill="white", width=self.line_width, joint="curve"
                 )
 
     def draw(self, draw: ImageDraw, input_frames, x, y, width, height):
@@ -203,7 +203,7 @@ class DirectionalPromptDrawer:
         draw.circle(
             (self.center_x, self.center_y),
             self.inner_circle_radius,
-            outline="black",
+            outline="white",
             width=self.ring_width,
         )
 
@@ -211,7 +211,7 @@ class DirectionalPromptDrawer:
         draw.circle(
             (self.center_x, self.center_y),
             self.outer_circle_radius,
-            outline="black",
+            outline="white",
             width=self.ring_width,
         )
 
@@ -224,8 +224,8 @@ class ButtonDrawer():
 
     def load_image(self, button_source):
         try:
-            self.button_image = Image.open(button_source)
-            self.transparent_button = Image.open(button_source)
+            self.button_image = Image.open(button_source).convert("RGBA")
+            self.transparent_button = Image.open(button_source).convert("RGBA")
             alpha = self.transparent_button.split()[3]
             alpha = alpha.point(lambda p: p // 2)
             self.transparent_button.putalpha(alpha)
@@ -258,8 +258,8 @@ class ButtonDrawer():
 class InputDrawer():
     def draw(self, inputs, image=None, x=0, y=0, width=1600, height=800):
         if not image:
-            image = Image.new("RGBA", (width, height), "white")
-            image.putalpha(0)
+            image = Image.new("RGBA", (width, height), (0, 0, 0, 0))
+            # image.putalpha(0)
         draw = ImageDraw.Draw(image)
 
         dpd = DirectionalPromptDrawer()

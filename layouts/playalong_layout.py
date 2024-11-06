@@ -29,7 +29,7 @@ class ButtonLayout(RelativeLayout):
         self.button_source = button_source
         self.input_pool =[]
         with self.canvas:
-            self.controller_button = ButtonImage(source=self.button_source, pos_hint={"center_x": 0.5, "bottom": 0}, size_hint=(1, None), opacity=0.5)
+            self.controller_button = ButtonImage(source=self.button_source, pos_hint={"center_x": 0.5, "bottom": 0}, size_hint=(1, None), opacity=0.6)
             self.add_widget(self.controller_button)
 
     
@@ -40,7 +40,7 @@ class ButtonLayout(RelativeLayout):
                 frame_state = input_frames[i]
                 if frame_state:
                     if len(self.input_pool) <= input_counter:
-                        button = ButtonImage(source=self.button_source, size_hint=(1,None), opacity=0.5)
+                        button = ButtonImage(source=self.button_source, size_hint=(1,None), opacity=0.6)
                         self.input_pool.append(button)
                         self.add_widget(button)
                     else:
