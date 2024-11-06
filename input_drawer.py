@@ -255,7 +255,7 @@ class ButtonDrawer():
         image.paste(resized_button, (int(x), int(y + height - new_height)), mask=resized_button)
 
 
-class StateDrawer():
+class InputDrawer():
     def draw(self, inputs, image=None, x=0, y=0, width=1600, height=800):
         if not image:
             image = Image.new("RGBA", (width, height), "white")
@@ -278,7 +278,7 @@ class StateDrawer():
 
 
 if __name__ == "__main__":
-    drawer = StateDrawer()
+    drawer = InputDrawer()
     inputs = get_cool_controller_pattern()
     image = drawer.draw(inputs[0:120])
     image.show()

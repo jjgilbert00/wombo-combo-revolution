@@ -1,7 +1,11 @@
+import json
 import os
+import mss
+import numpy as np
 from pynput import keyboard
-from generate_video import write_video_file
+from input_video import write_video_file
 from playalong import PlayalongController
+from screen_capture import ScreenRecorder
 os.environ["SDL_JOYSTICK_ALLOW_BACKGROUND_EVENTS"] = "1"
 from kivy.app import App
 from kivy.clock import Clock
@@ -16,26 +20,36 @@ import logging
 from KivyOnTop import register_topmost, unregister_topmost
 import tkinter as tk
 from tkinter import filedialog
+import threading
+import time
+import queue
+from concurrent.futures import ThreadPoolExecutor
 
 logger = logging.getLogger(__name__)
 TITLE = "Wombo Combo"
 
 TEST_INPUTS = get_cool_controller_pattern()
 # TEST_INPUTS = [get_random_controller_state() for _ in range(60 * 2)] # 10 seconds of random inputs
-
+NUM_CAPTURE_THREADS = 4
 
 
 class WomboComboApp(App):
     def __init__(self):
         super().__init__()
+        self.topmost = False
         self.controller_display = None
         self.controller_reader = None
         self.controller_recorder = None
         self.playalong_controller = None
+        self.screen_recorder = ScreenRecorder()
+        self.capture_queue = queue.Queue()
+        self.executor = ThreadPoolExecutor(max_workers=NUM_CAPTURE_THREADS)
+        self.capture_count = 0
+        self.capture_complete = 0
+        self.capturing = False
 
     def on_start(self, *args):
         Window.set_title(TITLE)
-        register_topmost(Window, TITLE)
 
         # Global keyboard listener for when the window isn't selected.
         self.listener = keyboard.Listener(on_press=self.on_key_press)
@@ -69,21 +83,49 @@ class WomboComboApp(App):
 
         layout = BoxLayout(orientation="vertical")
         layout.add_widget(self.playalong_layout)
-        # layout.add_widget(self.controller_display)
-        return layout
 
+        return layout
 
     def refresh(self):
         self.playalong_controller.refresh()
+        if self.playalong_controller.is_recording():
+            self.capture_queue.put(self.screen_recorder.capture_screen)
+            self.capture_count += 1
 
+    def start_capture(self):
+        self.capturing = True
+        for _ in range(NUM_CAPTURE_THREADS):
+            self.executor.submit(self.capture_loop)
+
+    def stop_capture(self):
+        self.capturing = False
+        self.executor.shutdown(wait=True)
+        self.executor = ThreadPoolExecutor(max_workers=NUM_CAPTURE_THREADS)
+
+    def capture_loop(self):
+        while self.capturing:
+            try:
+                capture_func = self.capture_queue.get(timeout=1)
+                capture_func()
+                self.capture_complete += 1
+                self.capture_queue.task_done()
+            except queue.Empty:
+                continue
 
     def on_stop(self):
         # Clean up when closing the app
         self.listener.stop()
+        self.stop_capture()
         cv2.destroyAllWindows()
         pygame.quit()
     
     def on_key_press(self, key):
+        if key == keyboard.Key.f2:
+            if self.topmost:
+                unregister_topmost(Window, TITLE)
+            else:
+                register_topmost(Window, TITLE)
+            self.topmost = not self.topmost
         if key == keyboard.Key.f5:
             self.playalong_controller.set_frame(0)
         if key == keyboard.Key.f6:
@@ -93,41 +135,55 @@ class WomboComboApp(App):
         if key == keyboard.Key.f8:
             if self.playalong_controller.is_recording():
                 self.playalong_controller.pause()
+                self.stop_capture()
+                print(f"CaptureCoutn: {self.capture_count}")
+                print(f"CaptureComplete: {self.capture_complete}")
+                print(f"Screen capture length: {len(self.screen_recorder.frames)}")
+                print(f"Input capture length: {len(self.playalong_controller.get_input_track())}")
             elif not self.playalong_controller.is_playing():
                 self.playalong_controller.start_recording()
+                self.capture_count = 0
+                self.capture_complete = 0
+                self.start_capture()
         if key == keyboard.Key.f9:
             self.playalong_controller.clean_track()
         if key == keyboard.Key.f10:
             self.playalong_controller.clear_track()
+            self.screen_recorder.clear()
         if key == keyboard.Key.f11:
-            self.show_file_chooser()
+            self.show_file_loader()
+        if key == keyboard.Key.f12:
+            self.show_file_saver()
 
-    def show_file_chooser(self):
+    def show_file_saver(self):
         root = tk.Tk()
         root.withdraw()  # Hide the root window
         file_path = filedialog.asksaveasfilename(defaultextension=".mp4", filetypes=[("Video files", "*.mp4"), ("All files", "*.*")])
         if file_path:
-            write_video_file(self.playalong_controller.get_input_track(), file_path)    
+            print(f"Screen capture length: {len(self.screen_recorder.frames)}")
+            print(f"Input capture length: {len(self.playalong_controller.get_input_track())}")
+            self.screen_recorder.save_video(file_path, target_frames=len(self.playalong_controller.get_input_track()))
+            write_video_file(self.playalong_controller.get_input_track(), file_path[0:-4] + '_inputs.mp4')
+            with open(file_path[0:-4] + '.json', 'w') as fout:
+                json.dump(self.playalong_controller.get_input_track(), fout)
+        print(f"Screen capture length: {len(self.screen_recorder.frames)}")
+        print(f"Input capture length: {len(self.playalong_controller.get_input_track())}")
+            
+
+    def show_file_loader(self):
+        root = tk.Tk()
+        root.withdraw()  # Hide the root window
+        file_path = filedialog.askopenfilename(defaultextension=".json", filetypes=[("JSON files", "*.json"), ("All files", "*.*")])
+        if file_path:
+            with open(file_path, 'r') as fin:
+                loaded_data = json.load(fin)
+                self.playalong_controller.set_input_track(loaded_data)
 
     def on_key_down(self, window, key, scancode, codepoint, modifier):
         if key == 61:  # Equals key
             Window.opacity = min(Window.opacity + 0.1, 1)
         elif key == 45:  # Minus key
             Window.opacity = max(Window.opacity - 0.1, 0)
-
-    # def screen_record(self, dt):
-    #     with mss.mss() as sct:
-    #         monitor = sct.monitors[1]
-    #         try:
-    #             img = np.array(sct.grab(monitor))
-    #         except Exception as e:
-    #             print(e)
-    #             return
-    #         # Display captured image (as a placeholder, here you can save to file or process it)
-    #         # For example, you could display it with OpenCV:
-    #         cv2.imshow("Screen Capture", img)
-    #         cv2.waitKey(1)
-
 
 if __name__ == "__main__":
     logging.basicConfig(filename="main.log", level=logging.DEBUG)
