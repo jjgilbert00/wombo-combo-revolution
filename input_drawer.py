@@ -63,7 +63,7 @@ class DirectionalPromptDrawer:
                     ),
                 )
                 x = self.x + self.width / 2 + dx
-                y = self.y + self.width / 2 + dy
+                y = self.y + self.width / 2 - dy
                 draw.ellipse(
                     [
                         (x - self.dot_radius, y - self.dot_radius),
@@ -96,7 +96,7 @@ class DirectionalPromptDrawer:
                         ),
                     )
                     start_x = self.x + self.width / 2 + dx
-                    start_y = self.y + self.width / 2 + dy
+                    start_y = self.y + self.width / 2 - dy
                     dx, dy = self.polar_to_cartesian(
                         self.direction_to_angle[input_frames[end]],
                         self.inner_circle_radius
@@ -107,7 +107,7 @@ class DirectionalPromptDrawer:
                         ),
                     )
                     end_x = self.x + self.width / 2 + dx
-                    end_y = self.y + self.width / 2 + dy
+                    end_y = self.y + self.width / 2 - dy
                     draw.line(
                         [start_x, start_y, end_x, end_y],
                         width=self.line_width,
@@ -138,19 +138,19 @@ class DirectionalPromptDrawer:
                     / len(input_frames)
                     * (self.outer_circle_radius - self.inner_circle_radius)
                 )
-                start_x, start_y = self.polar_to_cartesian(
+                start_dx, start_dy = self.polar_to_cartesian(
                     self.direction_to_angle[input_frames[i]], start_radius
                 )
                 end_radius = self.inner_circle_radius + (i + 1) / len(input_frames) * (
                     self.outer_circle_radius - self.inner_circle_radius
                 )
-                end_x, end_y = self.polar_to_cartesian(
+                end_dx, end_dy = self.polar_to_cartesian(
                     self.direction_to_angle[input_frames[i + 1]], end_radius
                 )
-                start_x += self.center_x
-                start_y += self.center_y
-                end_x += self.center_x
-                end_y += self.center_y
+                start_x = self.center_x + start_dx
+                start_y = self.center_y - start_dy
+                end_x = self.center_x + end_dx
+                end_y = self.center_y - end_dy
 
                 # Calculate the middle point
                 mid_radius = (start_radius + end_radius) / 2
@@ -161,7 +161,7 @@ class DirectionalPromptDrawer:
                     (3, 6),
                     (6, 3),
                 ]:  # Special case for when 360 degrees becomes 0 degrees
-                    mid_x, mid_y = self.polar_to_cartesian(
+                    mid_dx, mid_dy = self.polar_to_cartesian(
                         (
                             self.direction_to_angle[input_frames[i]]
                             + self.direction_to_angle[input_frames[i + 1]]
@@ -171,7 +171,7 @@ class DirectionalPromptDrawer:
                         mid_radius,
                     )
                 else:
-                    mid_x, mid_y = self.polar_to_cartesian(
+                    mid_dx, mid_dy = self.polar_to_cartesian(
                         (
                             self.direction_to_angle[input_frames[i]]
                             + self.direction_to_angle[input_frames[i + 1]]
@@ -179,8 +179,8 @@ class DirectionalPromptDrawer:
                         // 2,
                         mid_radius,
                     )
-                mid_x += self.center_x
-                mid_y += self.center_y
+                mid_x = self.center_x + mid_dx
+                mid_y = self.center_y - mid_dy
 
                 bezier_points = self.bezier_curve_points(
                     20, (start_x, start_y), (mid_x, mid_y), (end_x, end_y)
@@ -224,8 +224,8 @@ class ButtonDrawer():
 
     def load_image(self, button_source):
         try:
-            self.button_image = Image.open(button_source).convert("RGBA")
-            self.transparent_button = Image.open(button_source).convert("RGBA")
+            self.button_image = Image.open(button_source)
+            self.transparent_button = Image.open(button_source)
             alpha = self.transparent_button.split()[3]
             alpha = alpha.point(lambda p: p // 2)
             self.transparent_button.putalpha(alpha)

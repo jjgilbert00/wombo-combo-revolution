@@ -29,7 +29,6 @@ logger = logging.getLogger(__name__)
 TITLE = "Wombo Combo"
 
 TEST_INPUTS = get_cool_controller_pattern()
-# TEST_INPUTS = [get_random_controller_state() for _ in range(60 * 2)] # 10 seconds of random inputs
 NUM_CAPTURE_THREADS = 4
 
 
@@ -44,8 +43,6 @@ class WomboComboApp(App):
         self.screen_recorder = ScreenRecorder()
         self.capture_queue = queue.Queue()
         self.executor = ThreadPoolExecutor(max_workers=NUM_CAPTURE_THREADS)
-        self.capture_count = 0
-        self.capture_complete = 0
         self.capturing = False
 
     def on_start(self, *args):
@@ -90,7 +87,6 @@ class WomboComboApp(App):
         self.playalong_controller.refresh()
         if self.playalong_controller.is_recording():
             self.capture_queue.put(self.screen_recorder.capture_screen)
-            self.capture_count += 1
 
     def start_capture(self):
         self.capturing = True
@@ -107,7 +103,6 @@ class WomboComboApp(App):
             try:
                 capture_func = self.capture_queue.get(timeout=1)
                 capture_func()
-                self.capture_complete += 1
                 self.capture_queue.task_done()
             except queue.Empty:
                 continue
@@ -136,14 +131,8 @@ class WomboComboApp(App):
             if self.playalong_controller.is_recording():
                 self.playalong_controller.pause()
                 self.stop_capture()
-                print(f"CaptureCoutn: {self.capture_count}")
-                print(f"CaptureComplete: {self.capture_complete}")
-                print(f"Screen capture length: {len(self.screen_recorder.frames)}")
-                print(f"Input capture length: {len(self.playalong_controller.get_input_track())}")
             elif not self.playalong_controller.is_playing():
                 self.playalong_controller.start_recording()
-                self.capture_count = 0
-                self.capture_complete = 0
                 self.start_capture()
         if key == keyboard.Key.f9:
             self.playalong_controller.clean_track()
@@ -160,14 +149,10 @@ class WomboComboApp(App):
         root.withdraw()  # Hide the root window
         file_path = filedialog.asksaveasfilename(defaultextension=".mp4", filetypes=[("Video files", "*.mp4"), ("All files", "*.*")])
         if file_path:
-            print(f"Screen capture length: {len(self.screen_recorder.frames)}")
-            print(f"Input capture length: {len(self.playalong_controller.get_input_track())}")
             self.screen_recorder.save_video(file_path, target_frames=len(self.playalong_controller.get_input_track()))
             write_video_file(self.playalong_controller.get_input_track(), file_path[0:-4] + '_inputs.mp4')
             with open(file_path[0:-4] + '.json', 'w') as fout:
                 json.dump(self.playalong_controller.get_input_track(), fout)
-        print(f"Screen capture length: {len(self.screen_recorder.frames)}")
-        print(f"Input capture length: {len(self.playalong_controller.get_input_track())}")
             
 
     def show_file_loader(self):

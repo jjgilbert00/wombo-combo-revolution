@@ -1,13 +1,16 @@
+import array
 import mss
 import cv2
 import numpy as np
 import time
+import dxcam
 
 class ScreenRecorder:
     def __init__(self, fps=60):
         self.frames = []
         self.fps = fps
         self.video = None
+        self.camera = dxcam.create(output_idx=0, output_color="BGRA")
 
     def clear(self):
         self.frames = []
@@ -15,31 +18,33 @@ class ScreenRecorder:
             self.video.release()
             self.video = None
 
+    def start_recording(self):
+        self.camera.start(target_fps=60, video_mode=True)
 
-    # def capture_screen(self):
-    #     screen = cv2.imread(cv2.VideoCapture(0).read()[1])
-    #     self.frames.append(screen)
+    def stop_recording(self):
+        self.camera.stop()
 
     def capture_screen(self):
-        with mss.mss() as sct:
-            monitor = sct.monitors[1]
-            try:
-                frame = sct.grab(monitor)
-                self.frames.append(frame)
-            except Exception as e:
-                print(e)
+        if self.camera.is_capturing:
+            self.frames.append(self.camera.get_latest_frame())
+        else:
+            self.frames.append(self.camera.grab())
     
     def save_video(self, output_path, width=2560, height=1440, target_frames=None):
+        if not self.frames:
+            print("No frames to save.")
+            return
         frames_written = 0
         if self.video:
             self.video.release()
         self.video = cv2.VideoWriter(output_path, cv2.VideoWriter_fourcc(*'mp4v'), self.fps, (width, height))
         for i in range(len(self.frames)):
-            frame = self.frames[i]
-            resized_frame = cv2.resize(cv2.cvtColor(np.array(frame), cv2.COLOR_BGRA2BGR), (width, height))
-            # resized_frame = cv2.resize(cv2.cvtColor(np.array(frame), cv2.COLOR_BGR2RGB), (width, height))
+            if self.frames[i] is None:
+                continue
+            frame = self.frames[i][:, :, :3]
+            # Frame interpolation. If we can't get screenshots at 60fps, we need to fill in gaps. 
             while frames_written < (i + 1) / len(self.frames) * target_frames:
-                self.video.write(resized_frame)
+                self.video.write(frame)
                 frames_written += 1
         self.video.release()
 
