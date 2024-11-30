@@ -3,7 +3,7 @@ import os
 import mss
 import numpy as np
 from pynput import keyboard
-from input_video import write_capture_and_overlay, write_video_file
+from video_writer import write_capture_and_overlay, write_input_video
 from playalong import PlayalongController
 from screen_capture import ScreenRecorder
 
@@ -166,7 +166,7 @@ class WomboComboApp(App):
                 )
 
             def save_input_video():
-                write_video_file(
+                write_input_video(
                     self.playalong_controller.get_input_track(),
                     file_path[0:-4] + "_inputs.mp4",
                 )
