@@ -1,65 +1,62 @@
-"""Input-list representation: a track as rows of "direction + buttons, held for N frames".
+"""Input-list representation: a track as runs of "direction + buttons, held for N frames".
 
-This is the fighting-game training-mode style of showing inputs. A new row starts whenever the
+This is the fighting-game training-mode style of showing inputs. A new run starts whenever the
 direction or any button changes.
 """
-from bisect import bisect_right
-
 from PIL import Image, ImageDraw, ImageFont
 
-# Order buttons appear in within a row.
+# Order buttons appear in within a run.
 LIST_BUTTON_ORDER = ["X", "Y", "A", "B", "LB", "RB", "LT", "RT"]
 
 DIRECTION_ANGLES = {6: 0, 9: 45, 8: 90, 7: 135, 4: 180, 1: 225, 2: 270, 3: 315}
+
+# Runs are only followed this far past the visible range; longer holds are labelled "999+".
+MAX_COUNT = 999
 
 
 def input_key(state):
     return state["direction"], tuple(button for button in LIST_BUTTON_ORDER if state[button])
 
 
-class InputRuns:
-    """Groups a track into rows of identical input, updated incrementally while recording."""
+def runs_in_range(track, lo, hi):
+    """Runs of identical input overlapping frames [lo, hi), as [(start, length, key), ...].
 
-    def __init__(self):
-        self._track = None
-        self._synced = 0
-        self.starts = []
-        self.keys = []
-        self.total = 0
+    Frames that are None (no data, e.g. parts of an attempt not played yet) are skipped. Runs are
+    followed past the range so held counts stay correct.
+    """
+    lo, hi = max(lo, 0), min(hi, len(track))
+    first, last = max(0, lo - MAX_COUNT), min(len(track), hi + MAX_COUNT)
+    runs = []
+    frame = lo
+    while frame < hi:
+        state = track[frame]
+        if state is None:
+            frame += 1
+            continue
+        start, end = frame, frame + 1
+        if frame == lo:
+            while start > first and track[start - 1] == state:
+                start -= 1
+        while end < last and track[end] == state:
+            end += 1
+        runs.append((start, end - start, input_key(state)))
+        frame = end
+    return runs
 
-    def sync(self, track):
-        # Tracks are only ever appended to in place; anything else is a new list or a truncation.
-        if track is not self._track or len(track) < self._synced:
-            self._track, self._synced, self.starts, self.keys = track, 0, [], []
-        for i in range(self._synced, len(track)):
-            key = input_key(track[i])
-            if not self.keys or key != self.keys[-1]:
-                self.starts.append(i)
-                self.keys.append(key)
-        self._synced = self.total = len(track)
 
-    def length(self, row):
-        end = self.starts[row + 1] if row + 1 < len(self.starts) else self.total
-        return end - self.starts[row]
-
-    def window(self, frame, rows_before, rows_after):
-        """Returns ([(row index, frames held, key), ...], position).
-
-        position is fractional: row k reaches the hit line when position == k and has fully passed
-        it at k + 1, so each row crosses the line exactly on the frame it starts. A frame past the
-        end of the track (e.g. while recording) puts every row behind the line.
-        """
-        count = len(self.starts)
-        if not count:
-            return [], 0.0
-        if frame >= self.total:
-            position = float(count)
+def match_runs(target, attempt, lo, hi):
+    """Runs of frames where the attempt did or didn't match the target: [(start, length, matched)]."""
+    lo, hi = max(lo, 0), min(hi, len(target), len(attempt))
+    runs = []
+    for frame in range(lo, hi):
+        if attempt[frame] is None:
+            continue
+        matched = attempt[frame] == target[frame]
+        if runs and runs[-1][0] + runs[-1][1] == frame and runs[-1][2] == matched:
+            runs[-1] = (runs[-1][0], runs[-1][1] + 1, matched)
         else:
-            row = bisect_right(self.starts, frame) - 1
-            position = row + (frame - self.starts[row]) / self.length(row)
-        current = int(position)
-        rows = range(max(0, current - rows_before), min(count, current + rows_after + 1))
-        return [(row, self.length(row), self.keys[row]) for row in rows], position
+            runs.append((frame, 1, matched))
+    return runs
 
 
 def draw_direction_glyph(direction, size, font_path):

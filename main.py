@@ -24,6 +24,7 @@ Config.set("graphics", "vsync", "0")
 from kivy.app import App
 from kivy.clock import Clock
 from kivy.core.window import Window
+from kivy.metrics import dp
 from kivy.uix.boxlayout import BoxLayout
 from KivyOnTop import register_topmost, unregister_topmost
 from pynput import keyboard
@@ -47,6 +48,7 @@ HOTKEYS = [
     ("F1", "Show hotkeys", "show_help"),
     ("F2", "Overlay mode (on top, borderless)", "toggle_overlay"),
     ("F3", "Switch between ring and input list", "toggle_display"),
+    ("F4", "Practice on/off (record your attempt while playing)", "toggle_practice"),
     ("F5", "Restart playback", "restart_playback"),
     ("F6", "Play", "play"),
     ("F7", "Pause", "pause"),
@@ -96,6 +98,8 @@ class WomboComboApp(App):
             "export_overlay_on_save": 1,
             "opacity": 0.5,
             "loop": 1,
+            "practice": 1,
+            "list_zoom": 12,
             "input_display": "ring",
         })
 
@@ -114,6 +118,10 @@ class WomboComboApp(App):
         self.playalong_controller.set_looping(self.config.getboolean("wombo", "loop"))
         self.playalong_layout = PlayAlongLayout()
         self.input_list_layout = InputListLayout()
+        self.input_list_layout.set_zoom(dp(self.config.getfloat("wombo", "list_zoom")))
+        self.input_list_layout.on_scrub = self.scrub
+        self.input_list_layout.on_zoom = self.set_list_zoom
+        self.playalong_controller.set_practice(self.config.getboolean("wombo", "practice"))
         self.menu_bar = MenuBar(self)
         self.root_layout = BoxLayout(orientation="vertical")
         self.root_layout.add_widget(self.menu_bar)
@@ -160,8 +168,8 @@ class WomboComboApp(App):
 
     def refresh(self, dt):
         if self.display is self.input_list_layout:
-            rows_before, rows_after = self.input_list_layout.rows_needed()
-            self.input_list_layout.update_state(*self.playalong_controller.list_snapshot(rows_before, rows_after))
+            frames_before, frames_after = self.input_list_layout.frames_needed()
+            self.input_list_layout.update_state(self.playalong_controller.list_snapshot(frames_before, frames_after))
         else:
             controller_state, upcoming_frames = self.playalong_controller.snapshot()
             self.playalong_layout.update_state(controller_state, upcoming_frames)
@@ -193,8 +201,14 @@ class WomboComboApp(App):
             if backlog > FPS // 2:
                 parts.append(f"[color=ffb454]encoder {backlog / FPS:.1f}s behind[/color]")
         elif frames:
-            state = "PLAY" if controller.is_playing() else "PAUSED"
+            if controller.is_playing():
+                state = "PRACTICE" if controller.practice else "REVIEW"
+            else:
+                state = "PAUSED"
             parts.append(f"{state} {format_time(controller.get_current_frame())} / {format_time(frames)}")
+            if controller.attempted_frames:
+                accuracy = controller.matched_frames / controller.attempted_frames
+                parts.append(f"Match {accuracy:.0%} of {controller.attempted_frames}f")
         else:
             parts.append("No track")
         if self.job_label:
@@ -205,7 +219,8 @@ class WomboComboApp(App):
         reader = self.sampler.reader
         parts.append(reader.name if reader and reader.connected else "[color=ffb454]No controller[/color]")
         parts.append(f"{stats.rate:.1f} Hz")
-        self.menu_bar.update(controller.is_recording(), controller.is_playing(), controller.loop, "   |   ".join(parts))
+        self.menu_bar.update(controller.is_recording(), controller.is_playing(), controller.loop, controller.practice,
+                             "   |   ".join(parts))
 
     # ---- Transport -----------------------------------------------------------------------------
 
@@ -222,6 +237,25 @@ class WomboComboApp(App):
 
     def restart_playback(self):
         self.playalong_controller.set_frame(0)
+
+    def scrub(self, frames):
+        """Moves the playhead (pausing playback) so a part of the run can be inspected."""
+        controller = self.playalong_controller
+        if not controller.is_recording():
+            controller.pause()
+            controller.set_frame(controller.get_current_frame() + frames)
+
+    def set_list_zoom(self, px_per_frame):
+        self.config.set("wombo", "list_zoom", round(px_per_frame / dp(1), 1))
+
+    def toggle_practice(self):
+        practice = not self.playalong_controller.practice
+        self.playalong_controller.set_practice(practice)
+        self.config.set("wombo", "practice", int(practice))
+        self.flash("Practice: playing records your attempt" if practice else "Review: playing replays your attempt")
+
+    def clear_attempt(self):
+        self.playalong_controller.clear_attempt()
 
     def toggle_loop(self):
         loop = not self.playalong_controller.loop
@@ -298,8 +332,10 @@ class WomboComboApp(App):
             return
         if self.playalong_controller.is_recording():
             self.stop_recording()
-        # Older saves are a bare list of frames.
-        self.playalong_controller.set_input_track(data["inputs"] if isinstance(data, dict) else data)
+        if isinstance(data, dict):
+            self.playalong_controller.set_input_track(data["inputs"], data.get("attempt"))
+        else:
+            self.playalong_controller.set_input_track(data)  # Older saves are a bare list of frames.
         video = os.path.splitext(path)[0] + ".mp4"
         self.capture_path = video if os.path.exists(video) else None
         self.flash(f"Opened {os.path.basename(path)}")
@@ -308,6 +344,7 @@ class WomboComboApp(App):
         if self.playalong_controller.is_recording():
             self.stop_recording()
         inputs = self.playalong_controller.get_input_track()
+        attempt = self.playalong_controller.get_attempt_track()
         if not inputs:
             self.flash("Nothing to save", "ffb454")
             return
@@ -320,7 +357,10 @@ class WomboComboApp(App):
 
         def save(progress):
             with open(base + ".json", "w") as fout:
-                json.dump({"fps": FPS, "inputs": inputs}, fout, indent=1, sort_keys=True)
+                data = {"fps": FPS, "inputs": inputs}
+                if any(frame is not None for frame in attempt):
+                    data["attempt"] = attempt
+                json.dump(data, fout, indent=1, sort_keys=True)
             if not capture:
                 return
             if os.path.abspath(capture) != os.path.abspath(base + ".mp4"):
@@ -423,7 +463,12 @@ class WomboComboApp(App):
         self.show_display("ring" if self.display is self.input_list_layout else "list")
 
     def show_help(self):
-        HelpPopup([(key, description) for key, description, _ in HOTKEYS]).open()
+        mouse_help = [
+            ("Wheel", "Scrub the input list (pauses)"),
+            ("Drag", "Scrub the input list"),
+            ("Ctrl+Wheel", "Zoom the input list"),
+        ]
+        HelpPopup([(key, description) for key, description, _ in HOTKEYS] + mouse_help).open()
 
     def open_settings_popup(self):
         readers = self.select_controller()

@@ -1,10 +1,15 @@
 import threading
 from enum import Enum
 
+from collections import namedtuple
+
 from controller import get_neutral_controller_state
-from input_list import InputRuns
+from input_list import match_runs, runs_in_range
 
 PLAYALONG_FRAMELENGTH = 120
+
+
+ListSnapshot = namedtuple("ListSnapshot", "live_state frame recording target_runs attempt_runs match_runs")
 
 
 class RUNNING_STATES(Enum):
@@ -18,6 +23,10 @@ class PlayalongController:
 
     tick() runs on the sampler thread once per 60 Hz frame; everything else is called from the UI
     thread. All shared state is guarded by a lock, and the UI reads it through snapshot().
+
+    Alongside the track it keeps the player's attempt: one entry per track frame, None where they
+    haven't played it. While playing in practice mode, live input is written into the attempt at the
+    playhead, so the two can be compared frame for frame and replayed together afterwards.
     """
 
     def __init__(self, input_track=None):
@@ -30,13 +39,38 @@ class PlayalongController:
         # Called with the tick count after each recorded frame (e.g. to grab a matching video frame).
         self.frame_sink = None
         self.filled_frames = 0  # Recorded frames that repeat the previous one because the sampler ran late.
-        self.runs = InputRuns()  # The track grouped into rows, for the input list display.
+        self.practice = True  # Playing records the player's attempt; off, playback just replays it.
+        self._reset_attempt()
+
+    def _reset_attempt(self, attempt=None):
+        self.attempt_track = list(attempt) if attempt else [None] * len(self.input_track)
+        self.attempt_track += [None] * (len(self.input_track) - len(self.attempt_track))
+        del self.attempt_track[len(self.input_track):]
+        self.attempted_frames = sum(frame is not None for frame in self.attempt_track)
+        self.matched_frames = sum(
+            attempt is not None and attempt == target for attempt, target in zip(self.attempt_track, self.input_track)
+        )
+
+    def _record_attempt(self, frame, state):
+        previous = self.attempt_track[frame]
+        if previous is not None:
+            self.attempted_frames -= 1
+            self.matched_frames -= previous == self.input_track[frame]
+        self.attempt_track[frame] = state
+        self.attempted_frames += 1
+        self.matched_frames += state == self.input_track[frame]
 
     def tick(self, controller_state, ticks=1):
         sink = None
         with self._lock:
             self.live_state = controller_state
             if self.running_state == RUNNING_STATES.PLAYING:
+                if self.practice:
+                    # This tick's input answers the frame at the line (and any frames skipped by a late tick).
+                    for offset in range(ticks):
+                        frame = self.current_frame + offset
+                        if frame < len(self.input_track):
+                            self._record_attempt(frame, controller_state)
                 self._advance(ticks)
             elif self.running_state == RUNNING_STATES.RECORDING:
                 if not self.input_track:
@@ -65,14 +99,34 @@ class PlayalongController:
                 return self.live_state, []
             return self.live_state, self.get_playalong_frames()
 
-    def list_snapshot(self, rows_before, rows_after):
-        """Returns (live controller state, rows around the playhead, position, recording) for the input list."""
+    def list_snapshot(self, frames_before, frames_after):
+        """Target runs, attempt runs and per-frame matches around the playhead, for the input list."""
         with self._lock:
-            self.runs.sync(self.input_track)
             recording = self.running_state == RUNNING_STATES.RECORDING
             frame = len(self.input_track) if recording else self.current_frame
-            rows, position = self.runs.window(frame, rows_before, rows_after)
-            return self.live_state, rows, position, recording
+            lo, hi = frame - frames_before, frame + frames_after + 1
+            if recording:
+                return ListSnapshot(self.live_state, frame, True, runs_in_range(self.input_track, lo, hi), [], [])
+            return ListSnapshot(
+                self.live_state, frame, False,
+                runs_in_range(self.input_track, lo, hi),
+                runs_in_range(self.attempt_track, lo, hi),
+                match_runs(self.input_track, self.attempt_track, lo, hi),
+            )
+
+    def get_attempt_track(self):
+        with self._lock:
+            return list(self.attempt_track)
+
+    def set_attempt_track(self, attempt):
+        with self._lock:
+            self._reset_attempt(attempt)
+
+    def clear_attempt(self):
+        self.set_attempt_track(None)
+
+    def set_practice(self, practice):
+        self.practice = practice
 
     def set_frame(self, frame):
         with self._lock:
@@ -105,11 +159,12 @@ class PlayalongController:
         with self._lock:
             return list(self.input_track)
 
-    def set_input_track(self, input_track):
+    def set_input_track(self, input_track, attempt=None):
         with self._lock:
             self.running_state = RUNNING_STATES.STOPPED
             self.input_track = list(input_track)
             self.current_frame = 0
+            self._reset_attempt(attempt)
 
     def get_playalong_frames(self):
         playalong_frames = self.input_track[
@@ -131,6 +186,7 @@ class PlayalongController:
             self.filled_frames = 0
             self.input_track = []
             self.current_frame = 0
+            self._reset_attempt()
             self.running_state = RUNNING_STATES.RECORDING
 
     def stop_recording(self):
@@ -138,11 +194,13 @@ class PlayalongController:
             self.running_state = RUNNING_STATES.STOPPED
             self.frame_sink = None
             self.current_frame = 0
+            self._reset_attempt()
 
     def truncate(self, frame_count):
         """Drops trailing frames, e.g. one recorded after the video capture had already stopped."""
         with self._lock:
             del self.input_track[frame_count:]
+            self._reset_attempt(self.attempt_track)
 
     def clean_track(self):
         """Reduces held buttons to their first frame so prompts show presses, not holds."""
@@ -157,3 +215,4 @@ class PlayalongController:
                         cleaned[i][button] = 0
             self.input_track = cleaned
             self.current_frame = 0
+            self._reset_attempt(self.attempt_track)  # Re-score the attempt against the cleaned track.
