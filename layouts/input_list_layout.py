@@ -31,7 +31,6 @@ LINE_FRACTION = 0.25  # Position of the hit line, as a fraction of the track wid
 DEFAULT_PX_PER_FRAME = LABEL_WIDTH
 MIN_PX_PER_FRAME = dp(4)
 MAX_PX_PER_FRAME = dp(64)
-WHEEL_PIXELS = dp(48)  # How far one wheel notch scrolls.
 
 PANEL_COLOR = (0, 0, 0, 0.35)
 GUTTER_COLOR = (0.08, 0.08, 0.1, 1)
@@ -267,7 +266,7 @@ class InputListLayout(StencilView):
                 if self.on_zoom:
                     self.on_zoom(self.px_per_frame)
             elif direction and self.on_scrub:
-                self.on_scrub(direction * max(1, round(WHEEL_PIXELS / self.px_per_frame)))
+                self.on_scrub(direction)  # One frame per wheel notch, for frame-by-frame stepping.
             return True
         touch.grab(self)
         self._drag_frames = 0.0
