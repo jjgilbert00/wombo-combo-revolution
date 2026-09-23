@@ -1,5 +1,3 @@
-import threading
-import time
 import math
 import random
 
@@ -83,35 +81,3 @@ class ControllerReader:
     def get_controller_state(self):
         return self.state
 
-
-class ControllerRecorder:
-
-    def __init__(self, controller_reader):
-        self.controller_reader = controller_reader
-        self.recorded_inputs = []
-        self.recording = False
-
-    def start_recording(self):
-        self.recording = True
-        self.recorded_inputs = []
-        self.recording_thread = threading.Thread(target=self.record_input)
-        self.recording_thread.start()
-
-    def stop_recording(self):
-        self.recording = False
-
-    def get_recorded_inputs(self):
-        return self.recorded_inputs
-
-    def record_input(self):
-        while self.recording:
-            self.recorded_inputs.append(self.controller_reader.get_controller_state())
-            time.sleep(1.0 / 60.0)
-
-    def save_recorded_inputs(self, filename):
-        with open(filename, "w") as f:
-            f.write(str(self.recorded_inputs))
-
-    def load_recorded_inputs(self, filename):
-        with open(filename, "r") as f:
-            self.recorded_inputs = eval(f.read())

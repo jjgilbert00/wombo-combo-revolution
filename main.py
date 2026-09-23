@@ -13,7 +13,6 @@ from kivy.clock import Clock
 from kivy.uix.boxlayout import BoxLayout
 from kivy.core.window import Window
 from controller import get_cool_controller_pattern, ControllerReader
-from layouts.controller_layout import ControllerDisplay
 from layouts.playalong_layout import PlayAlongLayout
 import pygame
 import cv2
@@ -37,9 +36,7 @@ class WomboComboApp(App):
     def __init__(self):
         super().__init__()
         self.topmost = False
-        self.controller_display = None
         self.controller_reader = None
-        self.controller_recorder = None
         self.playalong_controller = None
         self.screen_recorder = ScreenRecorder()
         self.capture_queue = queue.Queue()
@@ -68,7 +65,6 @@ class WomboComboApp(App):
         self.controller_reader = None
         if pygame.joystick.get_count() > 0:
             self.controller_reader = ControllerReader(pygame.joystick.Joystick(0))
-            self.controller_display = ControllerDisplay(self.controller_reader)
 
         self.playalong_layout = PlayAlongLayout()
         self.playalong_controller = PlayalongController(
