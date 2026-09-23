@@ -38,6 +38,18 @@ TITLE = "Wombo Combo"
 
 TEST_INPUTS = get_cool_controller_pattern()
 
+HOTKEYS = [
+    ("F2", "Overlay mode (on top, borderless)", "toggle_overlay"),
+    ("F5", "Restart playback", "restart_playback"),
+    ("F6", "Play", "play"),
+    ("F7", "Pause", "pause"),
+    ("F8", "Start / stop recording", "toggle_recording"),
+    ("F9", "Clean track (presses only)", "clean_track"),
+    ("F10", "Clear track", "clear_track"),
+    ("F11", "Open inputs", "open_track"),
+    ("F12", "Save recording", "save_recording"),
+]
+
 CAPTURE_DISPLAY = 0
 CAPTURE_MAX_HEIGHT = 1080  # Downscale larger displays; None records at native resolution.
 ENCODER = "auto"  # NVENC when available, otherwise x264.
@@ -63,15 +75,25 @@ class WomboComboApp(App):
     def on_start(self, *args):
         Window.set_title(TITLE)
 
-        # Global keyboard listener for when the window isn't selected.
-        self.listener = keyboard.Listener(on_press=self.on_key_press)
-        self.listener.start()
         self.select_controller()
         self.sampler.start()
         Clock.schedule_interval(self.refresh, 0)  # Every rendered frame; input timing no longer depends on it.
         Clock.schedule_interval(self.check_controller, 1.0)
         # Creating the capture device takes ~100 ms; do it now rather than when recording starts.
         prepare_capture(CAPTURE_DISPLAY)
+
+        # Global keyboard listener for when the window isn't selected. The callback runs inside a
+        # system-wide keyboard hook, so it only hands the action to the UI thread and returns.
+        actions = {getattr(keyboard.Key, key.lower()): action for key, _, action in HOTKEYS}
+
+        def on_press(key):
+            # Must not return False: that stops the listener.
+            action = actions.get(key)
+            if action:
+                Clock.schedule_once(lambda dt: getattr(self, action)())
+
+        self.listener = keyboard.Listener(on_press=on_press)
+        self.listener.start()
 
     def build(self):
         # Set the window background color to fully transparent (RGBA)
@@ -151,43 +173,45 @@ class WomboComboApp(App):
 
             self.run_job("Finishing video", finish)
 
-    def on_key_press(self, key):
-        if key == keyboard.Key.f2:
-            if self.topmost:
-                unregister_topmost(Window, TITLE)
-                Window.borderless = False
-            else:
-                register_topmost(Window, TITLE)
-                Window.borderless = True
-            self.topmost = not self.topmost
-        elif key == keyboard.Key.f5:
-            self.playalong_controller.set_frame(0)
-        elif key == keyboard.Key.f6:
-            self.playalong_controller.play()
-        elif key == keyboard.Key.f7:
-            self.playalong_controller.pause()
-        elif key == keyboard.Key.f8:
-            if self.playalong_controller.is_recording():
-                self.stop_recording()
-            elif not self.playalong_controller.is_playing():
-                self.start_recording()
-        elif key == keyboard.Key.f9:
-            self.playalong_controller.clean_track()
-        elif key == keyboard.Key.f10:
-            if self.playalong_controller.is_recording():
-                self.stop_recording()
-            self.playalong_controller.clear_track()
-            self.capture_path = None
-        elif key == keyboard.Key.f11:
-            self.show_file_loader()
-        elif key == keyboard.Key.f12:
-            self.show_file_saver()
-        elif key == keyboard.KeyCode.from_char("="):
-            Window.opacity = min(Window.opacity + 0.1, 1)
-        elif key == keyboard.KeyCode.from_char("-"):
-            Window.opacity = max(Window.opacity - 0.1, 0)
+    # ---- Hotkey actions ------------------------------------------------------------------------
 
-    def show_file_saver(self):
+    def play(self):
+        if not self.playalong_controller.is_recording():
+            self.playalong_controller.play()
+
+    def pause(self):
+        if not self.playalong_controller.is_recording():
+            self.playalong_controller.pause()
+
+    def restart_playback(self):
+        self.playalong_controller.set_frame(0)
+
+    def toggle_recording(self):
+        if self.playalong_controller.is_recording():
+            self.stop_recording()
+        else:
+            self.start_recording()
+
+    def clean_track(self):
+        if not self.playalong_controller.is_recording():
+            self.playalong_controller.clean_track()
+
+    def clear_track(self):
+        if self.playalong_controller.is_recording():
+            self.stop_recording()
+        self.playalong_controller.clear_track()
+        self.capture_path = None
+
+    def toggle_overlay(self):
+        self.topmost = not self.topmost
+        if self.topmost:
+            register_topmost(Window, TITLE)
+            Window.borderless = True
+        else:
+            unregister_topmost(Window, TITLE)
+            Window.borderless = False
+
+    def save_recording(self):
         root = tk.Tk()
         root.withdraw()  # Hide the root window
         file_path = filedialog.asksaveasfilename(
@@ -233,7 +257,7 @@ class WomboComboApp(App):
 
         self.jobs.submit(task)
 
-    def show_file_loader(self):
+    def open_track(self):
         root = tk.Tk()
         root.withdraw()  # Hide the root window
         file_path = filedialog.askopenfilename(
