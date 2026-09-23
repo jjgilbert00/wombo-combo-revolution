@@ -1,5 +1,11 @@
 import json
 import os
+
+from timing import enable_high_resolution_timing, disable_high_resolution_timing
+
+# Must happen before Kivy starts so its frame limiter gets 1 ms sleeps instead of 15.6 ms ones.
+enable_high_resolution_timing()
+
 import mss
 import numpy as np
 from pynput import keyboard
@@ -110,6 +116,7 @@ class WomboComboApp(App):
         self.stop_capture()
         cv2.destroyAllWindows()
         pygame.quit()
+        disable_high_resolution_timing()
 
     def on_key_press(self, key):
         if key == keyboard.Key.f2:
