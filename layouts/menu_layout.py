@@ -76,8 +76,9 @@ class MenuItem(HoverBehavior, ButtonBehavior, BoxLayout):
     def __init__(self, text, shortcut="", **kwargs):
         super().__init__(size_hint_y=None, height=dp(32), padding=(dp(12), 0), **kwargs)
         _paint_background(self, (0, 0, 0, 0))
-        self.add_widget(Label(text=text, font_size=FONT_SIZE, color=TEXT_COLOR, halign="left", valign="middle",
-                              text_size=(dp(170), None)))
+        self.label = Label(text=text, font_size=FONT_SIZE, color=TEXT_COLOR, halign="left", valign="middle",
+                           text_size=(dp(170), None))
+        self.add_widget(self.label)
         self.add_widget(Label(text=shortcut, font_size=FONT_SIZE, color=DIM_TEXT_COLOR, halign="right",
                               size_hint_x=None, width=dp(48), text_size=(dp(48), None)))
         self.bind(hovered=self._refresh_color, state=self._refresh_color)
@@ -128,9 +129,11 @@ class MenuBar(BoxLayout):
         edit_menu = Menu()
         edit_menu.add_item("Clean track", app.clean_track, "F9")
         edit_menu.add_item("Clear track", app.clear_track, "F10")
+        edit_menu.add_item("Clear attempt", app.clear_attempt)
 
         view_menu = Menu()
         view_menu.add_item("Overlay mode", app.toggle_overlay, "F2")
+        self.display_item = view_menu.add_item("Show input list", app.toggle_display, "F3")
         view_menu.add_item("Hotkeys", app.show_help, "F1")
         view_menu.add_separator()
         view_menu.add_widget(self._opacity_row())
@@ -151,6 +154,7 @@ class MenuBar(BoxLayout):
         self.play_button = self._transport("Play", app.toggle_playback)
         self._transport("Restart", app.restart_playback)
         self.loop_button = self._transport("Loop", app.toggle_loop)
+        self.practice_button = self._transport("Practice", app.toggle_practice)
 
         self.status = Label(markup=True, font_size=FONT_SIZE, color=DIM_TEXT_COLOR, halign="right", valign="middle",
                             shorten=True, shorten_from="left", padding=(dp(10), 0))
@@ -182,12 +186,16 @@ class MenuBar(BoxLayout):
         row.add_widget(slider)
         return row
 
-    def update(self, recording, playing, looping, status):
+    def set_display_mode(self, mode):
+        self.display_item.label.text = "Show ring display" if mode == "list" else "Show input list"
+
+    def update(self, recording, playing, looping, practicing, status):
         self.record_button.text = "Stop" if recording else "Record"
         self.record_button.highlight = RECORD_COLOR if recording else (0, 0, 0, 0)
         self.play_button.text = "Pause" if playing else "Play"
         self.play_button.disabled = recording
         self.loop_button.highlight = ACTIVE_COLOR if looping else (0, 0, 0, 0)
+        self.practice_button.highlight = ACTIVE_COLOR if practicing else (0, 0, 0, 0)
         self.status.text = status
 
 
@@ -250,9 +258,9 @@ class HelpPopup(ModalView):
         grid = GridLayout(cols=2, row_default_height=dp(26), row_force_default=True)
         for key, description in hotkeys:
             grid.add_widget(Label(text=key, font_size=FONT_SIZE, color=DIM_TEXT_COLOR, size_hint_x=None,
-                                  width=dp(60), halign="left", text_size=(dp(60), None)))
+                                  width=dp(90), halign="left", text_size=(dp(90), None)))
             grid.add_widget(Label(text=description, font_size=FONT_SIZE, color=TEXT_COLOR, halign="left",
-                                  text_size=(dp(320), None)))
+                                  text_size=(dp(298), None)))
         panel.add_widget(grid)
         self.add_widget(panel)
         self.bind(on_touch_down=lambda *_: self.dismiss())
