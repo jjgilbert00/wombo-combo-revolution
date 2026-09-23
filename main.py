@@ -11,6 +11,7 @@ import numpy as np
 from pynput import keyboard
 from video_writer import write_capture_and_overlay, write_input_video
 from playalong import PlayalongController
+from sampler import InputSampler
 from screen_capture import ScreenRecorder
 
 os.environ["SDL_JOYSTICK_ALLOW_BACKGROUND_EVENTS"] = "1"
@@ -41,8 +42,9 @@ class WomboComboApp(App):
     def __init__(self):
         super().__init__()
         self.topmost = False
-        self.controller_reader = None
-        self.playalong_controller = None
+        # Owns the track and playhead; the sampler thread drives it once per 60 Hz frame.
+        self.playalong_controller = PlayalongController(TEST_INPUTS)
+        self.sampler = InputSampler(self.playalong_controller.tick)
         self.screen_recorder = ScreenRecorder()
         self.capture_queue = queue.Queue()
         self.executor = ThreadPoolExecutor(max_workers=NUM_CAPTURE_THREADS)
@@ -54,7 +56,10 @@ class WomboComboApp(App):
         # Global keyboard listener for when the window isn't selected.
         self.listener = keyboard.Listener(on_press=self.on_key_press)
         self.listener.start()
-        Clock.schedule_interval(lambda x: self.refresh(), 1.0 / 60.0)
+        self.select_controller()
+        self.sampler.start()
+        Clock.schedule_interval(self.refresh, 0)  # Every rendered frame; input timing no longer depends on it.
+        Clock.schedule_interval(self.check_controller, 1.0)
 
     def build(self):
         # Set the window background color to fully transparent (RGBA)
@@ -64,16 +69,7 @@ class WomboComboApp(App):
         Window.borderless = False
         Window.fullscreen = False
 
-        # Prefers an XInput controller; falls back to pygame for anything else.
-        readers = find_controllers()
-        self.controller_reader = readers[0] if readers else None
-
         self.playalong_layout = PlayAlongLayout()
-        self.playalong_controller = PlayalongController(
-            controller_reader=self.controller_reader,
-            view=self.playalong_layout,
-            input_track=TEST_INPUTS,
-        )
         self.playalong_controller.set_looping(True)
 
         layout = BoxLayout(orientation="vertical")
@@ -81,11 +77,24 @@ class WomboComboApp(App):
 
         return layout
 
-    def refresh(self):
+    def refresh(self, dt):
         if self.playalong_controller.is_recording():
             # self.capture_queue.put(self.screen_recorder.capture_screen)
             self.screen_recorder.capture_screen()
-        self.playalong_controller.refresh()
+        # Draw whatever the sampler thread last recorded; rendering never advances the playhead.
+        controller_state, upcoming_frames = self.playalong_controller.snapshot()
+        self.playalong_layout.update_state(controller_state, upcoming_frames)
+
+    def select_controller(self):
+        # Prefers an XInput controller; falls back to pygame for anything else.
+        readers = find_controllers()
+        self.sampler.reader = readers[0] if readers else None
+
+    def check_controller(self, dt):
+        # Picks up a controller that was plugged in (or back in) after startup.
+        reader = self.sampler.reader
+        if reader is None or not reader.connected:
+            self.select_controller()
 
     def start_capture(self):
         self.capturing = True
@@ -109,6 +118,7 @@ class WomboComboApp(App):
     def on_stop(self):
         # Clean up when closing the app
         self.listener.stop()
+        self.sampler.stop()
         self.stop_capture()
         cv2.destroyAllWindows()
         disable_high_resolution_timing()
@@ -130,7 +140,7 @@ class WomboComboApp(App):
             self.playalong_controller.pause()
         elif key == keyboard.Key.f8:
             if self.playalong_controller.is_recording():
-                self.playalong_controller.pause()
+                self.playalong_controller.stop_recording()
                 self.stop_capture()
             elif not self.playalong_controller.is_playing():
                 self.playalong_controller.start_recording()
