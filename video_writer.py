@@ -18,30 +18,29 @@ def write_video_file(output_path, frames, color_conversion, fps=60):
     subprocess.run(["python", os.path.join(os.path.dirname(__file__), "reencode.py"), output_path])
 
 
-def write_input_video(inputs, output_path, playalong_length=120):
+def write_input_video(inputs, output_path, playalong_length=120, width=1600, height=800):
     if not inputs:
         return
-    drawer = InputDrawer()
+    drawer = InputDrawer(width, height)
     extended_inputs = inputs + [get_neutral_controller_state() for _ in range(playalong_length)]
-    frames  = [np.array(drawer.draw(extended_inputs[i:i+playalong_length])) for i in range(len(extended_inputs) - playalong_length)]
+    frames = [np.array(drawer.draw(extended_inputs[i:i+playalong_length])) for i in range(len(inputs))]
     write_video_file(output_path, frames, cv2.COLOR_RGBA2BGR)
 
 
-def write_capture_and_overlay(capture_frames, inputs, output_path, playalong_length=120):
+def write_capture_and_overlay(capture_frames, inputs, output_path, playalong_length=120, opacity=0.8):
     if not inputs:
         return
-    drawer = InputDrawer()
     height, width, _ = capture_frames[0].shape
-    
+    drawer = InputDrawer(width, height)
+
     # Hacky way to delay the input visualization by 4 frames to compensate for the delay in the capture
     extended_inputs = [get_neutral_controller_state() for _ in range(4)] + inputs + [get_neutral_controller_state() for _ in range(playalong_length)]
-    images = [drawer.draw(extended_inputs[i:i+playalong_length], width=width, height=height) for i in range(len(extended_inputs) - playalong_length)]
-    input_frames = [np.array(image) for image in images]
     combined_frames = []
-    for i in range(min(len(capture_frames), len(input_frames))):
-        capture_frame = capture_frames[i]
-        overlay_frame = cv2.cvtColor(input_frames[i], cv2.COLOR_RGBA2BGRA)
-        combined_frame = cv2.addWeighted(capture_frame, 0.7, overlay_frame, 0.3, 0)
-        combined_frames.append(combined_frame)
-    write_video_file(output_path, combined_frames, cv2.COLOR_BGRA2BGR)
-
+    for i in range(min(len(capture_frames), len(extended_inputs) - playalong_length)):
+        frame = cv2.cvtColor(capture_frames[i], cv2.COLOR_BGRA2BGR)
+        overlay = np.asarray(drawer.draw(extended_inputs[i:i+playalong_length]))
+        # Alpha-blend using the overlay's own alpha channel so only the drawn inputs cover the video.
+        weight = overlay[:, :, 3].astype(np.float32) * (opacity / 255)
+        overlay_bgr = cv2.cvtColor(overlay, cv2.COLOR_RGBA2BGR)
+        combined_frames.append(cv2.blendLinear(overlay_bgr, frame, weight, 1.0 - weight))
+    write_video_file(output_path, combined_frames, None)

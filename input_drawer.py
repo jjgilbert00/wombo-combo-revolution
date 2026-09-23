@@ -2,7 +2,7 @@ from PIL import Image, ImageDraw
 import math
 
 from controller import get_cool_controller_pattern
-from images import IMAGE_SOURCE_BUTTON_UP, get_standard_button_icon
+from images import get_standard_button_icon
 
 
 class DirectionalPromptDrawer:
@@ -220,60 +220,53 @@ class DirectionalPromptDrawer:
         self.draw_dots(draw, input_frames)
 
 
-class ButtonDrawer():
+class ButtonDrawer:
+    """Draws one button column. The icon is loaded and scaled once, not per frame."""
 
-    def load_image(self, button_source):
+    def __init__(self, button_source, width):
         try:
-            self.button_image = Image.open(button_source).convert("RGBA")
-            self.transparent_button = Image.open(button_source).convert("RGBA")
-            alpha = self.transparent_button.split()[3]
-            alpha = alpha.point(lambda p: p // 2)
-            self.transparent_button.putalpha(alpha)
+            image = Image.open(button_source).convert("RGBA")
         except IOError:
             print(f"Unable to load image at {button_source}")
+            image = Image.new("RGBA", (width, width), (255, 255, 255, 255))
+        scale_ratio = width / image.width
+        self.button_image = image.resize((width, max(1, int(image.height * scale_ratio))))
+        self.transparent_button = self.button_image.copy()
+        self.transparent_button.putalpha(self.button_image.getchannel("A").point(lambda p: p // 2))
 
-
-    def draw(self, image, input_frames, x, y, width, height):
-        
-        button_width, button_height = self.button_image.size
-        scale_ratio = width / button_width
-        new_height = int(button_height * scale_ratio)
-        resized_button = self.button_image.resize((width, new_height))
+    def draw(self, image, input_frames, x, y, height):
+        new_height = self.button_image.height
         # Draw the frames of input data
-        if input_frames:
-            for i in range(len(input_frames)-1, -1, -1):
-                frame_state = input_frames[i]
-                if frame_state:
-                    button_x = int(x)
-                    button_y = int(y + height - new_height - (height-new_height) * (i/len(input_frames)))
-                    resized_button = self.button_image.resize((width, new_height))
-                    # draw.bitmap((button_x, button_y), resized_button)
-                    image.paste(resized_button, (button_x, button_y), mask=resized_button)
+        for i in range(len(input_frames) - 1, -1, -1):
+            if input_frames[i]:
+                button_y = int(y + height - new_height - (height - new_height) * (i / len(input_frames)))
+                image.paste(self.button_image, (int(x), button_y), mask=self.button_image)
 
         # Draw the button frames at the bottom of the screen
-        resized_button = self.transparent_button.resize((width, new_height))
-        image.paste(resized_button, (int(x), int(y + height - new_height)), mask=resized_button)
+        image.paste(self.transparent_button, (int(x), int(y + height - new_height)), mask=self.transparent_button)
 
 
-class InputDrawer():
-    def draw(self, inputs, image=None, x=0, y=0, width=1600, height=800):
-        if not image:
-            image = Image.new("RGBA", (width, height), (0, 0, 0, 0))
-            # image.putalpha(0)
+class InputDrawer:
+    button_names = ["A", "X", "B", "Y", "RT", "RB", "LT", "LB"]
+
+    def __init__(self, width=1600, height=800, controller_type="XGamepad", button_icon_style="Alt"):
+        self.width = width
+        self.height = height
+        self.directional_drawer = DirectionalPromptDrawer()
+        self.button_drawers = [
+            ButtonDrawer(get_standard_button_icon(controller_type, button_icon_style, name), width * 7 // 100)
+            for name in self.button_names
+        ]
+
+    def draw(self, inputs):
+        image = Image.new("RGBA", (self.width, self.height), (0, 0, 0, 0))
         draw = ImageDraw.Draw(image)
-
-        dpd = DirectionalPromptDrawer()
-        dpd.draw(draw, [frame['direction'] for frame in inputs], x, y, width//2, width//2)
-
-        button_drawer = ButtonDrawer()
-        button_names = ["A", "X", "B", "Y", "RT", "RB", "LT", "LB"]
-        controller_type="XGamepad"
-        button_icon_style='Alt'
-        for i in range(len(button_names)):
-            button_drawer.load_image(get_standard_button_icon(controller_type, button_icon_style, button_names[i]))
-            button_x = width * (0.5 + i * (0.48/8))
-            button_y = y
-            button_drawer.draw(image, [frame[button_names[i]] for frame in inputs], button_x, button_y, width * 7 // 100, height)
+        self.directional_drawer.draw(
+            draw, [frame["direction"] for frame in inputs], 0, 0, self.width // 2, self.width // 2
+        )
+        for i, (name, drawer) in enumerate(zip(self.button_names, self.button_drawers)):
+            button_x = self.width * (0.5 + i * (0.48 / 8))
+            drawer.draw(image, [frame[name] for frame in inputs], button_x, 0, self.height)
         return image
 
 
@@ -282,5 +275,3 @@ if __name__ == "__main__":
     inputs = get_cool_controller_pattern()
     image = drawer.draw(inputs[0:120])
     image.show()
-
-
