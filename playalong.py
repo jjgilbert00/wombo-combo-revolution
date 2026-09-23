@@ -26,9 +26,12 @@ class PlayalongController:
         self.current_frame = 0
         self.loop = False
         self.live_state = get_neutral_controller_state()
+        # Called with the tick count after each recorded frame (e.g. to grab a matching video frame).
+        self.frame_sink = None
         self.filled_frames = 0  # Recorded frames that repeat the previous one because the sampler ran late.
 
     def tick(self, controller_state, ticks=1):
+        sink = None
         with self._lock:
             self.live_state = controller_state
             if self.running_state == RUNNING_STATES.PLAYING:
@@ -40,6 +43,9 @@ class PlayalongController:
                 self.filled_frames += ticks - 1
                 self.input_track.extend(self.input_track[-1] for _ in range(ticks - 1))
                 self.input_track.append(controller_state)
+                sink = self.frame_sink
+        if sink:
+            sink(ticks)
 
     def _advance(self, ticks):
         self.current_frame += ticks
@@ -108,8 +114,9 @@ class PlayalongController:
     def clear_track(self):
         self.set_input_track([])
 
-    def start_recording(self):
+    def start_recording(self, frame_sink=None):
         with self._lock:
+            self.frame_sink = frame_sink
             self.filled_frames = 0
             self.input_track = []
             self.current_frame = 0
@@ -118,7 +125,13 @@ class PlayalongController:
     def stop_recording(self):
         with self._lock:
             self.running_state = RUNNING_STATES.STOPPED
+            self.frame_sink = None
             self.current_frame = 0
+
+    def truncate(self, frame_count):
+        """Drops trailing frames, e.g. one recorded after the video capture had already stopped."""
+        with self._lock:
+            del self.input_track[frame_count:]
 
     def clean_track(self):
         """Reduces held buttons to their first frame so prompts show presses, not holds."""
