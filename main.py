@@ -30,6 +30,7 @@ from pynput import keyboard
 
 import dialogs
 from controller import find_controllers, get_cool_controller_pattern
+from layouts.input_list_layout import InputListLayout
 from layouts.menu_layout import HelpPopup, MenuBar, SettingsPopup
 from layouts.playalong_layout import PlayAlongLayout
 from playalong import PlayalongController
@@ -45,6 +46,7 @@ TEST_INPUTS = get_cool_controller_pattern()
 HOTKEYS = [
     ("F1", "Show hotkeys", "show_help"),
     ("F2", "Overlay mode (on top, borderless)", "toggle_overlay"),
+    ("F3", "Switch between ring and input list", "toggle_display"),
     ("F5", "Restart playback", "restart_playback"),
     ("F6", "Play", "play"),
     ("F7", "Pause", "pause"),
@@ -94,6 +96,7 @@ class WomboComboApp(App):
             "export_overlay_on_save": 1,
             "opacity": 0.5,
             "loop": 1,
+            "input_display": "ring",
         })
 
     def get_application_config(self):
@@ -110,10 +113,12 @@ class WomboComboApp(App):
 
         self.playalong_controller.set_looping(self.config.getboolean("wombo", "loop"))
         self.playalong_layout = PlayAlongLayout()
+        self.input_list_layout = InputListLayout()
         self.menu_bar = MenuBar(self)
         self.root_layout = BoxLayout(orientation="vertical")
         self.root_layout.add_widget(self.menu_bar)
-        self.root_layout.add_widget(self.playalong_layout)
+        self.display = None
+        self.show_display(self.config.get("wombo", "input_display"))
         return self.root_layout
 
     def on_start(self):
@@ -154,8 +159,12 @@ class WomboComboApp(App):
     # ---- Per-frame -----------------------------------------------------------------------------
 
     def refresh(self, dt):
-        controller_state, upcoming_frames = self.playalong_controller.snapshot()
-        self.playalong_layout.update_state(controller_state, upcoming_frames)
+        if self.display is self.input_list_layout:
+            rows_before, rows_after = self.input_list_layout.rows_needed()
+            self.input_list_layout.update_state(*self.playalong_controller.list_snapshot(rows_before, rows_after))
+        else:
+            controller_state, upcoming_frames = self.playalong_controller.snapshot()
+            self.playalong_layout.update_state(controller_state, upcoming_frames)
 
     def select_controller(self):
         readers = find_controllers()
@@ -400,6 +409,18 @@ class WomboComboApp(App):
             Window.borderless = False
             self.root_layout.add_widget(self.menu_bar, index=len(self.root_layout.children))
         self.preview_opacity(False)
+
+    def show_display(self, mode):
+        display = self.input_list_layout if mode == "list" else self.playalong_layout
+        if self.display:
+            self.root_layout.remove_widget(self.display)
+        self.root_layout.add_widget(display)  # Added last, so it sits below the menu bar.
+        self.display = display
+        self.config.set("wombo", "input_display", mode)
+        self.menu_bar.set_display_mode(mode)
+
+    def toggle_display(self):
+        self.show_display("ring" if self.display is self.input_list_layout else "list")
 
     def show_help(self):
         HelpPopup([(key, description) for key, description, _ in HOTKEYS]).open()

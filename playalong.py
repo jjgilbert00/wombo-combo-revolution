@@ -2,6 +2,7 @@ import threading
 from enum import Enum
 
 from controller import get_neutral_controller_state
+from input_list import InputRuns
 
 PLAYALONG_FRAMELENGTH = 120
 
@@ -29,6 +30,7 @@ class PlayalongController:
         # Called with the tick count after each recorded frame (e.g. to grab a matching video frame).
         self.frame_sink = None
         self.filled_frames = 0  # Recorded frames that repeat the previous one because the sampler ran late.
+        self.runs = InputRuns()  # The track grouped into rows, for the input list display.
 
     def tick(self, controller_state, ticks=1):
         sink = None
@@ -62,6 +64,15 @@ class PlayalongController:
             if self.running_state == RUNNING_STATES.RECORDING:
                 return self.live_state, []
             return self.live_state, self.get_playalong_frames()
+
+    def list_snapshot(self, rows_before, rows_after):
+        """Returns (live controller state, rows around the playhead, position, recording) for the input list."""
+        with self._lock:
+            self.runs.sync(self.input_track)
+            recording = self.running_state == RUNNING_STATES.RECORDING
+            frame = len(self.input_track) if recording else self.current_frame
+            rows, position = self.runs.window(frame, rows_before, rows_after)
+            return self.live_state, rows, position, recording
 
     def set_frame(self, frame):
         with self._lock:
