@@ -18,9 +18,8 @@ from kivy.app import App
 from kivy.clock import Clock
 from kivy.uix.boxlayout import BoxLayout
 from kivy.core.window import Window
-from controller import get_cool_controller_pattern, ControllerReader
+from controller import find_controllers, get_cool_controller_pattern
 from layouts.playalong_layout import PlayAlongLayout
-import pygame
 import cv2
 import logging
 from KivyOnTop import register_topmost, unregister_topmost
@@ -65,12 +64,9 @@ class WomboComboApp(App):
         Window.borderless = False
         Window.fullscreen = False
 
-        # Initialize game controller reader
-        pygame.init()
-        pygame.joystick.init()
-        self.controller_reader = None
-        if pygame.joystick.get_count() > 0:
-            self.controller_reader = ControllerReader(pygame.joystick.Joystick(0))
+        # Prefers an XInput controller; falls back to pygame for anything else.
+        readers = find_controllers()
+        self.controller_reader = readers[0] if readers else None
 
         self.playalong_layout = PlayAlongLayout()
         self.playalong_controller = PlayalongController(
@@ -115,7 +111,6 @@ class WomboComboApp(App):
         self.listener.stop()
         self.stop_capture()
         cv2.destroyAllWindows()
-        pygame.quit()
         disable_high_resolution_timing()
 
     def on_key_press(self, key):

@@ -71,9 +71,8 @@ class PlayalongController:
         if self.running_state == RUNNING_STATES.PLAYING:
             self.next_frame()
 
-        self.controller_reader.update_state()
-
-        controller_state = self.controller_reader.get_controller_state()
+        state = self.controller_reader.poll() if self.controller_reader else None
+        controller_state = state or get_neutral_controller_state()  # Neutral when no controller is connected.
 
         if self.running_state == RUNNING_STATES.RECORDING:
             self.input_track.append(controller_state)
