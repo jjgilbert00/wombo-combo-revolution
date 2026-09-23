@@ -15,6 +15,12 @@ from sampler import InputSampler
 from screen_capture import ScreenRecorder
 
 os.environ["SDL_JOYSTICK_ALLOW_BACKGROUND_EVENTS"] = "1"
+from kivy.config import Config
+
+# Waiting for vsync inside the buffer swap holds the GIL for up to a frame, which starves the input
+# sampler thread. Kivy's own 60 fps limiter paces rendering instead (it sleeps without the GIL).
+Config.set("graphics", "vsync", "0")
+
 from kivy.app import App
 from kivy.clock import Clock
 from kivy.uix.boxlayout import BoxLayout
