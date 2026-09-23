@@ -28,10 +28,9 @@ from kivy.uix.boxlayout import BoxLayout
 from kivy.core.window import Window
 from controller import find_controllers, get_cool_controller_pattern
 from layouts.playalong_layout import PlayAlongLayout
+import dialogs
 import logging
 from KivyOnTop import register_topmost, unregister_topmost
-import tkinter as tk
-from tkinter import filedialog
 
 logger = logging.getLogger(__name__)
 TITLE = "Wombo Combo"
@@ -212,12 +211,7 @@ class WomboComboApp(App):
             Window.borderless = False
 
     def save_recording(self):
-        root = tk.Tk()
-        root.withdraw()  # Hide the root window
-        file_path = filedialog.asksaveasfilename(
-            defaultextension=".mp4",
-            filetypes=[("Video files", "*.mp4"), ("All files", "*.*")],
-        )
+        file_path = dialogs.save_file("Save recording", "Recordings (*.mp4)", "*.mp4", "mp4")
         if file_path:
             if self.playalong_controller.is_recording():
                 self.stop_recording()
@@ -258,12 +252,7 @@ class WomboComboApp(App):
         self.jobs.submit(task)
 
     def open_track(self):
-        root = tk.Tk()
-        root.withdraw()  # Hide the root window
-        file_path = filedialog.askopenfilename(
-            defaultextension=".json",
-            filetypes=[("JSON files", "*.json"), ("All files", "*.*")],
-        )
+        file_path = dialogs.open_file("Open inputs", "Input tracks (*.json)", "*.json")
         if file_path:
             with open(file_path, "r") as fin:
                 data = json.load(fin)
