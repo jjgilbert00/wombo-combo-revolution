@@ -13,15 +13,14 @@ from input_list import LIST_BUTTON_ORDER, MAX_COUNT, draw_direction_glyph, input
 
 ICON_SIZE = dp(28)
 MIN_ICON_SIZE = dp(16)
-COUNT_WIDTH = dp(44)
-COLUMN_WIDTH = dp(300)
-METER_WIDTH = dp(18)  # Frame meter: one block per frame, left of the target column.
-METER_GAP = dp(10)
-STRIP_WIDTH = dp(8)  # Per-frame match indicator between the two columns.
-COLUMN_GAP = dp(20)
+BUTTONS_PER_ROW = 3  # Button icons stack under the direction glyph in rows of this many.
 MARGIN = dp(24)
-HEADER_HEIGHT = dp(28)
-LINE_FRACTION = 0.3  # Height of the hit line, as a fraction of the view.
+GUTTER_WIDTH = dp(72)  # Lane names, left of the track.
+METER_HEIGHT = dp(18)  # Frame meter: one block per target frame, above the target lane.
+LANE_HEIGHT = dp(116)
+STRIP_HEIGHT = dp(8)  # Per-frame match indicator between the two lanes.
+LANE_GAP = dp(8)
+LINE_FRACTION = 0.25  # Position of the hit line, as a fraction of the track width.
 
 DEFAULT_PX_PER_FRAME = dp(12)
 MIN_PX_PER_FRAME = dp(3)
@@ -29,7 +28,7 @@ MAX_PX_PER_FRAME = dp(40)
 WHEEL_PIXELS = dp(48)  # How far one wheel notch scrolls.
 
 PANEL_COLOR = (0, 0, 0, 0.35)
-HEADER_COLOR = (0.08, 0.08, 0.1, 1)
+GUTTER_COLOR = (0.08, 0.08, 0.1, 1)
 LINE_COLOR = (1, 1, 1, 0.8)
 MATCH_COLOR = (0.45, 0.9, 0.5)
 MISS_COLOR = (1, 0.42, 0.42)
@@ -63,15 +62,35 @@ class _InputLabel:
         for rect in ([self.count] if with_count else []) + [self.direction] + self.buttons:
             group.add(rect)
 
-    def set(self, x, y, icon, key, textures, count_texture=None):
+    @staticmethod
+    def stacked_width(icon, key, count_texture):
+        columns = min(len(key[1]), BUTTONS_PER_ROW)
+        return max(count_texture.width * icon / ICON_SIZE, icon, icon * 1.1 * columns)
+
+    def set_stacked(self, x, top, icon, key, textures, count_texture):
+        """Count on top, direction glyph under it, then button icons in rows (left-aligned at x)."""
         direction, pressed = key
-        if self.count is not None:
-            scale = icon / ICON_SIZE
-            width, height = count_texture.width * scale, count_texture.height * scale
-            self.count.texture = count_texture
-            self.count.size = (width, height)
-            self.count.pos = (x + COUNT_WIDTH * scale - width, y + (icon - height) / 2)
-            x += (COUNT_WIDTH + dp(8)) * scale
+        scale = icon / ICON_SIZE
+        width, height = count_texture.width * scale, count_texture.height * scale
+        self.count.texture = count_texture
+        self.count.size = (width, height)
+        self.count.pos = (x, top - height)
+        y = top - height - dp(2) - icon
+        self.direction.texture = textures.directions[direction]
+        self.direction.pos = (x, y)
+        self.direction.size = (icon, icon)
+        for i, rect in enumerate(self.buttons):
+            if i < len(pressed):
+                row, column = divmod(i, BUTTONS_PER_ROW)
+                rect.texture = textures.buttons[pressed[i]]
+                rect.pos = (x + column * icon * 1.1, y - (row + 1) * icon * 1.05)
+                rect.size = (icon, icon)
+            else:
+                rect.size = (0, 0)
+
+    def set_row(self, x, y, icon, key, textures):
+        """Direction glyph followed by button icons in a single row."""
+        direction, pressed = key
         self.direction.texture = textures.directions[direction]
         self.direction.pos = (x, y)
         self.direction.size = (icon, icon)
@@ -87,7 +106,7 @@ class _InputLabel:
 
 
 class _Box:
-    """One run of input: a box as tall as the run lasts, with its label."""
+    """One run of input: a box as wide as the run lasts, with its label."""
 
     def __init__(self, layer):
         self.group = InstructionGroup()
@@ -140,13 +159,13 @@ class _Textures:
 
 
 class InputListLayout(StencilView):
-    """Training-mode style input list that scrolls down onto a hit line at a constant speed.
+    """Training-mode style input list that scrolls right to left onto a hit line at a constant speed.
 
-    Each run of input is a box as tall as it's held, so its bottom edge reaches the line on the
-    frame it should be pressed and its top edge when it should be released. The target track is on
-    the left and the player's attempt on the right, with a strip between them marking each frame
-    green (matched) or red (missed). A frame meter on the far left shows the target as one block per
-    frame. Mouse wheel or drag scrubs; Ctrl + wheel zooms.
+    Time runs left to right, so the player reads upcoming inputs like text. Each run of input is a
+    box as wide as it's held: its left edge reaches the line on the frame it should be pressed and
+    its right edge when it should be released. Lanes from the top: a frame meter (one block per
+    target frame), the target track, a strip marking each frame green (matched) or red (missed), and
+    the player's attempt. Mouse wheel or drag scrubs; Ctrl + wheel zooms.
     """
 
     def __init__(self, controller_type="XGamepad", button_icon_style="Alt", **kwargs):
@@ -159,20 +178,21 @@ class InputListLayout(StencilView):
 
         with self.canvas:
             Color(*PANEL_COLOR)
-            self.panels = [Rectangle(), Rectangle(), Rectangle()]  # Target, You, frame meter.
+            self.panels = [Rectangle(), Rectangle(), Rectangle()]  # Meter, target, attempt lanes.
             self.box_layer = InstructionGroup()
+            self.strip_layer = InstructionGroup()
             self.meter_layer = InstructionGroup()
             self.meter_divider_layer = InstructionGroup()
-            self.strip_layer = InstructionGroup()
         with self.canvas.after:
+            # The gutter covers boxes that scroll past the left edge of the track.
+            Color(*GUTTER_COLOR)
+            self.gutter = Rectangle()
+            Color(1, 1, 1, 0.85)
+            self.lane_labels = [Rectangle(texture=_text_texture(text, sp(13))) for text in ("Frames", "Target", "You")]
             self.line_color = Color(*LINE_COLOR)
             self.line = Rectangle()
             self.live_color = Color(1, 1, 1, 1)
             live_group = InstructionGroup()
-            Color(*HEADER_COLOR)
-            self.header = Rectangle()
-            Color(1, 1, 1, 0.85)
-            self.header_labels = [Rectangle(texture=_text_texture(text, sp(14))) for text in ("Target", "You")]
         self.live = _InputLabel(live_group, with_count=False)
         self.target_boxes = _Pool(self.box_layer, _Box)
         self.attempt_boxes = _Pool(self.box_layer, _Box)
@@ -190,34 +210,48 @@ class InputListLayout(StencilView):
 
     # ---- Geometry ----------------------------------------------------------------------------
 
-    def _line_y(self):
-        return self.y + self.height * LINE_FRACTION
+    def _track_left(self):
+        return self.x + MARGIN + GUTTER_WIDTH
 
-    def _meter_x(self):
-        return self.x + MARGIN
+    def _track_right(self):
+        return self.right - MARGIN
 
-    def _column_x(self, column):
-        return self._meter_x() + METER_WIDTH + METER_GAP + column * (COLUMN_WIDTH + COLUMN_GAP)
+    def _line_x(self):
+        return self._track_left() + (self._track_right() - self._track_left()) * LINE_FRACTION
+
+    def _frame_x(self, frame, now):
+        return self._line_x() + (frame - now) * self.px_per_frame
+
+    def _lanes(self):
+        """Bottom y of the meter, target, strip and attempt lanes."""
+        meter_y = self.top - MARGIN - METER_HEIGHT
+        target_y = meter_y - LANE_GAP - LANE_HEIGHT
+        strip_y = target_y - LANE_GAP / 2 - STRIP_HEIGHT
+        attempt_y = strip_y - LANE_GAP / 2 - LANE_HEIGHT
+        return meter_y, target_y, strip_y, attempt_y
 
     def _layout(self, *args):
-        for column, panel in enumerate(self.panels[:2]):
-            panel.pos = (self._column_x(column), self.y)
-            panel.size = (COLUMN_WIDTH, self.height)
-        self.panels[2].pos = (self._meter_x(), self.y)
-        self.panels[2].size = (METER_WIDTH, self.height)
-        width = METER_WIDTH + METER_GAP + 2 * COLUMN_WIDTH + COLUMN_GAP
-        self.line.pos = (self._meter_x(), self._line_y() - dp(1))
-        self.line.size = (width + dp(16) + ICON_SIZE * 5, dp(2))
-        self.header.pos = (self._meter_x(), self.top - HEADER_HEIGHT)
-        self.header.size = (width, HEADER_HEIGHT)
-        for column, label in enumerate(self.header_labels):
+        meter_y, target_y, strip_y, attempt_y = self._lanes()
+        left, right = self._track_left(), self._track_right()
+        for panel, (y, height) in zip(self.panels, ((meter_y, METER_HEIGHT), (target_y, LANE_HEIGHT),
+                                                    (attempt_y, LANE_HEIGHT))):
+            panel.pos = (left, y)
+            panel.size = (right - left, height)
+        self.gutter.pos = (self.x, attempt_y - LANE_GAP)
+        self.gutter.size = (left - self.x, self.top - attempt_y + LANE_GAP)
+        for label, (y, height) in zip(self.lane_labels, ((meter_y, METER_HEIGHT), (target_y, LANE_HEIGHT),
+                                                         (attempt_y, LANE_HEIGHT))):
             label.size = label.texture.size
-            label.pos = (self._column_x(column) + dp(12), self.top - (HEADER_HEIGHT + label.texture.height) / 2)
+            label.pos = (self.x + MARGIN, y + (height - label.texture.height) / 2)
+        live_y = attempt_y - LANE_GAP - ICON_SIZE
+        self.line.pos = (self._line_x() - dp(1), live_y - dp(4))
+        self.line.size = (dp(2), self.top - MARGIN - live_y + dp(4))
 
     def frames_needed(self):
         """How many frames fit (before, after) the hit line."""
-        below = self.height * LINE_FRACTION
-        return int(below / self.px_per_frame) + 2, int((self.height - below) / self.px_per_frame) + 2
+        line_x = self._line_x()
+        return (int((line_x - self._track_left()) / self.px_per_frame) + 2,
+                int((self._track_right() - line_x) / self.px_per_frame) + 2)
 
     def set_zoom(self, px_per_frame):
         self.px_per_frame = max(MIN_PX_PER_FRAME, min(MAX_PX_PER_FRAME, px_per_frame))
@@ -228,8 +262,8 @@ class InputListLayout(StencilView):
         if not self.collide_point(*touch.pos):
             return super().on_touch_down(touch)
         if touch.is_mouse_scrolling:
-            # Kivy reports wheel-away-from-you as "scrolldown"; that should reveal what's above (later).
-            direction = 1 if touch.button == "scrolldown" else -1 if touch.button == "scrollup" else 0
+            # Kivy reports wheel-away-from-you as "scrolldown"; that moves forward in time.
+            direction = {"scrolldown": 1, "scrollright": 1, "scrollup": -1, "scrollleft": -1}.get(touch.button, 0)
             if "ctrl" in Window.modifiers:
                 self.set_zoom(self.px_per_frame * (1.25 if direction > 0 else 0.8))
                 if self.on_zoom:
@@ -244,8 +278,8 @@ class InputListLayout(StencilView):
     def on_touch_move(self, touch):
         if touch.grab_current is not self:
             return super().on_touch_move(touch)
-        # Dragging the list down brings later frames onto the line, like pulling a scroll.
-        self._drag_frames -= touch.dy / self.px_per_frame
+        # Dragging the track left brings later frames onto the line.
+        self._drag_frames -= touch.dx / self.px_per_frame
         whole = int(self._drag_frames)
         if whole and self.on_scrub:
             self.on_scrub(whole)
@@ -260,88 +294,87 @@ class InputListLayout(StencilView):
 
     # ---- Drawing -----------------------------------------------------------------------------
 
-    def _draw_runs(self, pool, runs, snapshot, column, color, dim_history):
-        line_y = self._line_y()
-        left = self._column_x(column)
+    def _draw_runs(self, pool, runs, snapshot, lane_y, color, dim_history):
+        line_x = self._line_x()
+        track_left, track_right = self._track_left(), self._track_right()
         for start, length, key in runs:
-            y0 = line_y + (start - snapshot.frame) * self.px_per_frame
-            y1 = y0 + length * self.px_per_frame
-            if y1 < self.y or y0 > self.top:
+            x0 = self._frame_x(start, snapshot.frame)
+            x1 = x0 + length * self.px_per_frame
+            if x1 < track_left or x0 > track_right:
                 continue
             box = pool.next()
             neutral = key == (5, ())
-            past = y1 <= line_y
-            active = y0 <= line_y < y1
+            past = x1 <= line_x
+            active = x0 <= line_x < x1
             alpha = HISTORY_ALPHA if past and dim_history else 1
             box.fill_color.rgba = (*color, (0.05 if neutral else 0.16 if not active else 0.28) * alpha)
-            box.fill.pos = (left, y0)
-            box.fill.size = (COLUMN_WIDTH, y1 - y0)
+            box.fill.pos = (x0, lane_y)
+            box.fill.size = (x1 - x0, LANE_HEIGHT)
             box.edge_color.rgba = (*color, 0.6 * alpha)
-            box.edge.pos = (left, y0)
-            box.edge.size = (COLUMN_WIDTH, dp(1))
+            box.edge.pos = (x0, lane_y)
+            box.edge.size = (dp(1), LANE_HEIGHT)
             box.content_color.a = alpha
 
             # Short runs get a smaller label, anchored to the edge where the input starts. A held run
-            # keeps its label just above the line, and a long run's label stays in view.
-            icon = max(MIN_ICON_SIZE, min(ICON_SIZE, y1 - y0 - dp(4)))
-            label_y = y0 + dp(2) if y1 - y0 >= icon + dp(4) else y0
-            label_y = max(label_y, min(self.y + dp(2), y1 - icon - dp(2)))
+            # keeps its label just right of the line, and a long run's label stays in view.
+            count = self.textures.count(length)
+            icon = max(MIN_ICON_SIZE, min(ICON_SIZE, x1 - x0 - dp(6)))
+            width = _InputLabel.stacked_width(icon, key, count)
+            label_x = x0 + dp(3)
+            label_x = max(label_x, min(track_left + dp(3), x1 - width - dp(3)))
             if active:
-                label_y = max(label_y, min(line_y + dp(2), y1 - icon - dp(2)))
-            box.label.set(left + dp(10), label_y, icon, key, self.textures, self.textures.count(length))
+                label_x = max(label_x, min(line_x + dp(3), x1 - width - dp(3)))
+            box.label.set_stacked(label_x, lane_y + LANE_HEIGHT - dp(4), icon, key, self.textures, count)
         pool.finish(_Box.hide)
 
-    def _draw_matches(self, runs, snapshot):
-        line_y = self._line_y()
-        x = self._column_x(0) + COLUMN_WIDTH + (COLUMN_GAP - STRIP_WIDTH) / 2
+    def _draw_matches(self, runs, snapshot, strip_y):
         for start, length, matched in runs:
-            y0 = line_y + (start - snapshot.frame) * self.px_per_frame
             color, rect = self.strips.next()
             color.rgba = (*(MATCH_COLOR if matched else MISS_COLOR), 0.9)
-            rect.pos = (x, y0)
-            rect.size = (STRIP_WIDTH, length * self.px_per_frame)
+            rect.pos = (self._frame_x(start, snapshot.frame), strip_y)
+            rect.size = (length * self.px_per_frame, STRIP_HEIGHT)
         self.strips.finish(lambda strip: setattr(strip[0], "a", 0))
 
-    def _draw_meter(self, runs, snapshot):
+    def _draw_meter(self, runs, snapshot, meter_y):
         """One block per target frame, coloured by input type, with a divider where the input changes."""
-        line_y = self._line_y()
         ppf = self.px_per_frame
         gap = dp(1) if ppf >= dp(4) else 0
-        x = self._meter_x()
-        first_visible = snapshot.frame - int((line_y - self.y) / ppf) - 1
-        last_visible = snapshot.frame + int((self.top - line_y) / ppf) + 1
+        line_x = self._line_x()
+        first_visible = snapshot.frame - int((line_x - self._track_left()) / ppf) - 1
+        last_visible = snapshot.frame + int((self._track_right() - line_x) / ppf) + 1
         for start, length, key in runs:
             direction, buttons = key
             color = METER_BUTTON_COLOR if buttons else METER_NEUTRAL_COLOR if direction == 5 else METER_DIRECTION_COLOR
             for frame in range(max(start, first_visible), min(start + length, last_visible + 1)):
-                y = line_y + (frame - snapshot.frame) * ppf
                 past = frame < snapshot.frame and not snapshot.recording
                 block_color, block = self.meter_blocks.next()
                 block_color.rgba = (*color, HISTORY_ALPHA if past else 0.95)
-                block.pos = (x, y + gap)
-                block.size = (METER_WIDTH, ppf - gap)
+                block.pos = (self._frame_x(frame, snapshot.frame) + gap, meter_y)
+                block.size = (ppf - gap, METER_HEIGHT)
             if first_visible <= start <= last_visible:
                 divider_color, divider = self.meter_dividers.next()
                 divider_color.rgba = (1, 1, 1, 0.9)
-                divider.pos = (x - dp(3), line_y + (start - snapshot.frame) * ppf - dp(1))
-                divider.size = (METER_WIDTH + dp(6), dp(2))
+                divider.pos = (self._frame_x(start, snapshot.frame) - dp(1), meter_y - dp(3))
+                divider.size = (dp(2), METER_HEIGHT + dp(6))
         hide = lambda item: setattr(item[0], "a", 0)
         self.meter_blocks.finish(hide)
         self.meter_dividers.finish(hide)
 
     def update_state(self, snapshot):
-        self._draw_meter(snapshot.target_runs, snapshot)
-        self._draw_runs(self.target_boxes, snapshot.target_runs, snapshot, 0, TARGET_BOX_COLOR,
+        meter_y, target_y, strip_y, attempt_y = self._lanes()
+        self._draw_meter(snapshot.target_runs, snapshot, meter_y)
+        self._draw_runs(self.target_boxes, snapshot.target_runs, snapshot, target_y, TARGET_BOX_COLOR,
                         dim_history=not snapshot.recording)
-        self._draw_runs(self.attempt_boxes, snapshot.attempt_runs, snapshot, 1, ATTEMPT_BOX_COLOR, dim_history=False)
-        self._draw_matches(snapshot.match_runs, snapshot)
+        self._draw_runs(self.attempt_boxes, snapshot.attempt_runs, snapshot, attempt_y, ATTEMPT_BOX_COLOR,
+                        dim_history=False)
+        self._draw_matches(snapshot.match_runs, snapshot, strip_y)
 
-        # The player's live input sits at the end of the line, which turns green when it matches.
+        # The player's live input sits under the line, which turns green when it matches.
         live_key = input_key(snapshot.live_state)
         target_key = next((key for start, length, key in snapshot.target_runs
                            if start <= snapshot.frame < start + length), None)
         matched = not snapshot.recording and live_key == target_key
         self.line_color.rgba = (*MATCH_COLOR, 1) if matched else LINE_COLOR
         self.live_color.a = 0 if snapshot.recording else 1
-        self.live.set(self._column_x(2) - COLUMN_GAP + dp(16), self._line_y() - ICON_SIZE / 2, ICON_SIZE,
-                      live_key, self.textures)
+        self.live.set_row(self._line_x() - ICON_SIZE / 2, attempt_y - LANE_GAP - ICON_SIZE - dp(4), ICON_SIZE,
+                          live_key, self.textures)
