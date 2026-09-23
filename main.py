@@ -2,6 +2,7 @@ import json
 import os
 import shutil
 import tempfile
+from concurrent.futures import ThreadPoolExecutor
 
 from timing import enable_high_resolution_timing, disable_high_resolution_timing
 
@@ -31,7 +32,6 @@ import logging
 from KivyOnTop import register_topmost, unregister_topmost
 import tkinter as tk
 from tkinter import filedialog
-import threading
 
 logger = logging.getLogger(__name__)
 TITLE = "Wombo Combo"
@@ -56,7 +56,9 @@ class WomboComboApp(App):
         self.capture_path = None  # Video that belongs to the current input track, if any.
         self.temp_dir = tempfile.mkdtemp(prefix="wombo_")
         self.take = 0
-        self.finishing = None  # Thread finishing the last take's video file.
+        self.jobs = ThreadPoolExecutor(max_workers=1)  # Saves/exports run one at a time, off the UI thread.
+        self.job_label = None
+        self.job_progress = None
 
     def on_start(self, *args):
         Window.set_title(TITLE)
@@ -109,8 +111,7 @@ class WomboComboApp(App):
         if self.playalong_controller.is_recording():
             self.stop_recording()
         self.sampler.stop()
-        if self.finishing:
-            self.finishing.join()
+        self.jobs.shutdown(wait=True, cancel_futures=True)
         shutil.rmtree(self.temp_dir, ignore_errors=True)
         disable_high_resolution_timing()
 
@@ -138,10 +139,17 @@ class WomboComboApp(App):
             recorder.stop()
             # A frame can be sampled just after the video stopped; keep the two the same length.
             self.playalong_controller.truncate(recorder.frames_captured)
+            # Jobs run in order, so anything queued after this sees the finished file.
             self.capture_path = recorder.output_path
-            # Encoding may still be catching up; let it finish without blocking.
-            self.finishing = threading.Thread(target=recorder.finish, daemon=True)
-            self.finishing.start()
+
+            def finish(progress):
+                try:
+                    recorder.finish()
+                except Exception:
+                    self.capture_path = None
+                    raise
+
+            self.run_job("Finishing video", finish)
 
     def on_key_press(self, key):
         if key == keyboard.Key.f2:
@@ -191,18 +199,39 @@ class WomboComboApp(App):
                 self.stop_recording()
             base = os.path.splitext(file_path)[0]
             inputs = self.playalong_controller.get_input_track()
+            capture = self.capture_path  # Read now; a new take started before the job runs would reset it.
             encoder = resolve_encoder(ENCODER)
-            with open(base + ".json", "w") as fout:
-                json.dump({"fps": FPS, "inputs": inputs}, fout, indent=1, sort_keys=True)
-            write_input_video(inputs, base + "_inputs.mp4", encoder=encoder)
-            if self.capture_path:
-                if self.finishing:
-                    self.finishing.join()  # The take's video must be fully written before copying it.
-                if os.path.abspath(self.capture_path) != os.path.abspath(base + ".mp4"):
-                    shutil.copyfile(self.capture_path, base + ".mp4")
+
+            def save(progress):
+                with open(base + ".json", "w") as fout:
+                    json.dump({"fps": FPS, "inputs": inputs}, fout, indent=1, sort_keys=True)
+                write_input_video(inputs, base + "_inputs.mp4", encoder=encoder)
+                if not capture:
+                    return
+                if os.path.abspath(capture) != os.path.abspath(base + ".mp4"):
+                    shutil.copyfile(capture, base + ".mp4")
+                self.job_label = "Exporting overlay"
                 write_capture_and_overlay(
-                    self.capture_path, inputs, base + "_overlay.mp4", delay_frames=OVERLAY_DELAY_FRAMES, encoder=encoder
+                    capture, inputs, base + "_overlay.mp4", delay_frames=OVERLAY_DELAY_FRAMES, encoder=encoder,
+                    progress=progress,
                 )
+
+            self.run_job("Saving", save)
+
+    def run_job(self, label, work):
+        """Runs work(progress_callback) on the job thread; job_label/job_progress describe what's running."""
+
+        def task():
+            self.job_label, self.job_progress = label, None
+            try:
+                work(lambda fraction: setattr(self, "job_progress", fraction))
+                logger.info("%s finished", label)
+            except Exception:
+                logger.exception("%s failed", label)
+            finally:
+                self.job_label, self.job_progress = None, None
+
+        self.jobs.submit(task)
 
     def show_file_loader(self):
         root = tk.Tk()
