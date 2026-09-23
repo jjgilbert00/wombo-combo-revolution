@@ -15,6 +15,8 @@ ICON_SIZE = dp(28)
 MIN_ICON_SIZE = dp(16)
 COUNT_WIDTH = dp(44)
 COLUMN_WIDTH = dp(300)
+METER_WIDTH = dp(18)  # Frame meter: one block per frame, left of the target column.
+METER_GAP = dp(10)
 STRIP_WIDTH = dp(8)  # Per-frame match indicator between the two columns.
 COLUMN_GAP = dp(20)
 MARGIN = dp(24)
@@ -34,6 +36,9 @@ MISS_COLOR = (1, 0.42, 0.42)
 TARGET_BOX_COLOR = (1, 1, 1)
 ATTEMPT_BOX_COLOR = (0.45, 0.65, 1)
 HISTORY_ALPHA = 0.45
+METER_NEUTRAL_COLOR = (0.38, 0.38, 0.42)
+METER_DIRECTION_COLOR = (0.3, 0.55, 0.95)
+METER_BUTTON_COLOR = (1.0, 0.68, 0.2)
 
 
 def _texture_from_pil(image):
@@ -140,7 +145,8 @@ class InputListLayout(StencilView):
     Each run of input is a box as tall as it's held, so its bottom edge reaches the line on the
     frame it should be pressed and its top edge when it should be released. The target track is on
     the left and the player's attempt on the right, with a strip between them marking each frame
-    green (matched) or red (missed). Mouse wheel or drag scrubs; Ctrl + wheel zooms.
+    green (matched) or red (missed). A frame meter on the far left shows the target as one block per
+    frame. Mouse wheel or drag scrubs; Ctrl + wheel zooms.
     """
 
     def __init__(self, controller_type="XGamepad", button_icon_style="Alt", **kwargs):
@@ -153,8 +159,10 @@ class InputListLayout(StencilView):
 
         with self.canvas:
             Color(*PANEL_COLOR)
-            self.panels = [Rectangle(), Rectangle()]
+            self.panels = [Rectangle(), Rectangle(), Rectangle()]  # Target, You, frame meter.
             self.box_layer = InstructionGroup()
+            self.meter_layer = InstructionGroup()
+            self.meter_divider_layer = InstructionGroup()
             self.strip_layer = InstructionGroup()
         with self.canvas.after:
             self.line_color = Color(*LINE_COLOR)
@@ -169,6 +177,8 @@ class InputListLayout(StencilView):
         self.target_boxes = _Pool(self.box_layer, _Box)
         self.attempt_boxes = _Pool(self.box_layer, _Box)
         self.strips = _Pool(self.strip_layer, self._make_strip)
+        self.meter_blocks = _Pool(self.meter_layer, self._make_strip)
+        self.meter_dividers = _Pool(self.meter_divider_layer, self._make_strip)
         self.bind(pos=self._layout, size=self._layout)
 
     @staticmethod
@@ -183,17 +193,22 @@ class InputListLayout(StencilView):
     def _line_y(self):
         return self.y + self.height * LINE_FRACTION
 
+    def _meter_x(self):
+        return self.x + MARGIN
+
     def _column_x(self, column):
-        return self.x + MARGIN + column * (COLUMN_WIDTH + COLUMN_GAP)
+        return self._meter_x() + METER_WIDTH + METER_GAP + column * (COLUMN_WIDTH + COLUMN_GAP)
 
     def _layout(self, *args):
-        for column, panel in enumerate(self.panels):
+        for column, panel in enumerate(self.panels[:2]):
             panel.pos = (self._column_x(column), self.y)
             panel.size = (COLUMN_WIDTH, self.height)
-        width = 2 * COLUMN_WIDTH + COLUMN_GAP
-        self.line.pos = (self.x + MARGIN, self._line_y() - dp(1))
+        self.panels[2].pos = (self._meter_x(), self.y)
+        self.panels[2].size = (METER_WIDTH, self.height)
+        width = METER_WIDTH + METER_GAP + 2 * COLUMN_WIDTH + COLUMN_GAP
+        self.line.pos = (self._meter_x(), self._line_y() - dp(1))
         self.line.size = (width + dp(16) + ICON_SIZE * 5, dp(2))
-        self.header.pos = (self.x + MARGIN, self.top - HEADER_HEIGHT)
+        self.header.pos = (self._meter_x(), self.top - HEADER_HEIGHT)
         self.header.size = (width, HEADER_HEIGHT)
         for column, label in enumerate(self.header_labels):
             label.size = label.texture.size
@@ -287,7 +302,35 @@ class InputListLayout(StencilView):
             rect.size = (STRIP_WIDTH, length * self.px_per_frame)
         self.strips.finish(lambda strip: setattr(strip[0], "a", 0))
 
+    def _draw_meter(self, runs, snapshot):
+        """One block per target frame, coloured by input type, with a divider where the input changes."""
+        line_y = self._line_y()
+        ppf = self.px_per_frame
+        gap = dp(1) if ppf >= dp(4) else 0
+        x = self._meter_x()
+        first_visible = snapshot.frame - int((line_y - self.y) / ppf) - 1
+        last_visible = snapshot.frame + int((self.top - line_y) / ppf) + 1
+        for start, length, key in runs:
+            direction, buttons = key
+            color = METER_BUTTON_COLOR if buttons else METER_NEUTRAL_COLOR if direction == 5 else METER_DIRECTION_COLOR
+            for frame in range(max(start, first_visible), min(start + length, last_visible + 1)):
+                y = line_y + (frame - snapshot.frame) * ppf
+                past = frame < snapshot.frame and not snapshot.recording
+                block_color, block = self.meter_blocks.next()
+                block_color.rgba = (*color, HISTORY_ALPHA if past else 0.95)
+                block.pos = (x, y + gap)
+                block.size = (METER_WIDTH, ppf - gap)
+            if first_visible <= start <= last_visible:
+                divider_color, divider = self.meter_dividers.next()
+                divider_color.rgba = (1, 1, 1, 0.9)
+                divider.pos = (x - dp(3), line_y + (start - snapshot.frame) * ppf - dp(1))
+                divider.size = (METER_WIDTH + dp(6), dp(2))
+        hide = lambda item: setattr(item[0], "a", 0)
+        self.meter_blocks.finish(hide)
+        self.meter_dividers.finish(hide)
+
     def update_state(self, snapshot):
+        self._draw_meter(snapshot.target_runs, snapshot)
         self._draw_runs(self.target_boxes, snapshot.target_runs, snapshot, 0, TARGET_BOX_COLOR,
                         dim_history=not snapshot.recording)
         self._draw_runs(self.attempt_boxes, snapshot.attempt_runs, snapshot, 1, ATTEMPT_BOX_COLOR, dim_history=False)
