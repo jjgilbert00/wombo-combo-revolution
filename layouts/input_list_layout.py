@@ -9,22 +9,28 @@ from kivy.uix.stencilview import StencilView
 from PIL import Image
 
 from images import get_standard_button_icon
-from input_list import LIST_BUTTON_ORDER, MAX_COUNT, draw_direction_glyph, input_key
+from input_list import LIST_BUTTON_ORDER, draw_direction_glyph, input_key
 
-ICON_SIZE = dp(28)
-MIN_ICON_SIZE = dp(16)
-BUTTONS_PER_ROW = 3  # Button icons stack under the direction glyph in rows of this many.
+ICON_SIZE = dp(26)
+# A label is one icon wide: frame count on top, then the direction, then pressed buttons in a column.
+LABEL_PADDING = dp(2)
+LABEL_WIDTH = ICON_SIZE + 2 * LABEL_PADDING
+COUNT_FONT_SIZE = sp(14)
+DISPLAY_COUNT_LIMIT = 99  # Longer holds show "99+", like training-mode input displays.
+LANE_BUTTON_ROWS = 3  # Lanes are tall enough for this many buttons; more overflow the lane.
 MARGIN = dp(24)
 GUTTER_WIDTH = dp(72)  # Lane names, left of the track.
 METER_HEIGHT = dp(18)  # Frame meter: one block per target frame, above the target lane.
-LANE_HEIGHT = dp(116)
+LANE_HEIGHT = dp(4) + dp(18) + (ICON_SIZE + dp(2)) * (1 + LANE_BUTTON_ROWS) + dp(4)
 STRIP_HEIGHT = dp(8)  # Per-frame match indicator between the two lanes.
 LANE_GAP = dp(8)
 LINE_FRACTION = 0.25  # Position of the hit line, as a fraction of the track width.
 
-DEFAULT_PX_PER_FRAME = dp(12)
-MIN_PX_PER_FRAME = dp(3)
-MAX_PX_PER_FRAME = dp(40)
+# By default one frame is exactly one label wide, so every input has room for its label. Zooming
+# out shows more of the track; boxes then too narrow for a label just show the box.
+DEFAULT_PX_PER_FRAME = LABEL_WIDTH
+MIN_PX_PER_FRAME = dp(4)
+MAX_PX_PER_FRAME = dp(64)
 WHEEL_PIXELS = dp(48)  # How far one wheel notch scrolls.
 
 PANEL_COLOR = (0, 0, 0, 0.35)
@@ -62,29 +68,21 @@ class _InputLabel:
         for rect in ([self.count] if with_count else []) + [self.direction] + self.buttons:
             group.add(rect)
 
-    @staticmethod
-    def stacked_width(icon, key, count_texture):
-        columns = min(len(key[1]), BUTTONS_PER_ROW)
-        return max(count_texture.width * icon / ICON_SIZE, icon, icon * 1.1 * columns)
-
-    def set_stacked(self, x, top, icon, key, textures, count_texture):
-        """Count on top, direction glyph under it, then button icons in rows (left-aligned at x)."""
+    def set_stacked(self, x, top, key, textures, count_texture):
+        """Count on top, direction glyph under it, then button icons in a column, all one icon wide."""
         direction, pressed = key
-        scale = icon / ICON_SIZE
-        width, height = count_texture.width * scale, count_texture.height * scale
         self.count.texture = count_texture
-        self.count.size = (width, height)
-        self.count.pos = (x, top - height)
-        y = top - height - dp(2) - icon
+        self.count.size = count_texture.size
+        self.count.pos = (x + (ICON_SIZE - count_texture.width) / 2, top - dp(18) + (dp(18) - count_texture.height) / 2)
+        y = top - dp(18) - dp(2) - ICON_SIZE
         self.direction.texture = textures.directions[direction]
         self.direction.pos = (x, y)
-        self.direction.size = (icon, icon)
+        self.direction.size = (ICON_SIZE, ICON_SIZE)
         for i, rect in enumerate(self.buttons):
             if i < len(pressed):
-                row, column = divmod(i, BUTTONS_PER_ROW)
                 rect.texture = textures.buttons[pressed[i]]
-                rect.pos = (x + column * icon * 1.1, y - (row + 1) * icon * 1.05)
-                rect.size = (icon, icon)
+                rect.pos = (x, y - (i + 1) * (ICON_SIZE + dp(2)))
+                rect.size = (ICON_SIZE, ICON_SIZE)
             else:
                 rect.size = (0, 0)
 
@@ -152,9 +150,9 @@ class _Textures:
         self.counts = {}
 
     def count(self, frames):
-        text = str(frames) if frames <= MAX_COUNT else f"{MAX_COUNT}+"
+        text = str(frames) if frames <= DISPLAY_COUNT_LIMIT else f"{DISPLAY_COUNT_LIMIT}+"
         if text not in self.counts:
-            self.counts[text] = _text_texture(text, sp(18))
+            self.counts[text] = _text_texture(text, COUNT_FONT_SIZE)
         return self.counts[text]
 
 
@@ -313,18 +311,20 @@ class InputListLayout(StencilView):
             box.edge_color.rgba = (*color, 0.6 * alpha)
             box.edge.pos = (x0, lane_y)
             box.edge.size = (dp(1), LANE_HEIGHT)
+            # Labels are all the same size, anchored to the edge where the input starts. A held run
+            # keeps its label just right of the line, and a long run's label stays in view. When
+            # zoomed out, runs too narrow for a label show only the box.
+            if x1 - x0 < LABEL_WIDTH:
+                box.content_color.a = 0
+                continue
             box.content_color.a = alpha
-
-            # Short runs get a smaller label, anchored to the edge where the input starts. A held run
-            # keeps its label just right of the line, and a long run's label stays in view.
-            count = self.textures.count(length)
-            icon = max(MIN_ICON_SIZE, min(ICON_SIZE, x1 - x0 - dp(6)))
-            width = _InputLabel.stacked_width(icon, key, count)
-            label_x = x0 + dp(3)
-            label_x = max(label_x, min(track_left + dp(3), x1 - width - dp(3)))
+            label_x = x0 + LABEL_PADDING
+            label_right = x1 - ICON_SIZE - LABEL_PADDING
+            label_x = max(label_x, min(track_left + LABEL_PADDING, label_right))
             if active:
-                label_x = max(label_x, min(line_x + dp(3), x1 - width - dp(3)))
-            box.label.set_stacked(label_x, lane_y + LANE_HEIGHT - dp(4), icon, key, self.textures, count)
+                label_x = max(label_x, min(line_x + LABEL_PADDING, label_right))
+            box.label.set_stacked(label_x, lane_y + LANE_HEIGHT - dp(4), key, self.textures,
+                                  self.textures.count(length))
         pool.finish(_Box.hide)
 
     def _draw_matches(self, runs, snapshot, strip_y):

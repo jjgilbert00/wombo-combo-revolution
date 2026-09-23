@@ -99,7 +99,7 @@ class WomboComboApp(App):
             "opacity": 0.5,
             "loop": 1,
             "practice": 1,
-            "list_zoom": 12,
+            "list_frame_width": 0,  # Pixels per frame in the input list; 0 = one label wide.
             "input_display": "ring",
         })
 
@@ -118,7 +118,9 @@ class WomboComboApp(App):
         self.playalong_controller.set_looping(self.config.getboolean("wombo", "loop"))
         self.playalong_layout = PlayAlongLayout()
         self.input_list_layout = InputListLayout()
-        self.input_list_layout.set_zoom(dp(self.config.getfloat("wombo", "list_zoom")))
+        frame_width = self.config.getfloat("wombo", "list_frame_width")
+        if frame_width:
+            self.input_list_layout.set_zoom(dp(frame_width))
         self.input_list_layout.on_scrub = self.scrub
         self.input_list_layout.on_zoom = self.set_list_zoom
         self.playalong_controller.set_practice(self.config.getboolean("wombo", "practice"))
@@ -246,7 +248,7 @@ class WomboComboApp(App):
             controller.set_frame(controller.get_current_frame() + frames)
 
     def set_list_zoom(self, px_per_frame):
-        self.config.set("wombo", "list_zoom", round(px_per_frame / dp(1), 1))
+        self.config.set("wombo", "list_frame_width", round(px_per_frame / dp(1), 1))
 
     def toggle_practice(self):
         practice = not self.playalong_controller.practice
