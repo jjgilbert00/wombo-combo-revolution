@@ -26,7 +26,7 @@ TEXT_COLOR = (0.92, 0.92, 0.92, 1)
 DIM_TEXT_COLOR = (0.6, 0.6, 0.64, 1)
 FONT_SIZE = sp(14)
 LANE_MENU_ITEMS = [("meter", "Frame meter"), ("target", "Recording"), ("keys", "Key inputs"),
-                   ("attempt", "Your attempt")]
+                   ("attempt", "Your attempt"), ("recent", "Recent attempts")]
 
 
 def _paint_background(widget, color):

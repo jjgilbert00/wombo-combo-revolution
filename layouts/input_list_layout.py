@@ -13,7 +13,7 @@ from PIL import Image
 
 from images import get_standard_button_icon
 from input_list import LIST_BUTTON_ORDER, draw_direction_glyph, input_key
-from key_inputs import describe
+from key_inputs import EARLY, LATE, PENDING, describe
 
 ICON_SIZE = dp(26)
 # A label is one icon wide: frame count on top, then the direction, then pressed buttons in a column.
@@ -28,6 +28,8 @@ METER_HEIGHT = dp(18)  # Frame meter: one block per target frame, above the targ
 LANE_HEIGHT = dp(4) + dp(18) + (ICON_SIZE + dp(2)) * (1 + LANE_BUTTON_ROWS) + dp(4)
 STRIP_HEIGHT = dp(8)  # Per-frame match indicator between the two lanes.
 KEYS_LANE_HEIGHT = dp(26)  # Key inputs lane: just each requirement's window, notation and result.
+RUN_LANE_HEIGHT = dp(16)  # Each earlier attempt is a compact row of graded key inputs.
+RUN_LANE_GAP = dp(3)
 LANE_GAP = dp(8)
 LINE_FRACTION = 0.25  # Position of the hit line, as a fraction of the track width.
 
@@ -59,11 +61,13 @@ KEY_COLOR = (1.0, 0.78, 0.2)
 EXACT_KEY_COLOR = (0.35, 0.85, 1.0)  # Exact spans stand apart from press-anywhere-in-window ones.
 HOLD_KEY_COLOR = (0.72, 0.55, 1.0)  # And holds from both.
 KEY_RESULT_COLORS = {"hit": MATCH_COLOR, "miss": MISS_COLOR, "pending": (0.55, 0.55, 0.6)}
+GRADE_COLORS = {"hit": MATCH_COLOR, "early": (0.45, 0.62, 1.0), "late": (1.0, 0.62, 0.2), "miss": MISS_COLOR,
+                "pending": (0.45, 0.45, 0.5)}
 NON_KEY_ALPHA = 0.35  # Target inputs outside every key input fade back once key inputs exist.
 CLICK_SLOP = dp(4)  # A press that moves less than this is a click, not a drag.
 
 # Lanes that can be shown or hidden, top to bottom, with their names in the gutter.
-LANES = {"meter": "Frames", "target": "Target", "keys": "Key inputs", "attempt": "You"}
+LANES = {"meter": "Frames", "target": "Target", "keys": "Key inputs", "attempt": "You", "recent": "Recent attempts"}
 
 
 _VIRTUAL_KEYS = {"shift": 0x10, "ctrl": 0x11}
@@ -325,7 +329,10 @@ class InputListLayout(StencilView):
     track cleaned down to what's required), and the player's attempt under a strip marking each
     frame green (matched) or red (missed). Key inputs are also outlined on the target with their
     result over the match strip, and once a track has any, the inputs outside them fade back.
-    The player's live input sits under the lanes. Notes hang underneath as toasts, each with a
+    Under those, recent attempts as compact rows, newest first: each key input's window coloured
+    by how that run did (hit, early, late, missed, or not reached), with a tick where an early or
+    late input actually came and how many frames off it was. Without key inputs a row shows the
+    run's per-frame matches. The player's live input sits under the lanes. Notes hang underneath as toasts, each with a
     brace pointing at the frames it annotates. Mouse wheel or drag scrubs; Ctrl + wheel zooms. Clicking selects a frame (Shift
     extends the selection) and dragging in the frame meter or key inputs lane selects a range.
     """
@@ -337,6 +344,7 @@ class InputListLayout(StencilView):
         self.show_notes = True  # When off, notes only show as bars over their frames.
         self.dim_non_key = False  # Set by the app while the track has key inputs.
         self.lanes_shown = set(LANES)  # Set by the app; the key inputs lane also needs key inputs.
+        self._history = []  # History rows from the last snapshot, one lane each.
         self.on_scrub = None  # Called with a frame delta when the user scrolls or drags.
         self.on_zoom = None  # Called with the new pixels-per-frame.
         self.on_select = None  # Called with (start, end) frames, inclusive, when the user selects frames.
@@ -354,6 +362,8 @@ class InputListLayout(StencilView):
             self.box_layer = InstructionGroup()
             self.strip_layer = InstructionGroup()
             self.key_layer = InstructionGroup()
+            self.history_layer = InstructionGroup()
+            self.history_text_layer = InstructionGroup()  # Its own layer, so cells added later don't cover it.
             self.meter_layer = InstructionGroup()
             self.meter_divider_layer = InstructionGroup()
             self.note_layer = InstructionGroup()
@@ -379,6 +389,8 @@ class InputListLayout(StencilView):
         self.note_graphics = _Pool(self.note_layer, _NoteGraphic)
         self.key_graphics = _Pool(self.key_layer, _KeyGraphic)
         self.panels = _Pool(self.panel_layer, self._make_strip)
+        self.history_cells = _Pool(self.history_layer, self._make_strip)
+        self.history_texts = _Pool(self.history_text_layer, self._make_strip)
         self.labels = _Pool(self.label_layer, self._make_strip)
 
     @staticmethod
@@ -421,20 +433,26 @@ class InputListLayout(StencilView):
         if "attempt" in self.lanes_shown:
             stack("strip", STRIP_HEIGHT, LANE_GAP / 2)
             stack("attempt", LANE_HEIGHT)
+        for i, _ in enumerate(self._history):
+            stack(("run", i), RUN_LANE_HEIGHT, RUN_LANE_GAP)
+        if self._history:
+            y -= LANE_GAP - RUN_LANE_GAP
         return lanes, y
 
     def _arrange(self, lanes, bottom):
         """Lane panels and gutter labels, the gutter, and the hit line down to the live input."""
         left, right = self._track_left(), self._track_right()
         for name, (y, height) in lanes.items():
-            if name not in LANES:
+            is_run = isinstance(name, tuple)
+            if not is_run and name not in LANES:
                 continue
             color, panel = self.panels.next()
             color.rgba = PANEL_COLOR
             panel.pos, panel.size = (left, y), (right - left, height)
             color, label = self.labels.next()
-            color.rgba = (1, 1, 1, 0.85)
-            label.texture = self.textures.lane_label(LANES[name])
+            color.rgba = (1, 1, 1, 0.6 if is_run else 0.85)
+            label.texture = (self.textures.lane_label(self._history[name[1]].label, sp(11)) if is_run
+                             else self.textures.lane_label(LANES[name]))
             label.size = label.texture.size
             label.pos = (self.x + MARGIN, y + (height - label.texture.height) / 2)
         hide = lambda item: setattr(item[0], "a", 0)
@@ -716,6 +734,43 @@ class InputListLayout(StencilView):
             graphic.run.pos = (run_x, strip_y - dp(2))
             graphic.run.size = (self._frame_x(run_start + run_length, snapshot.frame) - run_x, STRIP_HEIGHT + dp(4))
 
+    def _draw_history(self, snapshot, lanes):
+        track_left, track_right = self._track_left(), self._track_right()
+        frame_x = lambda frame: self._frame_x(frame, snapshot.frame)
+        for i, row in enumerate(self._history):
+            y, height = lanes[("run", i)]
+            for start, length, matched in row.match_runs:
+                color, rect = self.history_cells.next()
+                color.rgba = (*(MATCH_COLOR if matched else MISS_COLOR), 0.6)
+                rect.pos, rect.size = (frame_x(start), y + dp(4)), (length * self.px_per_frame, height - dp(8))
+            for start, end, grade, offset in row.grades:
+                x0, x1 = frame_x(start), frame_x(end + 1)
+                if x1 < track_left or x0 > track_right:
+                    continue
+                color, rect = self.history_cells.next()
+                color.rgba = (*GRADE_COLORS[grade], 0.35 if grade == PENDING else 0.9)
+                rect.pos, rect.size = (x0, y), (x1 - x0, height)
+                if grade not in (EARLY, LATE):
+                    continue
+                # A tick where the input actually came, linked back to the window it missed.
+                at = frame_x((start if grade == EARLY else end) + offset) + self.px_per_frame / 2
+                edge = x0 if grade == EARLY else x1
+                color, rect = self.history_cells.next()
+                color.rgba = (*GRADE_COLORS[grade], 1)
+                rect.pos, rect.size = (at - dp(1.5), y), (dp(3), height)
+                color, rect = self.history_cells.next()
+                color.rgba = (*GRADE_COLORS[grade], 0.8)
+                rect.pos, rect.size = (min(at, edge), y + height / 2 - dp(1)), (abs(edge - at), dp(2))
+                texture = self.textures.key_tag(f"{offset:+d}")
+                if texture.width + dp(4) <= x1 - x0:
+                    color, rect = self.history_texts.next()
+                    color.a = 1
+                    rect.texture, rect.size = texture, texture.size
+                    rect.pos = ((x0 + x1 - texture.width) / 2, y + (height - texture.height) / 2)
+        hide = lambda item: setattr(item[0], "a", 0)
+        self.history_cells.finish(hide)
+        self.history_texts.finish(hide)
+
     def _draw_selection(self, snapshot, top, bottom):
         if not self.selection or top <= bottom:
             self.selection_color.a = self.selection_edge_color.a = 0
@@ -733,6 +788,7 @@ class InputListLayout(StencilView):
 
     def update_state(self, snapshot):
         self._frame = snapshot.frame
+        self._history = snapshot.history if "recent" in self.lanes_shown else []
         lanes, bottom = self._lanes()
         self._arrange(lanes, bottom)
         # A hidden lane draws nothing, which also parks the graphics it drew before.
@@ -746,6 +802,7 @@ class InputListLayout(StencilView):
                         ATTEMPT_BOX_COLOR, dim_history=False)
         self._draw_matches(shown("strip", snapshot.match_runs), snapshot, lane_y("strip"))
         self._draw_key_inputs(snapshot.key_inputs, snapshot, lanes)
+        self._draw_history(snapshot, lanes)
         lanes_top = self.top - MARGIN
         live_y = bottom - ICON_SIZE
         self._draw_notes(snapshot.notes, snapshot, lanes_top, live_y - dp(14))

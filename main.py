@@ -639,6 +639,7 @@ class WomboComboApp(App):
             ("N", "Add a note to the selection (click a note to edit it)"),
             ("K", "Mark the selection as a key input (click its tag to edit)"),
             ("Esc", "Clear the selection"),
+            ("Attempts", "Green hit, blue early, orange late, red missed, grey not reached (+/- frames off)"),
         ]
         HelpPopup([(key, description) for key, description, _ in HOTKEYS] + mouse_help).open()
 
