@@ -258,6 +258,8 @@ class WomboComboApp(App):
             self.input_list_layout.dim_non_key = bool(self.playalong_controller.key_inputs)
             frames_before, frames_after = self.input_list_layout.frames_needed()
             self.input_list_layout.update_state(self.playalong_controller.list_snapshot(frames_before, frames_after))
+            if self.topmost:
+                self._fit_overlay()
         else:
             controller_state, upcoming_frames = self.playalong_controller.snapshot()
             self.playalong_layout.update_state(controller_state, upcoming_frames)
@@ -338,7 +340,8 @@ class WomboComboApp(App):
         self.menu_bar.update(controller.is_recording(), controller.is_playing(), controller.loop, controller.practice,
                              "   |   ".join(parts), demoing=bool(controller.demo_kind()))
         welcome = WELCOME if not frames and not controller.is_recording() else ""
-        self.input_list_layout.set_guidance(self._next_step_hint(), welcome)
+        # Over the game, the overlay shows the list only; the hints are for the app window.
+        self.input_list_layout.set_guidance("" if self.topmost else self._next_step_hint(), welcome)
 
     def _next_step_hint(self):
         """One line on what to do next, for where the player is right now."""
@@ -952,6 +955,8 @@ class WomboComboApp(App):
     def toggle_overlay(self):
         self.topmost = not self.topmost
         if self.topmost:
+            self._normal_size = Window.size
+            self._overlay_note_rows = 0
             Window.borderless = True
             self.root_layout.remove_widget(self.menu_bar)
             Window.bind(on_draw=self._keep_on_top)
@@ -961,7 +966,23 @@ class WomboComboApp(App):
             Window.borderless = False
             self.root_layout.add_widget(self.menu_bar, index=len(self.root_layout.children))
             self._set_on_top(False)
+            Window.size = self._normal_size
         self.preview_opacity(False)
+
+    def _fit_overlay(self):
+        """Trims the overlay window to what the input list draws, so no empty space covers the game.
+        It keeps its top edge and grows again when more is shown (e.g. another attempt row)."""
+        layout = self.input_list_layout
+        # Room for as many rows of notes as have been needed so far: one to start with if there are
+        # notes, more only if overlapping notes stack up. It doesn't shrink back, so the window
+        # doesn't jump as notes scroll by.
+        wanted = 1 if layout.show_notes and self.playalong_controller.notes else 0
+        self._overlay_note_rows = max(getattr(self, "_overlay_note_rows", 0), wanted, layout.note_rows_used)
+        if not layout.show_notes:
+            self._overlay_note_rows = 0
+        height = round(layout.content_height(self._overlay_note_rows) + Window.height - layout.height)
+        if abs(height - Window.height) > 2:
+            Window.size = (Window.width, height)
 
     @staticmethod
     def _set_on_top(on_top):
