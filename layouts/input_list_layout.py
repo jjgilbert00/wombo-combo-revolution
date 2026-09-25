@@ -351,6 +351,7 @@ class InputListLayout(StencilView):
         self.dim_non_key = False  # Set by the app while the track has key inputs.
         self.lanes_shown = set(LANES)  # Set by the app; the key inputs lane also needs key inputs.
         self._history = []  # History rows from the last snapshot, one lane each.
+        self.note_rows_used = 0  # Rows of note toasts in the last frame drawn.
         self.on_scrub = None  # Called with a frame delta when the user scrolls or drags.
         self.on_zoom = None  # Called with the new pixels-per-frame.
         self.on_select = None  # Called with (start, end) frames, inclusive, when the user selects frames.
@@ -502,6 +503,18 @@ class InputListLayout(StencilView):
         self.hint.size = (right - left, self.hint.texture_size[1])
         self.hint.pos = (left, max(self.y + dp(12), notes_bottom - self.hint.height))
         self.welcome.pos = (self.center_x - self.welcome.width / 2, self.center_y - self.welcome.height / 2)
+
+    def content_height(self, note_rows):
+        """How tall the list needs to be to show everything it draws: the shown lanes, the live input
+        under them, and note_rows rows of note toasts. For fitting the overlay window. While the
+        getting-started card shows, that's the whole height."""
+        if self.welcome.opacity:
+            return self.height
+        _, bottom = self._lanes()
+        lowest = bottom - ICON_SIZE - dp(4)  # The live input row.
+        if note_rows:
+            lowest -= dp(14) + BRACE_HEIGHT + min(note_rows, TOAST_ROWS) * dp(40)
+        return self.top - lowest + dp(8)
 
     def frames_needed(self):
         """How many frames fit (before, after) the hit line."""
@@ -702,6 +715,7 @@ class InputListLayout(StencilView):
             note.text.size = texture.size
             self._toast_hits.append((toast_x, toast_top - height, width, height, index))
         self.note_graphics.finish(_NoteGraphic.hide)
+        self.note_rows_used = len(row_ends) if self.show_notes else 0
 
     def _draw_key_inputs(self, key_inputs, snapshot, lanes):
         track_left, track_right = self._track_left(), self._track_right()

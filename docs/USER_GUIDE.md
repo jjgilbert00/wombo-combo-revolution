@@ -13,6 +13,7 @@ Frame by frame, and attempt after attempt.
 - [Marking what matters: key inputs](#marking-what-matters-key-inputs)
 - [Notes](#notes)
 - [Reviewing your attempts](#reviewing-your-attempts)
+- [Demoing a combo in game](#demoing-a-combo-in-game)
 - [Saving, opening and files](#saving-opening-and-files)
 - [Videos and overlay mode](#videos-and-overlay-mode)
 - [Settings](#settings)
@@ -275,6 +276,61 @@ attempt with its score and time. From here you can:
 Changing key inputs re-grades every run, so older attempts are always judged by the current
 requirements.
 
+## Demoing a combo in game
+
+Wombo Combo can perform a recording in the game for you, so you can see and hear what the combo
+should look like before you try it. It plugs in a **virtual Xbox controller** and plays the
+recording on it at the recorded timing. Software can't press the buttons of your own controller,
+so the game sees this as a second controller.
+
+**One-time setup:**
+
+1. Install the ViGEmBus driver, which makes the virtual controller possible. It's already there if
+   you've used tools like DS4Windows.
+2. Install the Python package in the same environment as the app:
+   ```
+   pip install vgamepad
+   ```
+   It offers to install the ViGEmBus driver if it's missing. If you already have the driver, you
+   can dismiss that installer.
+
+**Demoing:**
+
+1. Get the game ready: for example, Training Mode with the dummy in place and your character on
+   the same side as in the recording.
+2. From the **Demo** menu, or with a key from inside the game, choose one of:
+   - **Demo the recording** (**Shift+F6**) plays the take exactly as recorded, stray inputs and all.
+   - **Demo the key inputs** (**Shift+F7**) plays the recording cleaned down to what's required
+     (see below). This needs key inputs to be marked.
+3. You have a 3-second countdown (*Settings > Demo countdown*) to switch to the game. The virtual
+   controller then plays the combo.
+4. **F7**, **Space** or **Stop the demo** stops it. **Home** / **F5** starts it again. The demo
+   also stops by itself at the end.
+
+While a demo plays, the Demo button is lit, and the **You** lane shows exactly what the virtual
+controller is pressing. Nothing is scored.
+
+**The cleaned-up version.** "Demo the key inputs" keeps only what the key inputs require:
+- Every other frame is neutral.
+- Each press comes on the frame the recording did it and is held for 3 frames.
+- A motion is laid out just before its press, 2 frames per direction.
+- A hold (like a charge) lasts as long as it did in the recording.
+- An exact span is copied frame for frame.
+
+This is the clearest way to see what the combo actually needs, and to check that your key inputs
+describe it.
+
+**Making the game use the virtual controller.** The game has to treat the virtual controller as
+the one playing your character. How depends on the game and on Steam Input. Usually it works to
+press a button on it once (for example, run a short demo from the character select screen), or to
+use the game's own controller assignment. If nothing happens in game, this is the first thing to
+check.
+
+- Directions are sent on the D-pad, exactly as recorded. A combo recorded facing right will be
+  mirrored if your character faces left.
+- The virtual controller also shows up as a controller in *Settings > Controller*. Keep the app
+  reading your real one.
+
 ## Saving, opening and files
 
 | To | Do this |
@@ -315,6 +371,7 @@ opacity* in the View menu. **F3** switches to the older ring display, if you pre
 | Export overlay on save | Also write `name_overlay.mp4` when saving a recording. |
 | Lead-in before practice | The run-up before practice playback: off, 0.5 s, 1 s or 2 s. |
 | Recent attempts shown | How many recent runs appear as rows. |
+| Demo countdown | How long a demo waits before playing, to switch to the game: 1, 2, 3 or 5 s. |
 
 Settings are saved automatically.
 
@@ -330,7 +387,9 @@ Settings are saved automatically.
 | Shift+F3 | Show / hide notes |
 | F4 | Practice / Review |
 | F5 | Restart |
-| F6 / F7 | Play / Pause |
+| F6 / F7 | Play / Pause (F7 also stops a demo) |
+| Shift+F6 | Demo the recording in game |
+| Shift+F7 | Demo just the key inputs in game |
 | F8 | Start / stop recording |
 | F11 | Open a recording |
 | F12 | Save recording as |
@@ -367,6 +426,7 @@ Settings are saved automatically.
   administrator too. Windows doesn't pass keys from an elevated window to non-elevated apps.
 - **"late frames" while recording, or the rate isn't about 60 Hz.** The PC is too busy to sample
   every frame on time. Close heavy programs, or turn off *Record video* or lower *Video size*.
+- **A demo hotkey seems to do nothing in game.** Listen for a low error beep: the reason is in the app's status bar (and its log). Usually vgamepad isn't installed yet, or no recording is open. When a demo starts, it ticks once a second through the countdown.
 - **Video capture failed.** The recording continues with inputs only, and the message says why.
   Try *Settings > Encoder: CPU (x264)*.
 - **"No inputs for that video".** A recording's `.mp4` can only be opened next to its `.json` with
