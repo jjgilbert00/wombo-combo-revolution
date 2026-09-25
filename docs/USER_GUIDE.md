@@ -6,6 +6,7 @@ you press each input as it reaches the line, and the app shows exactly where you
 Frame by frame, and attempt after attempt.
 
 - [Quick start](#quick-start)
+- [Sample combos](#sample-combos)
 - [The screen](#the-screen)
 - [Practising](#practising)
 - [Recording your own combos](#recording-your-own-combos)
@@ -46,6 +47,27 @@ python main.py
 With nothing loaded, the app shows these steps too:
 
 ![The start screen](images/start-screen.png)
+
+## Sample combos
+
+The File menu has two Street Fighter 6 samples, ready to practise. They use the default Xbox
+Classic layout (X = LP, **Y = MP**, RB = HP, A = LK, **B = MK**, RT = HK), with the character
+facing right.
+
+| Sample | Combo | What it shows |
+|---|---|---|
+| **SF6 Ryu** | st.MP, cr.MP, 214 MK (medium Tatsumaki) | **Link.** The cr.MP has a tight 3-frame window. **Special cancel.** A motion (`214`) buffered during cr.MP, then MK. **Ignoring noise.** The recording has a stray frame of down-forward, and its buttons are held longer than needed; neither is part of a key input, so neither is scored. |
+| **SF6 Guile** | st.MP, cr.MP, [2] 8 MK (medium Flash Kick) | **Charge (a Hold key input).** Down must be held long enough for Flash Kick. Charging on the frame after st.MP is ideal (the purple bar), but you can start as late as the notch and still make it. |
+
+Each sample comes with notes explaining it, and two saved example attempts so you can see how
+runs are graded before playing. Ryu's late example shows a cr.MP two frames late (`+2`). Guile's
+shows a charge started too late. Hide them from the attempts manager (**A**) once you've seen
+them.
+
+The samples were written by hand to be plausible, **not measured in the game**. The link and
+cancel windows, and Guile's 36-frame charge, are placeholders. Check them against the game's frame
+data (or your own recording) and adjust them by clicking a key input's tag. You can also change
+the timeline in `samples/build_samples.py` and run it again.
 
 ## Where to find help in the app
 

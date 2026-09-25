@@ -275,7 +275,7 @@ class MenuBar(BoxLayout):
         return row
 
     def set_recent(self, paths):
-        """Rebuilds the File menu, listing recently opened recordings right under Open."""
+        """Rebuilds the File menu, listing recently opened recordings right under Open, then the samples."""
         menu, app = self.file_menu, self.app
         menu.clear_widgets()
         menu.add_item("Open recording...", app.open_track, "Ctrl+O")
@@ -284,6 +284,13 @@ class MenuBar(BoxLayout):
             item = menu.add_item(name, lambda path=path: app.open_track(path))
             item.label.color = DIM_TEXT_COLOR
             item.label.shorten = True
+        samples = app.sample_recordings()
+        if samples:
+            menu.add_separator()
+            for path in samples:
+                # "SF6 Ryu - st.MP, cr.MP, ..." is listed as "Sample: SF6 Ryu"; the title bar names the combo.
+                name = os.path.splitext(os.path.basename(path))[0].split(" - ")[0]
+                menu.add_item(f"Sample: {name}", lambda path=path: app.open_track(path)).label.shorten = True
         menu.add_separator()
         menu.add_item("Save", app.save, "Ctrl+S")
         menu.add_item("Save recording as...", app.save_recording, "F12")
