@@ -5,7 +5,7 @@ from collections import namedtuple
 
 from controller import get_neutral_controller_state
 from input_list import match_runs, runs_in_range
-from key_inputs import HIT, result
+from key_inputs import HIT, normalized, result
 
 PLAYALONG_FRAMELENGTH = 120
 
@@ -56,7 +56,7 @@ class PlayalongController:
     def _fit_key_inputs(self, key_inputs):
         """Drops key inputs that start past the end of the track and trims ones that run off it."""
         last = len(self.input_track) - 1
-        fitted = [dict(k, end=min(k["end"], last)) for k in key_inputs if k["start"] <= last]
+        fitted = [normalized(dict(k, end=min(k["end"], last))) for k in key_inputs if k["start"] <= last]
         self.key_inputs = sorted(fitted, key=lambda k: (k["start"], k["end"]))
 
     def _fit_notes(self, notes):
@@ -137,7 +137,7 @@ class PlayalongController:
                 match_runs(self.input_track, self.attempt_track, lo, hi),
                 [(i, note["start"], note["end"], note["text"]) for i, note in enumerate(self.notes)
                  if note["start"] < hi and note["end"] >= lo],
-                [(i, dict(k), result(k, self.attempt_track)) for i, k in enumerate(self.key_inputs)
+                [(i, dict(k), result(k, self.attempt_track, self.input_track)) for i, k in enumerate(self.key_inputs)
                  if k["start"] < hi and k["end"] >= lo],
             )
 
@@ -165,7 +165,7 @@ class PlayalongController:
     def key_input_score(self):
         """(hits, total) for the attempt against the key inputs."""
         with self._lock:
-            results = [result(k, self.attempt_track) for k in self.key_inputs]
+            results = [result(k, self.attempt_track, self.input_track) for k in self.key_inputs]
             return sum(r == HIT for r in results), len(results)
 
     def get_notes(self):
