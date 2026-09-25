@@ -26,6 +26,8 @@ exact diagonal. The motion is ignored.
 from input_list import LIST_BUTTON_ORDER
 
 HIT, MISS, PENDING = "hit", "miss", "pending"
+EARLY, LATE = "early", "late"  # Grades for a miss that was done just outside the window.
+GRADE_REACH = 12  # How many frames outside a window to look for an early or late input.
 
 
 def normalized(key_input):
@@ -58,6 +60,19 @@ def best_hold(key_input, track):
         else:
             length = 0
     return best
+
+
+def _hold_runs(key_input, track, first, last):
+    """(start, length) of every contiguous hold in track frames first..last."""
+    runs, start = [], None
+    for frame in range(first, last + 2):
+        state = track[frame] if frame <= last else None
+        if state is not None and _held_at(key_input, state):
+            start = frame if start is None else start
+        elif start is not None:
+            runs.append((start, frame - start))
+            start = None
+    return runs
 
 
 def _hold_result(key_input, attempt):
@@ -134,6 +149,71 @@ def result(key_input, attempt, target):
     if frames and all(attempt[frame] is not None for frame in frames):
         return MISS
     return PENDING
+
+
+def _nearest(offsets):
+    """The offset closest to the window, preferring early on a tie; None if there are none."""
+    return min(offsets, key=lambda offset: (abs(offset), offset)) if offsets else None
+
+
+def _missed_by(key_input, attempt, target, lo, hi):
+    """How many frames outside the window a missed key input was done: negative for early,
+    positive for late, None if it wasn't done within lo..hi at all."""
+    start, end = key_input["start"], key_input["end"]
+    if key_input["exact"]:
+        # The whole span played exactly, just shifted in time.
+        shifts = [d for d in range(lo - start, hi - end + 1) if d and all(
+            attempt[frame + d] is not None and attempt[frame + d] == target[frame] for frame in range(start, end + 1))]
+        return _nearest(shifts)
+    if key_input["hold"]:
+        # A long enough hold that sits partly outside the window: it started too soon or ended too late.
+        offsets = []
+        for run_start, length in _hold_runs(key_input, attempt, lo, hi):
+            if length >= key_input["hold"]:
+                offsets.append(run_start - start if run_start < start else run_start + length - 1 - end)
+        return _nearest(offsets)
+    early = next((frame - start for frame in range(start - 1, lo - 1, -1)
+                  if satisfied_at(dict(key_input, start=lo), attempt, frame)), None)
+    late = next((frame - end for frame in range(end + 1, hi + 1) if satisfied_at(key_input, attempt, frame)), None)
+    return _nearest([offset for offset in (early, late) if offset is not None])
+
+
+def grade(key_input, attempt, target, lo=None, hi=None):
+    """(grade, offset): HIT/PENDING with offset 0, EARLY or LATE with how many frames outside the
+    window it was done (-3 = three frames early), or MISS. Early and late are looked for in frames
+    lo..hi, by default GRADE_REACH frames either side of the window."""
+    key_input = normalized(key_input)
+    outcome = result(key_input, attempt, target)
+    if outcome != MISS:
+        return outcome, 0
+    lo = max(0, key_input["start"] - GRADE_REACH if lo is None else lo)
+    hi = min(len(attempt) - 1, key_input["end"] + GRADE_REACH if hi is None else hi)
+    offset = _missed_by(key_input, attempt, target, lo, hi)
+    if offset is None:
+        return MISS, 0
+    return (EARLY if offset < 0 else LATE), offset
+
+
+def grade_all(key_inputs, attempt, target):
+    """Grades each key input (sorted by start), looking for early and late inputs only up to the
+    neighbouring key inputs' windows, so an input that belongs to the next one isn't counted as
+    this one done late. Holds are left out of that both ways: other inputs are done during a
+    charge, and a charge started late runs on into the next input."""
+    grades = []
+    for i, key_input in enumerate(key_inputs):
+        key_input = normalized(key_input)
+        lo = key_input["start"] - GRADE_REACH
+        hi = key_input["end"] + GRADE_REACH
+        is_hold = lambda k: k["hold"] and not k["exact"]
+        bounding = [normalized(k) for k in key_inputs]
+        bounding = [] if is_hold(key_input) else [(j, k) for j, k in enumerate(bounding) if j != i and not is_hold(k)]
+        for j, other in bounding:
+            if j < i:
+                lo = max(lo, other["end"] + 1)
+            else:
+                hi = min(hi, other["start"] - 1)
+        grades.append(grade(key_input, attempt, target, lo, hi))
+    return grades
 
 
 def derive(track, start, end):

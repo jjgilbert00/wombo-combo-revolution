@@ -108,6 +108,7 @@ class WomboComboApp(App):
             "input_display": "ring",
             "show_notes": 1,
             "lanes": ",".join(LANES),  # Input list lanes shown.
+            "recent_attempts": 5,  # Recent runs shown in the input list.
         })
 
     def get_application_config(self):
@@ -134,6 +135,7 @@ class WomboComboApp(App):
         self.input_list_layout.on_note_click = self.edit_note
         self.input_list_layout.on_key_input_click = self.edit_key_input
         self.playalong_controller.set_practice(self.config.getboolean("wombo", "practice"))
+        self.playalong_controller.set_history_count(self.config.getint("wombo", "recent_attempts"))
         self.menu_bar = MenuBar(self)
         self.root_layout = BoxLayout(orientation="vertical")
         self.root_layout.add_widget(self.menu_bar)
@@ -286,7 +288,7 @@ class WomboComboApp(App):
         self.pause() if self.playalong_controller.is_playing() else self.play()
 
     def restart_playback(self):
-        self.playalong_controller.set_frame(0)
+        self.playalong_controller.restart()
 
     def scrub(self, frames):
         """Moves the playhead (pausing playback) so a part of the run can be inspected."""
@@ -637,6 +639,7 @@ class WomboComboApp(App):
             ("N", "Add a note to the selection (click a note to edit it)"),
             ("K", "Mark the selection as a key input (click its tag to edit)"),
             ("Esc", "Clear the selection"),
+            ("Attempts", "Green hit, blue early, orange late, red missed, grey not reached (+/- frames off)"),
         ]
         HelpPopup([(key, description) for key, description, _ in HOTKEYS] + mouse_help).open()
 
@@ -665,6 +668,10 @@ class WomboComboApp(App):
              self.config.get("wombo", "overlay_delay"), setter("overlay_delay")),
             ("Export overlay on save", bool, self.config.getboolean("wombo", "export_overlay_on_save"),
              setter("export_overlay_on_save")),
+            ("Recent attempts shown", [(str(n), str(n)) for n in (0, 1, 2, 3, 5, 8, 10, 15, 20)],
+             self.config.get("wombo", "recent_attempts"),
+             setter("recent_attempts", lambda: self.playalong_controller.set_history_count(
+                 self.config.getint("wombo", "recent_attempts")))),
         ]
         SettingsPopup(rows).open()
 
