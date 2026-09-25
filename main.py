@@ -26,6 +26,7 @@ from kivy.clock import Clock
 from kivy.core.window import Window
 from kivy.metrics import dp
 from kivy.uix.boxlayout import BoxLayout
+from kivy.uix.modalview import ModalView
 from KivyOnTop import register_topmost, unregister_topmost
 from pynput import keyboard
 
@@ -85,6 +86,7 @@ class WomboComboApp(App):
         self.job_label = None
         self.job_progress = None
         self.message = None  # (markup text, expiry time)
+        self.selection = None  # (start, end) frames selected in the input list, inclusive.
 
     # ---- Setup ---------------------------------------------------------------------------------
 
@@ -125,6 +127,7 @@ class WomboComboApp(App):
             self.input_list_layout.set_zoom(dp(frame_width))
         self.input_list_layout.on_scrub = self.scrub
         self.input_list_layout.on_zoom = self.set_list_zoom
+        self.input_list_layout.on_select = self.set_selection
         self.playalong_controller.set_practice(self.config.getboolean("wombo", "practice"))
         self.menu_bar = MenuBar(self)
         self.root_layout = BoxLayout(orientation="vertical")
@@ -169,6 +172,16 @@ class WomboComboApp(App):
 
         self.listener = keyboard.Listener(on_press=on_press, on_release=on_release)
         self.listener.start()
+        Window.bind(on_key_down=self.on_key_down)
+
+    def on_key_down(self, window, key, scancode, codepoint, modifiers):
+        """Shortcuts that only apply while the app window is focused."""
+        if any(isinstance(child, ModalView) for child in Window.children):
+            return False  # A popup is open; let it have the keys.
+        if key == 27:  # Esc
+            self.set_selection(None)
+            return True
+        return False
 
     def on_stop(self):
         self.listener.stop()
@@ -230,6 +243,10 @@ class WomboComboApp(App):
         if self.job_label:
             progress = f" {int(self.job_progress * 100)}%" if self.job_progress is not None else "..."
             parts.append(f"{self.job_label}{progress}")
+        if self.selection:
+            start, end = self.selection
+            span = f"frame {start}" if start == end else f"frames {start}-{end} ({end - start + 1}f)"
+            parts.append(f"[color=8fb8ff]Selected {span}[/color]")
         if self.message and time.time() < self.message[1]:
             parts.append(self.message[0])
         reader = self.sampler.reader
@@ -263,6 +280,17 @@ class WomboComboApp(App):
 
     def set_list_zoom(self, px_per_frame):
         self.config.set("wombo", "list_frame_width", round(px_per_frame / dp(1), 1))
+
+    def set_selection(self, start, end=None):
+        """Selects frames start..end (inclusive, either order) of the track, or clears with None."""
+        if start is not None:
+            last = len(self.playalong_controller.input_track) - 1
+            start, end = sorted((start, start if end is None else end))
+            start, end = max(0, start), min(end, last)
+            if start > end:
+                start = None
+        self.selection = None if start is None else (start, end)
+        self.input_list_layout.selection = self.selection
 
     def toggle_practice(self):
         practice = not self.playalong_controller.practice
@@ -303,6 +331,7 @@ class WomboComboApp(App):
                 self.flash(f"Recording inputs only, video capture failed: {e}", "ffb454", 8)
                 self.screen_recorder = None
         self.playalong_controller.start_recording(frame_sink)
+        self.set_selection(None)
 
     def stop_recording(self):
         self.playalong_controller.stop_recording()
@@ -334,6 +363,7 @@ class WomboComboApp(App):
         if self.playalong_controller.is_recording():
             self.stop_recording()
         self.playalong_controller.clear_track()
+        self.set_selection(None)
         self.capture_path = None
 
     def open_track(self):
@@ -355,6 +385,7 @@ class WomboComboApp(App):
         video = os.path.splitext(path)[0] + ".mp4"
         self.capture_path = video if os.path.exists(video) else None
         self.flash(f"Opened {os.path.basename(path)}")
+        self.set_selection(None)
 
     def save_recording(self):
         if self.playalong_controller.is_recording():

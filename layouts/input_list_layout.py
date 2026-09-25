@@ -1,3 +1,6 @@
+import ctypes
+import sys
+
 from kivy.core.image import Image as CoreImage
 from kivy.core.text import Label as CoreLabel
 from kivy.core.window import Window
@@ -49,6 +52,19 @@ TOAST_MAX_WIDTH = dp(260)
 TOAST_PADDING = dp(8)
 TOAST_ROWS = 3  # Overlapping notes stack into this many rows; any more are skipped.
 BRACE_HEIGHT = dp(12)
+SELECTION_COLOR = (0.4, 0.65, 1.0)
+CLICK_SLOP = dp(4)  # A press that moves less than this is a click, not a drag.
+
+
+_VIRTUAL_KEYS = {"shift": 0x10, "ctrl": 0x11}
+
+
+def _modifier_held(name):
+    """Whether Shift/Ctrl is down right now. Asks Windows directly: Kivy's Window.modifiers isn't
+    reliably updated for mouse events, so it can miss a held key."""
+    if sys.platform == "win32":
+        return bool(ctypes.windll.user32.GetKeyState(_VIRTUAL_KEYS[name]) & 0x8000)
+    return name in Window.modifiers
 
 
 def _texture_from_pil(image):
@@ -235,7 +251,8 @@ class InputListLayout(StencilView):
     its right edge when it should be released. Lanes from the top: a frame meter (one block per
     target frame), the target track, a strip marking each frame green (matched) or red (missed), and
     the player's attempt. Notes hang underneath as toasts, each with a brace pointing at the frames
-    it annotates. Mouse wheel or drag scrubs; Ctrl + wheel zooms.
+    it annotates. Mouse wheel or drag scrubs; Ctrl + wheel zooms. Clicking selects a frame (Shift
+    extends the selection) and dragging in the frame meter selects a range.
     """
 
     def __init__(self, controller_type="XGamepad", button_icon_style="Alt", **kwargs):
@@ -245,6 +262,9 @@ class InputListLayout(StencilView):
         self.show_notes = True  # When off, notes only show as bars over their frames.
         self.on_scrub = None  # Called with a frame delta when the user scrolls or drags.
         self.on_zoom = None  # Called with the new pixels-per-frame.
+        self.on_select = None  # Called with (start, end) frames, inclusive, when the user selects frames.
+        self.selection = None  # (start, end) to highlight, set by the app.
+        self._frame = 0  # Frame at the hit line when last drawn, for mapping clicks to frames.
         self._drag_frames = 0.0
 
         with self.canvas:
@@ -255,6 +275,10 @@ class InputListLayout(StencilView):
             self.meter_layer = InstructionGroup()
             self.meter_divider_layer = InstructionGroup()
             self.note_layer = InstructionGroup()
+            self.selection_color = Color(*SELECTION_COLOR, 0)
+            self.selection_fill = Rectangle()
+            self.selection_edge_color = Color(*SELECTION_COLOR, 0)
+            self.selection_edges = [Rectangle(), Rectangle()]
         with self.canvas.after:
             # The gutter covers boxes that scroll past the left edge of the track.
             Color(*GUTTER_COLOR)
@@ -326,6 +350,9 @@ class InputListLayout(StencilView):
         return (int((line_x - self._track_left()) / self.px_per_frame) + 2,
                 int((self._track_right() - line_x) / self.px_per_frame) + 2)
 
+    def frame_at(self, x):
+        return self._frame + int((x - self._line_x()) // self.px_per_frame)
+
     def set_zoom(self, px_per_frame):
         self.px_per_frame = max(MIN_PX_PER_FRAME, min(MAX_PX_PER_FRAME, px_per_frame))
 
@@ -337,7 +364,7 @@ class InputListLayout(StencilView):
         if touch.is_mouse_scrolling:
             # Kivy reports wheel-away-from-you as "scrolldown"; that moves forward in time.
             direction = {"scrolldown": 1, "scrollright": 1, "scrollup": -1, "scrollleft": -1}.get(touch.button, 0)
-            if "ctrl" in Window.modifiers:
+            if _modifier_held("ctrl"):
                 self.set_zoom(self.px_per_frame * (1.25 if direction > 0 else 0.8))
                 if self.on_zoom:
                     self.on_zoom(self.px_per_frame)
@@ -346,11 +373,22 @@ class InputListLayout(StencilView):
             return True
         touch.grab(self)
         self._drag_frames = 0.0
+        meter_y = self._lanes()[0]
+        # Dragging in the frame meter selects frames; anywhere else it scrubs.
+        touch.ud["selecting"] = meter_y - LANE_GAP / 2 <= touch.y <= meter_y + METER_HEIGHT + MARGIN
+        touch.ud["anchor"] = self.frame_at(touch.x)
+        touch.ud["dragged"] = False
         return True
 
     def on_touch_move(self, touch):
         if touch.grab_current is not self:
             return super().on_touch_move(touch)
+        if abs(touch.x - touch.ox) > CLICK_SLOP or abs(touch.y - touch.oy) > CLICK_SLOP:
+            touch.ud["dragged"] = True
+        if touch.ud["selecting"]:
+            if touch.ud["dragged"] and self.on_select:
+                self.on_select(touch.ud["anchor"], self.frame_at(touch.x))
+            return True
         # Dragging the track left brings later frames onto the line.
         self._drag_frames -= touch.dx / self.px_per_frame
         whole = int(self._drag_frames)
@@ -360,10 +398,19 @@ class InputListLayout(StencilView):
         return True
 
     def on_touch_up(self, touch):
-        if touch.grab_current is self:
-            touch.ungrab(self)
-            return True
-        return super().on_touch_up(touch)
+        if touch.grab_current is not self:
+            return super().on_touch_up(touch)
+        touch.ungrab(self)
+        if not touch.ud["dragged"] and self.on_select:
+            frame = self.frame_at(touch.x)
+            if _modifier_held("shift") and self.selection:
+                # Extend from whichever end of the current selection is farther away.
+                start, end = self.selection
+                anchor = start if abs(frame - start) > abs(frame - end) else end
+                self.on_select(anchor, frame)
+            else:
+                self.on_select(frame, frame)
+        return True
 
     # ---- Drawing -----------------------------------------------------------------------------
 
@@ -478,7 +525,24 @@ class InputListLayout(StencilView):
             note.text.size = texture.size
         self.note_graphics.finish(_NoteGraphic.hide)
 
+    def _draw_selection(self, snapshot, meter_y, attempt_y):
+        if not self.selection:
+            self.selection_color.a = self.selection_edge_color.a = 0
+            return
+        start, end = self.selection
+        x0 = self._frame_x(start, snapshot.frame)
+        x1 = self._frame_x(end + 1, snapshot.frame)
+        top = meter_y + METER_HEIGHT
+        self.selection_color.a = 0.16
+        self.selection_fill.pos = (x0, attempt_y)
+        self.selection_fill.size = (x1 - x0, top - attempt_y)
+        self.selection_edge_color.a = 0.9
+        for edge, x in zip(self.selection_edges, (x0, x1 - dp(2))):
+            edge.pos = (x, attempt_y)
+            edge.size = (dp(2), top - attempt_y)
+
     def update_state(self, snapshot):
+        self._frame = snapshot.frame
         meter_y, target_y, strip_y, attempt_y = self._lanes()
         self._draw_meter(snapshot.target_runs, snapshot, meter_y)
         self._draw_runs(self.target_boxes, snapshot.target_runs, snapshot, target_y, TARGET_BOX_COLOR,
@@ -487,6 +551,7 @@ class InputListLayout(StencilView):
                         dim_history=False)
         self._draw_matches(snapshot.match_runs, snapshot, strip_y)
         self._draw_notes(snapshot.notes, snapshot, meter_y, attempt_y - LANE_GAP - ICON_SIZE - dp(14))
+        self._draw_selection(snapshot, meter_y, attempt_y)
 
         # The player's live input sits under the line, which turns green when it matches.
         live_key = input_key(snapshot.live_state)
