@@ -203,14 +203,16 @@ class MenuBar(BoxLayout):
         self.set_recent([])
 
         edit_menu = Menu()
-        edit_menu.add_item("Clean track (presses only)", app.clean_track)
-        edit_menu.add_item("Clear track", app.clear_track)
+        # The selection, then attempts, then whole-track changes last so they're hard to hit by accident.
+        edit_menu.add_item("Add note to selection", app.add_note, "N")
+        edit_menu.add_item("Mark key input", app.mark_key_input, "K")
+        edit_menu.add_separator()
         edit_menu.add_item("Save attempt", app.save_attempt, "S")
         edit_menu.add_item("Attempts...", app.open_attempts, "A")
         edit_menu.add_item("Clear attempt", app.clear_attempt)
         edit_menu.add_separator()
-        edit_menu.add_item("Add note to selection", app.add_note, "N")
-        edit_menu.add_item("Mark key input", app.mark_key_input, "K")
+        edit_menu.add_item("Clean track (presses only)", app.clean_track)
+        edit_menu.add_item("Clear track", app.clear_track)
 
         view_menu = Menu()
         view_menu.add_item("Overlay mode", app.toggle_overlay, "F2")
