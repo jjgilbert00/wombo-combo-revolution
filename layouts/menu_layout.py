@@ -26,7 +26,7 @@ TEXT_COLOR = (0.92, 0.92, 0.92, 1)
 DIM_TEXT_COLOR = (0.6, 0.6, 0.64, 1)
 FONT_SIZE = sp(14)
 LANE_MENU_ITEMS = [("meter", "Frame meter"), ("target", "Recording"), ("keys", "Key inputs"),
-                   ("attempt", "Your attempt"), ("recent", "Recent attempts")]
+                   ("attempt", "Your attempt"), ("saved", "Saved attempts"), ("recent", "Recent attempts")]
 
 
 def _paint_background(widget, color):
@@ -134,6 +134,7 @@ class MenuBar(BoxLayout):
         edit_menu = Menu()
         edit_menu.add_item("Clean track", app.clean_track, "F9")
         edit_menu.add_item("Clear track", app.clear_track, "F10")
+        edit_menu.add_item("Save attempt", app.save_attempt, "S")
         edit_menu.add_item("Clear attempt", app.clear_attempt)
         edit_menu.add_separator()
         edit_menu.add_item("Add note to selection", app.add_note, "N")

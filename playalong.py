@@ -16,8 +16,8 @@ ListSnapshot = namedtuple(
     "ListSnapshot", "live_state frame recording target_runs attempt_runs match_runs notes key_inputs history"
 )
 # One earlier attempt in the input list: its label, its key input grades as (start, end, grade, offset),
-# and when the track has no key inputs, its per-frame match runs instead.
-HistoryRow = namedtuple("HistoryRow", "label grades match_runs")
+# when the track has no key inputs its per-frame match runs instead, and whether it's a saved attempt.
+HistoryRow = namedtuple("HistoryRow", "label grades match_runs saved")
 
 
 class RUNNING_STATES(Enum):
@@ -45,6 +45,9 @@ class PlayalongController:
     Each practice pass is kept as a run in the recent history: when playback loops or reaches the
     end, or is restarted partway, the attempt so far is archived and (when starting over) cleared,
     so the next pass starts fresh. Runs are {"id", "created", "attempt"}, oldest first.
+
+    Saved attempts are ones the player chose to keep with the track (they're saved in its file):
+    {"id", "name", "created", "attempt", "shown"}, where shown puts them in the input list.
     """
 
     def __init__(self, input_track=None):
@@ -63,6 +66,8 @@ class PlayalongController:
         self.key_inputs = []
         self.runs = []
         self._next_run_id = 1
+        self.saved = []
+        self._next_saved_id = 1
         self.history_count = 5  # Recent runs shown in the input list.
         self._grades_version = 0  # Bumped when key inputs or the target change, invalidating cached grades.
 
@@ -184,18 +189,81 @@ class PlayalongController:
             run["_grades"] = (self._grades_version, grade_all(self.key_inputs, run["attempt"], self.input_track))
         return run["_grades"][1]
 
+    def _history_row(self, run, label, saved, lo, hi):
+        if not self.key_inputs:
+            return HistoryRow(label, [], match_runs(self.input_track, run["attempt"], lo, hi), saved)
+        grades = [(k["start"], k["end"], grade, offset) for k, (grade, offset) in zip(self.key_inputs, self._grades(run))
+                  if k["start"] < hi and k["end"] >= lo]
+        return HistoryRow(label, grades, [], saved)
+
     def _history_rows(self, lo, hi):
-        """The most recent history_count runs, newest first, trimmed to frames lo..hi."""
-        rows = []
+        """Shown saved attempts, then the most recent history_count runs newest first, trimmed to
+        frames lo..hi."""
+        rows = [self._history_row(saved, saved["name"], True, lo, hi) for saved in self.saved if saved["shown"]]
         for run in reversed(self.runs[-self.history_count:] if self.history_count else []):
-            if self.key_inputs:
-                grades = [(k["start"], k["end"], grade, offset)
-                          for k, (grade, offset) in zip(self.key_inputs, self._grades(run))
-                          if k["start"] < hi and k["end"] >= lo]
-                rows.append(HistoryRow(f"Run {run['id']}", grades, []))
-            else:
-                rows.append(HistoryRow(f"Run {run['id']}", [], match_runs(self.input_track, run["attempt"], lo, hi)))
+            rows.append(self._history_row(run, f"Run {run['id']}", False, lo, hi))
         return rows
+
+    def score(self, attempt):
+        """(hits, total) against the key inputs, or with none, (matched frames, played frames)."""
+        with self._lock:
+            if self.key_inputs:
+                grades = grade_all(self.key_inputs, attempt, self.input_track)
+                return sum(grade == HIT for grade, _ in grades), len(grades)
+            played = [(a, t) for a, t in zip(attempt, self.input_track) if a is not None]
+            return sum(a == t for a, t in played), len(played)
+
+    def remove_run(self, run_id):
+        with self._lock:
+            self.runs = [run for run in self.runs if run["id"] != run_id]
+
+    def save_attempt(self, run_id=None, name=None):
+        """Saves a recent run, or with no run_id the attempt on screen (or failing that, the latest
+        run). Returns the saved attempt, or None if there's nothing to save."""
+        with self._lock:
+            if run_id is not None:
+                attempt = next((run["attempt"] for run in self.runs if run["id"] == run_id), None)
+            elif self.attempted_frames:
+                attempt = self.attempt_track
+            else:
+                attempt = self.runs[-1]["attempt"] if self.runs else None
+            if attempt is None:
+                return None
+            saved = {"id": self._next_saved_id, "name": name or f"Saved {self._next_saved_id}",
+                     "created": time.time(), "attempt": list(attempt), "shown": True}
+            self._next_saved_id += 1
+            self.saved.append(saved)
+            return dict(saved)
+
+    def get_saved(self):
+        """Saved attempts without their ids or cached grades, as they're written to the track file."""
+        with self._lock:
+            return [{key: saved[key] for key in ("name", "created", "attempt", "shown")} for saved in self.saved]
+
+    def get_saved_attempts(self):
+        with self._lock:
+            return [dict(saved) for saved in self.saved]
+
+    def update_saved(self, saved_id, **fields):
+        """Renames (name=) or shows/hides (shown=) a saved attempt."""
+        with self._lock:
+            for saved in self.saved:
+                if saved["id"] == saved_id:
+                    saved.update(fields)
+
+    def remove_saved(self, saved_id):
+        with self._lock:
+            self.saved = [saved for saved in self.saved if saved["id"] != saved_id]
+
+    def _set_saved(self, saved_attempts):
+        self.saved = []
+        for saved in saved_attempts:
+            attempt = list(saved["attempt"])[:len(self.input_track)]
+            attempt += [None] * (len(self.input_track) - len(attempt))
+            self.saved.append({"id": self._next_saved_id, "name": saved.get("name") or f"Saved {self._next_saved_id}",
+                               "created": saved.get("created", 0), "attempt": attempt,
+                               "shown": saved.get("shown", True)})
+            self._next_saved_id += 1
 
     def get_runs(self):
         with self._lock:
@@ -307,13 +375,14 @@ class PlayalongController:
         with self._lock:
             return list(self.input_track)
 
-    def set_input_track(self, input_track, attempt=None, notes=None, key_inputs=None):
+    def set_input_track(self, input_track, attempt=None, notes=None, key_inputs=None, saved_attempts=None):
         with self._lock:
             self.running_state = RUNNING_STATES.STOPPED
             self.input_track = list(input_track)
             self.current_frame = 0
             self._reset_attempt(attempt)
             self.runs = []  # Runs belong to the track they were played against.
+            self._set_saved(saved_attempts or [])
             self._fit_notes(notes or [])
             self._fit_key_inputs(key_inputs or [])
 
@@ -339,6 +408,7 @@ class PlayalongController:
             self.current_frame = 0
             self._reset_attempt()
             self.runs = []
+            self.saved = []
             self.notes = []
             self.key_inputs = []
             self.running_state = RUNNING_STATES.RECORDING

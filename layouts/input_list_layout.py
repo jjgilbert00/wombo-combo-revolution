@@ -67,7 +67,8 @@ NON_KEY_ALPHA = 0.35  # Target inputs outside every key input fade back once key
 CLICK_SLOP = dp(4)  # A press that moves less than this is a click, not a drag.
 
 # Lanes that can be shown or hidden, top to bottom, with their names in the gutter.
-LANES = {"meter": "Frames", "target": "Target", "keys": "Key inputs", "attempt": "You", "recent": "Recent attempts"}
+LANES = {"meter": "Frames", "target": "Target", "keys": "Key inputs", "attempt": "You", "saved": "Saved attempts",
+         "recent": "Recent attempts"}
 
 
 _VIRTUAL_KEYS = {"shift": 0x10, "ctrl": 0x11}
@@ -329,7 +330,7 @@ class InputListLayout(StencilView):
     track cleaned down to what's required), and the player's attempt under a strip marking each
     frame green (matched) or red (missed). Key inputs are also outlined on the target with their
     result over the match strip, and once a track has any, the inputs outside them fade back.
-    Under those, recent attempts as compact rows, newest first: each key input's window coloured
+    Under those, saved attempts and then recent attempts as compact rows, newest first: each key input's window coloured
     by how that run did (hit, early, late, missed, or not reached), with a tick where an early or
     late input actually came and how many frames off it was. Without key inputs a row shows the
     run's per-frame matches. The player's live input sits under the lanes. Notes hang underneath as toasts, each with a
@@ -450,7 +451,8 @@ class InputListLayout(StencilView):
             color.rgba = PANEL_COLOR
             panel.pos, panel.size = (left, y), (right - left, height)
             color, label = self.labels.next()
-            color.rgba = (1, 1, 1, 0.6 if is_run else 0.85)
+            color.rgba = ((*KEY_COLOR, 0.9) if is_run and self._history[name[1]].saved
+                          else (1, 1, 1, 0.6 if is_run else 0.85))
             label.texture = (self.textures.lane_label(self._history[name[1]].label, sp(11)) if is_run
                              else self.textures.lane_label(LANES[name]))
             label.size = label.texture.size
@@ -788,7 +790,7 @@ class InputListLayout(StencilView):
 
     def update_state(self, snapshot):
         self._frame = snapshot.frame
-        self._history = snapshot.history if "recent" in self.lanes_shown else []
+        self._history = [row for row in snapshot.history if ("saved" if row.saved else "recent") in self.lanes_shown]
         lanes, bottom = self._lanes()
         self._arrange(lanes, bottom)
         # A hidden lane draws nothing, which also parks the graphics it drew before.
