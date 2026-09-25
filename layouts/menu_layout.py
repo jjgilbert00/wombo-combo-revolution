@@ -216,7 +216,7 @@ class MenuBar(BoxLayout):
         view_menu.add_item("Overlay mode", app.toggle_overlay, "F2")
         self.display_item = view_menu.add_item("Show input list", app.toggle_display, "F3")
         self.notes_item = view_menu.add_item("Hide notes", app.toggle_notes, "Shift+F3")
-        view_menu.add_item("Hotkeys", app.show_help, "F1")
+        view_menu.add_item("Help and keys", app.show_help, "F1")
         view_menu.add_separator()
         # Input list lanes, each shown or hidden; the right column says which.
         self.lane_items = {name: view_menu.add_item(text, lambda name=name: app.toggle_lane(name))
@@ -363,23 +363,56 @@ class SettingsPopup(ModalView):
 
 
 class HelpPopup(ModalView):
-    def __init__(self, hotkeys, **kwargs):
-        super().__init__(size_hint=(None, None), size=(dp(420), dp(64) + dp(26) * len(hotkeys)),
+    """Getting-started steps across the top, then key sections in two columns.
+    columns is [[(section title, [(key, description)])]]; on_manual opens the user guide."""
+
+    KEY_WIDTH = dp(96)
+    COLUMN_WIDTH = dp(440)
+
+    def __init__(self, steps, columns, on_manual, **kwargs):
+        row_count = max(sum(len(rows) + 1.4 for _, rows in column) for column in columns)
+        super().__init__(size_hint=(None, None), size=(dp(940), dp(170) + dp(24) * len(steps) + dp(25) * row_count),
                          background="", background_color=(0, 0, 0, 0.5), **kwargs)
-        panel = BoxLayout(orientation="vertical", padding=dp(16), spacing=dp(8))
+        panel = BoxLayout(orientation="vertical", padding=dp(20), spacing=dp(8))
         _paint_background(panel, PANEL_COLOR)
-        panel.add_widget(Label(text="Hotkeys (work while the game has focus)", font_size=sp(16), bold=True,
-                               color=TEXT_COLOR, size_hint_y=None, height=dp(24), halign="left",
-                               text_size=(dp(388), None)))
-        grid = GridLayout(cols=2, row_default_height=dp(26), row_force_default=True)
-        for key, description in hotkeys:
-            grid.add_widget(Label(text=key, font_size=FONT_SIZE, color=DIM_TEXT_COLOR, size_hint_x=None,
-                                  width=dp(90), halign="left", text_size=(dp(90), None)))
-            grid.add_widget(Label(text=description, font_size=FONT_SIZE, color=TEXT_COLOR, halign="left",
-                                  text_size=(dp(298), None)))
-        panel.add_widget(grid)
+        panel.add_widget(self._label("Getting started", sp(17), TEXT_COLOR, dp(26), bold=True))
+        for number, step in enumerate(steps, 1):
+            panel.add_widget(self._label(f"{number}.  {step}", FONT_SIZE, TEXT_COLOR, dp(24), markup=True))
+        body = BoxLayout(spacing=dp(20), padding=(0, dp(10), 0, 0))
+        for column in columns:
+            box = BoxLayout(orientation="vertical", spacing=dp(1))
+            for title, rows in column:
+                box.add_widget(self._label(title, FONT_SIZE, TEXT_COLOR, dp(32), bold=True, valign="bottom"))
+                for key, description in rows:
+                    row = BoxLayout(size_hint_y=None, height=dp(24))
+                    row.add_widget(Label(text=key, font_size=FONT_SIZE, color=(1.0, 0.78, 0.2, 1), size_hint_x=None,
+                                         width=self.KEY_WIDTH, halign="left", valign="middle",
+                                         text_size=(self.KEY_WIDTH, dp(24))))
+                    row.add_widget(Label(text=description, font_size=FONT_SIZE, color=TEXT_COLOR, halign="left",
+                                         valign="middle", shorten=True,
+                                         text_size=(self.COLUMN_WIDTH - self.KEY_WIDTH, dp(24))))
+                    box.add_widget(row)
+            box.add_widget(Widget())
+            body.add_widget(box)
+        panel.add_widget(body)
+        actions = BoxLayout(size_hint_y=None, height=dp(32), spacing=dp(8))
+        actions.add_widget(self._label("Hover over any button for a tip. The user guide covers everything in detail.",
+                                       sp(12), DIM_TEXT_COLOR, dp(32)))
+        guide = BarButton(text="Open user guide", highlight=(1, 1, 1, 0.1))
+        guide.bind(on_release=lambda *_: (self.dismiss(), on_manual()))
+        close = BarButton(text="Close", highlight=(1, 1, 1, 0.1))
+        close.bind(on_release=lambda *_: self.dismiss())
+        actions.add_widget(guide)
+        actions.add_widget(close)
+        panel.add_widget(actions)
         self.add_widget(panel)
-        self.bind(on_touch_down=lambda *_: self.dismiss())
+
+    @staticmethod
+    def _label(text, font_size, color, height, bold=False, markup=False, valign="middle"):
+        label = Label(text=text, font_size=font_size, color=color, bold=bold, markup=markup, size_hint_y=None,
+                      height=height, halign="left", valign=valign)
+        label.bind(size=lambda l, size: setattr(l, "text_size", size))
+        return label
 
 
 class NotePopup(ModalView):

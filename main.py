@@ -47,7 +47,7 @@ logger = logging.getLogger(__name__)
 TITLE = "Wombo Combo"
 
 HOTKEYS = [
-    ("F1", "Show hotkeys", "show_help"),
+    ("F1", "Help and keys", "show_help"),
     ("F2", "Overlay mode (on top, borderless)", "toggle_overlay"),
     ("F3", "Switch between ring and input list", "toggle_display"),
     ("Shift+F3", "Show / hide notes", "toggle_notes"),
@@ -904,21 +904,50 @@ class WomboComboApp(App):
         self.show_display("ring" if self.display is self.input_list_layout else "list")
 
     def show_help(self):
-        mouse_help = [
-            ("Wheel", "Scrub the input list (pauses)"),
-            ("Drag", "Scrub the input list"),
-            ("Ctrl+Wheel", "Zoom the input list"),
-            ("Click", "Select a frame (Shift+click extends)"),
-            ("Frames drag", "Select a range of frames"),
-            ("N", "Add a note to the selection (click a note to edit it)"),
-            ("K", "Mark the selection as a key input (click its tag to edit)"),
-            ("S", "Save the attempt (or the latest run) with the track"),
-            ("A", "Attempts: rename, show, replay or delete saved and recent attempts"),
-            ("Esc", "Clear the selection"),
-            ("Right-click", "Menu for the selection: note, key input, practise from here, attempts"),
-            ("Attempts", "Green hit, blue early, orange late, red missed, grey not reached (+/- frames off)"),
+        steps = [
+            "Open a recording with [b]Ctrl+O[/b] (or drop its .json / .mp4 on the window), or record one with "
+            "[b]F8[/b] and save it with [b]F12[/b].",
+            "Press [b]Space[/b] (or [b]F6[/b] in game) and play along: press each input as it reaches the line.",
+            "Mark what matters: select frames (drag in the frame meter) and press [b]K[/b]. Runs are graded "
+            "below your attempt.",
+            "Look back: scroll or drag the list, [b]S[/b] saves an attempt, [b]A[/b] lists and replays attempts.",
         ]
-        HelpPopup([(key, description) for key, description, _ in HOTKEYS] + mouse_help).open()
+        in_game = [(key, description) for key, description, _ in HOTKEYS]
+        in_window = [
+            ("Space", "Play / pause"),
+            ("Home", "Restart (a fresh attempt while practising)"),
+            ("Ctrl+O", "Open a recording"),
+            ("Ctrl+S", "Save changes to the recording"),
+            ("N", "Add a note to the selection"),
+            ("K", "Mark the selection as a key input"),
+            ("S", "Save the attempt with the recording"),
+            ("A", "Attempts: rename, show, replay, delete"),
+            ("Esc", "Clear the selection"),
+        ]
+        mouse = [
+            ("Wheel / drag", "Move through the list, a frame per notch"),
+            ("Ctrl+Wheel", "Zoom in and out"),
+            ("Click", "Select a frame (Shift+click extends)"),
+            ("Drag Frames", "Select a range (in the frame meter)"),
+            ("Right-click", "Menu for the selection"),
+            ("Click a tag", "Edit a note or key input"),
+        ]
+        colours = [
+            ("Green", "Hit (or a frame that matched)"),
+            ("Blue / orange", "Early / late, with frames off"),
+            ("Red", "Missed"),
+            ("Grey", "Not reached yet"),
+        ]
+        columns = [[("In game (these work while the game has focus)", in_game)],
+                   [("In this window", in_window), ("Mouse", mouse), ("Attempt colours", colours)]]
+        HelpPopup(steps, columns, self.open_user_guide).open()
+
+    def open_user_guide(self):
+        path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "docs", "USER_GUIDE.md")
+        try:
+            os.startfile(path)
+        except OSError as e:
+            self.flash(f"Couldn't open the user guide ({path}): {e}", "ff6b6b", 8)
 
     def open_settings_popup(self):
         readers = self.select_controller()
