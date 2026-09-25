@@ -58,7 +58,7 @@ HOTKEYS = [
     ("F9", "Clean track (presses only)", "clean_track"),
     ("F10", "Clear track", "clear_track"),
     ("F11", "Open a recording", "open_track"),
-    ("F12", "Save recording", "save_recording"),
+    ("F12", "Save recording as (with its video)", "save_recording"),
 ]
 
 VIDEO_HEIGHTS = [("Native", 0), ("1080p", 1080), ("720p", 720)]
@@ -81,6 +81,8 @@ class WomboComboApp(App):
         self.screen_recorder = None
         self.capture_path = None  # Video that belongs to the current input track, if any.
         self.track_path = None  # The current track's .json file, once it's been opened or saved.
+        self.unsaved_take = False  # A new take that hasn't been saved anywhere yet.
+        self.unsaved_edits = False  # Notes, key inputs or cleaning not yet saved.
         self.temp_dir = tempfile.mkdtemp(prefix="wombo_")
         self.take = 0
         self.jobs = ThreadPoolExecutor(max_workers=1)  # Saves/exports run one at a time, off the UI thread.
@@ -182,6 +184,7 @@ class WomboComboApp(App):
         self.listener = keyboard.Listener(on_press=on_press, on_release=on_release)
         self.listener.start()
         Window.bind(on_key_down=self.on_key_down)
+        Window.bind(on_request_close=lambda *args: not self._keep_unsaved_work("quitting"))
         Window.bind(on_drop_file=lambda window, filename, *args: self.open_track(filename.decode("utf-8")))
 
     def on_key_down(self, window, key, scancode, codepoint, modifiers):
@@ -193,6 +196,9 @@ class WomboComboApp(App):
             return True
         if codepoint == "o" and modifiers == ["ctrl"]:
             self.open_track()
+            return True
+        if codepoint == "s" and modifiers == ["ctrl"]:
+            self.save()
             return True
         if codepoint == "n" and not modifiers:
             self.add_note()
@@ -268,6 +274,8 @@ class WomboComboApp(App):
             elif controller.attempted_frames:
                 accuracy = controller.matched_frames / controller.attempted_frames
                 parts.append(f"Match {accuracy:.0%} of {controller.attempted_frames}f")
+            if self.unsaved_take or self.unsaved_edits:
+                parts.append("[color=ffb454]Unsaved[/color]")
         else:
             parts.append("No track")
         if self.job_label:
@@ -347,8 +355,13 @@ class WomboComboApp(App):
                 self.playalong_controller.set_note(index, start, end, new_text)
             elif index is not None:
                 self.playalong_controller.remove_note(index)
+            self.unsaved_edits = True
 
-        delete = (lambda: self.playalong_controller.remove_note(index)) if index is not None else None
+        def delete():
+            self.playalong_controller.remove_note(index)
+            self.unsaved_edits = True
+
+        delete = delete if index is not None else None
         title = f"Note on {span}" if index is None else f"Edit note on {span}"
         NotePopup(title, text, save, delete).open()
 
@@ -385,9 +398,14 @@ class WomboComboApp(App):
                     self.flash(f"The hold is longer than its {count}-frame window", "ffb454")
                     return
             controller.set_key_input(index, edited)
+            self.unsaved_edits = True
             self.flash(f"Key input {describe(edited)} on frames {edited['start']}-{edited['end']}")
 
-        delete = (lambda: controller.remove_key_input(index)) if index is not None else None
+        def delete():
+            controller.remove_key_input(index)
+            self.unsaved_edits = True
+
+        delete = delete if index is not None else None
         title = "Mark key input" if index is None else "Edit key input"
         track = controller.get_input_track()
         KeyInputPopup(title, normalized(key_input), len(track) - 1, LIST_BUTTON_ORDER, describe,
@@ -505,7 +523,11 @@ class WomboComboApp(App):
             self.start_recording()
 
     def start_recording(self):
+        # A raw take is easy to record again, so only edits are worth stopping for.
+        if not self._keep_unsaved_work("recording a new take", edits_only=True):
+            return
         self.track_path = None
+        self.unsaved_take = self.unsaved_edits = False
         self.playalong_controller.pause()
         self.capture_path = None
         frame_sink = None
@@ -528,6 +550,7 @@ class WomboComboApp(App):
 
     def stop_recording(self):
         self.playalong_controller.stop_recording()
+        self.unsaved_take = bool(self.playalong_controller.input_track)
         recorder, self.screen_recorder = self.screen_recorder, None
         if recorder:
             recorder.stop()
@@ -550,11 +573,15 @@ class WomboComboApp(App):
     def clean_track(self):
         if not self.playalong_controller.is_recording():
             self.playalong_controller.clean_track()
+            self.unsaved_edits = True
             self.flash("Track cleaned")
 
     def clear_track(self):
         if self.playalong_controller.is_recording():
             self.stop_recording()
+        if not self._keep_unsaved_work("clearing it"):
+            return
+        self.unsaved_take = self.unsaved_edits = False
         self.playalong_controller.clear_track()
         self.set_selection(None)
         self.capture_path = None
@@ -571,6 +598,8 @@ class WomboComboApp(App):
     def open_track(self, path=None):
         """Opens a recording ready to practise: its inputs (.json), with its video if there is one.
         Either file of a saved recording can be picked, or dropped onto the window."""
+        if not self._keep_unsaved_work("opening another"):
+            return
         if path is None:
             path = dialogs.open_file("Open recording", "Recordings (*.json, *.mp4)", "*.json;*.mp4")
         if not path:
@@ -600,6 +629,7 @@ class WomboComboApp(App):
         video = os.path.splitext(path)[0] + ".mp4"
         self.capture_path = video if os.path.exists(video) else None
         self.set_selection(None)
+        self.unsaved_take = self.unsaved_edits = False
         self._remember_recent(path)
         # Straight into practice: the input list, practice on, from the first frame.
         self.show_display("list")
@@ -608,20 +638,62 @@ class WomboComboApp(App):
         Window.set_title(f"{TITLE} - {os.path.splitext(os.path.basename(path))[0]}")
         self.flash(f"Opened {os.path.basename(path)}. Press Play (F6) to practise", "8fd18f", 6)
 
-    def save_recording(self):
+    def _track_data(self):
+        """The track and everything made for it, as saved in its .json."""
+        controller = self.playalong_controller
+        data = {"fps": FPS, "inputs": controller.get_input_track()}
+        attempt = controller.get_attempt_track()
+        if any(frame is not None for frame in attempt):
+            data["attempt"] = attempt
+        for key, value in (("notes", controller.get_notes()), ("key_inputs", controller.get_key_inputs()),
+                           ("saved_attempts", controller.get_saved())):
+            if value:
+                data[key] = value
+        return data
+
+    def save(self):
+        """Saves into the open recording's file, or for a new take asks where to save it (with its
+        video). Returns False if nothing was saved."""
         if self.playalong_controller.is_recording():
             self.stop_recording()
-        inputs = self.playalong_controller.get_input_track()
-        attempt = self.playalong_controller.get_attempt_track()
-        notes = self.playalong_controller.get_notes()
-        key_inputs = self.playalong_controller.get_key_inputs()
-        saved_attempts = self.playalong_controller.get_saved()
+        if not self.track_path:
+            return self.save_recording()
+        data, path = self._track_data(), self.track_path
+
+        def write(progress):
+            with open(path, "w") as fout:
+                json.dump(data, fout, indent=1, sort_keys=True)
+
+        self.run_job("Saving", write, f"Saved {os.path.basename(path)}")
+        self.unsaved_edits = False
+        return True
+
+    def _keep_unsaved_work(self, doing, edits_only=False):
+        """Before something replaces the track, offers to save unsaved work. Returns False to stop."""
+        unsaved = self.unsaved_edits or (self.unsaved_take and not edits_only)
+        if not unsaved or not self.playalong_controller.input_track:
+            return True
+        answer = dialogs.ask_save("Unsaved changes", f"Save the current recording before {doing}?")
+        if answer == "save":
+            return self.save()
+        return answer == "discard"
+
+    def quit(self):
+        if self._keep_unsaved_work("quitting"):
+            self.stop()
+
+    def save_recording(self):
+        """Saves the track (.json) and its video (.mp4) under a new name. Returns False if cancelled."""
+        if self.playalong_controller.is_recording():
+            self.stop_recording()
+        data = self._track_data()
+        inputs, notes = data["inputs"], data.get("notes", [])
         if not inputs:
             self.flash("Nothing to save", "ffb454")
-            return
+            return False
         path = dialogs.save_file("Save recording", "Recordings (*.mp4)", "*.mp4", "mp4")
         if not path:
-            return
+            return False
         base = os.path.splitext(path)[0]
         export_overlay = self.config.getboolean("wombo", "export_overlay_on_save")
         self.track_path = base + ".json"  # Later saved attempts go straight into it.
@@ -629,15 +701,6 @@ class WomboComboApp(App):
 
         def save(progress):
             with open(base + ".json", "w") as fout:
-                data = {"fps": FPS, "inputs": inputs}
-                if any(frame is not None for frame in attempt):
-                    data["attempt"] = attempt
-                if notes:
-                    data["notes"] = notes
-                if key_inputs:
-                    data["key_inputs"] = key_inputs
-                if saved_attempts:
-                    data["saved_attempts"] = saved_attempts
                 json.dump(data, fout, indent=1, sort_keys=True)
             if not capture:
                 return
@@ -649,6 +712,10 @@ class WomboComboApp(App):
                                           **self._export_options(progress))
 
         self.run_job("Saving", save, f"Saved {os.path.basename(base)}")
+        self.unsaved_take = self.unsaved_edits = False
+        self._remember_recent(base + ".json")
+        Window.set_title(f"{TITLE} - {os.path.basename(base)}")
+        return True
 
     def export_overlay_video(self):
         if self.playalong_controller.is_recording():

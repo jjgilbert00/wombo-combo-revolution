@@ -210,12 +210,13 @@ class MenuBar(BoxLayout):
             item.label.color = DIM_TEXT_COLOR
             item.label.shorten = True
         menu.add_separator()
-        menu.add_item("Save recording...", app.save_recording, "F12")
+        menu.add_item("Save", app.save, "Ctrl+S")
+        menu.add_item("Save recording as...", app.save_recording, "F12")
         menu.add_separator()
         menu.add_item("Export overlay video...", app.export_overlay_video)
         menu.add_item("Export input video...", app.export_input_video)
         menu.add_separator()
-        menu.add_item("Quit", app.stop)
+        menu.add_item("Quit", app.quit)
 
     def set_lanes_shown(self, shown):
         for name, item in self.lane_items.items():

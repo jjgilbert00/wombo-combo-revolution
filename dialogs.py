@@ -38,3 +38,10 @@ def open_file(title, filter_name, pattern):
 def save_file(title, filter_name, pattern, default_extension, file_name=""):
     return _run(win32gui.GetSaveFileNameW, Title=title, Filter=f"{filter_name}\0{pattern}\0",
                 DefExt=default_extension, File=file_name, Flags=FLAGS | win32con.OFN_OVERWRITEPROMPT)
+
+
+def ask_save(title, message):
+    """Save / Don't save / Cancel. Returns "save", "discard" or "cancel"."""
+    answer = win32gui.MessageBox(_owner(), message, title,
+                                 win32con.MB_YESNOCANCEL | win32con.MB_ICONWARNING | win32con.MB_DEFBUTTON1)
+    return {win32con.IDYES: "save", win32con.IDNO: "discard"}.get(answer, "cancel")
