@@ -315,84 +315,130 @@ class NotePopup(ModalView):
 
 MINUS = "\u2212"  # A real minus sign; "-" renders as a thin dash on a button.
 
-DIRECTION_CHOICES = [
-    ("Any direction", None), ("1  down-back", 1), ("2  down", 2), ("3  down-forward", 3), ("4  back", 4),
-    ("5  neutral", 5), ("6  forward", 6), ("7  up-back", 7), ("8  up", 8), ("9  up-forward", 9),
-]
-
-
 class _Toggle(ToggleButton):
     def __init__(self, **kwargs):
-        super().__init__(background_normal="", background_down="", font_size=FONT_SIZE, color=TEXT_COLOR,
-                         **kwargs)
-        self.bind(state=self._refresh_color)
+        super().__init__(background_normal="", background_down="", background_disabled_normal="",
+                         background_disabled_down="", font_size=FONT_SIZE, color=TEXT_COLOR,
+                         disabled_color=DIM_TEXT_COLOR, **kwargs)
+        self.bind(state=self._refresh_color, disabled=self._refresh_color)
         self._refresh_color()
 
     def _refresh_color(self, *args):
-        self.background_color = (1.0, 0.78, 0.2, 0.9) if self.state == "down" else (1, 1, 1, 0.08)
+        if self.disabled:
+            self.background_color = (1, 1, 1, 0.03)
+        else:
+            self.background_color = (1.0, 0.78, 0.2, 0.9) if self.state == "down" else (1, 1, 1, 0.08)
         self.color = (0.1, 0.08, 0.02, 1) if self.state == "down" else TEXT_COLOR
 
 
 class KeyInputPopup(ModalView):
-    """Edits a key input: its window of eligible frames, required direction and buttons.
-    on_save(key_input) gets the edited copy; on_delete is only offered for an existing one."""
+    """Edits a key input: whether it's a press in a window or an exact span, its eligible frames,
+    and (for a press) the motion, direction and buttons it requires. Every part can be dropped with
+    one click or keystroke, so stray directions or buttons from the recording are easy to remove.
+    on_save(key_input) gets the edited copy; on_delete is only offered for an existing one.
+    describe(key_input) supplies the live notation preview."""
 
-    def __init__(self, title, key_input, last_frame, button_names, on_save, on_delete=None, **kwargs):
-        super().__init__(size_hint=(None, None), size=(dp(480), dp(232)), background="",
+    ROW_HEIGHT = dp(32)
+    NUMPAD_ROWS = ((7, 8, 9), (4, 5, 6), (1, 2, 3))
+
+    def __init__(self, title, key_input, last_frame, button_names, describe, on_save, on_delete=None, **kwargs):
+        super().__init__(size_hint=(None, None), size=(dp(520), dp(384)), background="",
                          background_color=(0, 0, 0, 0.5), **kwargs)
-        self.key_input = dict(key_input, buttons=list(key_input["buttons"]))
+        self.key_input = dict(key_input, motion=list(key_input["motion"]), buttons=list(key_input["buttons"]))
         self.last_frame = last_frame
-        panel = BoxLayout(orientation="vertical", padding=dp(16), spacing=dp(12))
+        self.describe = describe
+        panel = BoxLayout(orientation="vertical", padding=dp(16), spacing=dp(10))
         _paint_background(panel, PANEL_COLOR)
-        panel.add_widget(Label(text=title, font_size=sp(16), bold=True, color=TEXT_COLOR, size_hint_y=None,
-                               height=dp(22), halign="left", text_size=(dp(448), None)))
+        header = BoxLayout(size_hint_y=None, height=dp(24))
+        header.add_widget(Label(text=title, font_size=sp(16), bold=True, color=TEXT_COLOR, halign="left",
+                                valign="middle", size_hint_x=None, width=dp(300), text_size=(dp(300), dp(24))))
+        self.preview = Label(font_size=sp(16), bold=True, color=(1.0, 0.78, 0.2, 1), halign="right",
+                             valign="middle")
+        self.preview.bind(size=lambda label, size: setattr(label, "text_size", size))
+        header.add_widget(self.preview)
+        panel.add_widget(header)
 
-        grid = GridLayout(cols=2, spacing=(dp(12), dp(10)), row_default_height=dp(32), row_force_default=True)
-        grid.add_widget(self._label("Eligible frames"))
+        kinds = BoxLayout(spacing=dp(4))
+        for text, exact in (("Press in window", False), ("Exact span", True)):
+            toggle = _Toggle(text=text, group="kind", allow_no_selection=False,
+                             state="down" if bool(self.key_input.get("exact")) == exact else "normal")
+            toggle.bind(state=lambda t, state, exact=exact: state == "down" and self._set_exact(exact))
+            kinds.add_widget(toggle)
+        panel.add_widget(self._row("Type", kinds))
+
         frames = BoxLayout(spacing=dp(4))
         self.window_label = Label(font_size=FONT_SIZE, color=TEXT_COLOR, size_hint_x=None, width=dp(150))
-        for text, edge, delta in ((MINUS, "start", -1), ("+", "start", 1)):
-            frames.add_widget(self._stepper(text, edge, delta))
+        frames.add_widget(self._stepper(MINUS, "start", -1))
+        frames.add_widget(self._stepper("+", "start", 1))
         frames.add_widget(self.window_label)
-        for text, edge, delta in ((MINUS, "end", -1), ("+", "end", 1)):
-            frames.add_widget(self._stepper(text, edge, delta))
-        grid.add_widget(frames)
-        self._refresh_window()
+        frames.add_widget(self._stepper(MINUS, "end", -1))
+        frames.add_widget(self._stepper("+", "end", 1))
+        frames.add_widget(Widget())
+        panel.add_widget(self._row("Frames", frames))
 
-        grid.add_widget(self._label("Direction"))
-        selected = next(text for text, value in DIRECTION_CHOICES if value == key_input["direction"])
-        values = dict(DIRECTION_CHOICES)
-        grid.add_widget(_spinner([text for text, _ in DIRECTION_CHOICES], selected,
-                                 lambda text: self.key_input.update(direction=values[text])))
+        self.press_widgets = []
+        motion = BoxLayout(spacing=dp(8))
+        self.motion_input = TextInput(
+            text="".join(str(d) for d in self.key_input["motion"]), multiline=False, font_size=FONT_SIZE,
+            size_hint_x=None, width=dp(120), background_color=(1, 1, 1, 0.08), foreground_color=TEXT_COLOR,
+            cursor_color=TEXT_COLOR, hint_text="e.g. 236",
+            input_filter=lambda text, from_undo: "".join(c for c in text if c in "123456789"),
+        )
+        self.motion_input.bind(text=lambda _, text: self._set_motion(text))
+        motion.add_widget(self.motion_input)
+        motion.add_widget(self._hint("Numpad notation; leave empty for no motion"))
+        panel.add_widget(self._row("Motion", motion))
+        self.press_widgets.append(self.motion_input)
 
-        grid.add_widget(self._label("Buttons (press)"))
+        direction = BoxLayout(spacing=dp(10))
+        numpad = GridLayout(cols=3, spacing=dp(4), size_hint=(None, None), width=dp(116), height=dp(104))
+        for row in self.NUMPAD_ROWS:
+            for value in row:
+                toggle = _Toggle(text=str(value), group="direction",
+                                 state="down" if self.key_input["direction"] == value else "normal")
+                toggle.bind(state=lambda t, state, value=value: self._set_direction(value if state == "down" else None))
+                numpad.add_widget(toggle)
+                self.press_widgets.append(toggle)
+        direction.add_widget(numpad)
+        direction.add_widget(self._hint("Held when the buttons are pressed.\nClick the lit key again for any direction."))
+        panel.add_widget(self._row("Direction", direction, height=dp(104)))
+
         buttons = BoxLayout(spacing=dp(4))
         for name in button_names:
             toggle = _Toggle(text=name, state="down" if name in self.key_input["buttons"] else "normal")
             toggle.bind(state=lambda t, state, name=name: self._set_button(name, state == "down"))
             buttons.add_widget(toggle)
-        grid.add_widget(buttons)
-        panel.add_widget(grid)
+            self.press_widgets.append(toggle)
+        panel.add_widget(self._row("Buttons", buttons))
 
-        row = BoxLayout(size_hint_y=None, height=dp(32), spacing=dp(8))
+        actions = BoxLayout(size_hint_y=None, height=self.ROW_HEIGHT, spacing=dp(8))
         if on_delete:
             delete = BarButton(text="Delete", highlight=(0.85, 0.2, 0.2, 0.8))
             delete.bind(on_release=lambda *_: (self.dismiss(), on_delete()))
-            row.add_widget(delete)
-        row.add_widget(Widget())
+            actions.add_widget(delete)
+        actions.add_widget(Widget())
         cancel = BarButton(text="Cancel")
         cancel.bind(on_release=lambda *_: self.dismiss())
         save = BarButton(text="Save", highlight=(1, 1, 1, 0.12))
         save.bind(on_release=lambda *_: (self.dismiss(), on_save(self.key_input)))
-        row.add_widget(cancel)
-        row.add_widget(save)
-        panel.add_widget(row)
+        actions.add_widget(cancel)
+        actions.add_widget(save)
+        panel.add_widget(actions)
         self.add_widget(panel)
+        self._refresh()
+
+    def _row(self, label, content, height=None):
+        row = BoxLayout(size_hint_y=None, height=height or self.ROW_HEIGHT, spacing=dp(12))
+        row.add_widget(Label(text=label, font_size=FONT_SIZE, color=TEXT_COLOR, halign="left", valign="top",
+                             size_hint_x=None, width=dp(84), text_size=(dp(84), height or self.ROW_HEIGHT),
+                             padding=(0, dp(7))))
+        row.add_widget(content)
+        return row
 
     @staticmethod
-    def _label(text):
-        return Label(text=text, font_size=FONT_SIZE, color=TEXT_COLOR, halign="left", valign="middle",
-                     size_hint_x=None, width=dp(120), text_size=(dp(120), dp(32)))
+    def _hint(text):
+        return Label(text=text, font_size=sp(12), color=DIM_TEXT_COLOR, halign="left", valign="middle",
+                     text_size=(dp(250), None))
 
     def _stepper(self, text, edge, delta):
         button = BarButton(text=text, highlight=(1, 1, 1, 0.08))
@@ -406,13 +452,35 @@ class KeyInputPopup(ModalView):
         else:
             end = min(self.last_frame, max(end + delta, start))
         self.key_input.update(start=start, end=end)
-        self._refresh_window()
+        self._refresh()
 
-    def _refresh_window(self):
-        start, end = self.key_input["start"], self.key_input["end"]
-        count = end - start + 1
-        self.window_label.text = f"{start} - {end}  ({count} frame{'s' if count != 1 else ''})"
+    def _set_exact(self, exact):
+        self.key_input["exact"] = exact
+        self._refresh()
+
+    def _set_motion(self, text):
+        self.key_input["motion"] = [int(c) for c in text]
+        self._refresh()
+
+    def _set_direction(self, direction):
+        # Toggling one numpad key off and another on fires twice; ignore the stale "off".
+        if direction is None and any(getattr(t, "group", None) == "direction" and t.state == "down"
+                                     for t in self.press_widgets):
+            return
+        self.key_input["direction"] = direction
+        self._refresh()
 
     def _set_button(self, name, pressed):
         buttons = [b for b in self.key_input["buttons"] if b != name]
         self.key_input["buttons"] = buttons + [name] if pressed else buttons
+        self._refresh()
+
+    def _refresh(self):
+        start, end = self.key_input["start"], self.key_input["end"]
+        count = end - start + 1
+        self.window_label.text = f"{start} - {end}  ({count} frame{'s' if count != 1 else ''})"
+        exact = bool(self.key_input.get("exact"))
+        # Motion, direction and buttons don't apply to an exact span, which matches whole frames.
+        for widget in self.press_widgets:
+            widget.disabled = exact
+        self.preview.text = self.describe(self.key_input)
