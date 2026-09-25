@@ -13,6 +13,7 @@ from PIL import Image
 
 from images import get_standard_button_icon
 from input_list import LIST_BUTTON_ORDER, draw_direction_glyph, input_key
+from key_inputs import describe
 
 ICON_SIZE = dp(26)
 # A label is one icon wide: frame count on top, then the direction, then pressed buttons in a column.
@@ -53,6 +54,9 @@ TOAST_PADDING = dp(8)
 TOAST_ROWS = 3  # Overlapping notes stack into this many rows; any more are skipped.
 BRACE_HEIGHT = dp(12)
 SELECTION_COLOR = (0.4, 0.65, 1.0)
+KEY_COLOR = (1.0, 0.78, 0.2)
+KEY_RESULT_COLORS = {"hit": MATCH_COLOR, "miss": MISS_COLOR, "pending": (0.55, 0.55, 0.6)}
+NON_KEY_ALPHA = 0.35  # Target inputs outside every key input fade back once key inputs exist.
 CLICK_SLOP = dp(4)  # A press that moves less than this is a click, not a drag.
 
 
@@ -197,6 +201,30 @@ def _brace_points(x0, x1, top, height):
     return points
 
 
+class _KeyGraphic:
+    """A key input: a gold outline around its eligible frames in the target lane, a tag naming the
+    requirement, and a result bar (hit/miss/pending) over the match strip."""
+
+    def __init__(self, layer):
+        self.group = InstructionGroup()
+        self.outline_color = Color(*KEY_COLOR, 0)
+        self.outline = [Rectangle() for _ in range(4)]
+        self.tag_color = Color(*KEY_COLOR, 0)
+        self.tag = Rectangle()
+        self.tag_text_color = Color(1, 1, 1, 0)
+        self.tag_text = Rectangle()
+        self.result_color = Color(1, 1, 1, 0)
+        self.result = Rectangle()
+        for instruction in [self.outline_color, *self.outline, self.tag_color, self.tag, self.tag_text_color,
+                            self.tag_text, self.result_color, self.result]:
+            self.group.add(instruction)
+        layer.add(self.group)
+
+    def hide(self):
+        for color in (self.outline_color, self.tag_color, self.tag_text_color, self.result_color):
+            color.a = 0
+
+
 class _Pool:
     def __init__(self, layer, factory):
         self.layer, self.factory, self.items, self.used = layer, factory, [], 0
@@ -224,12 +252,20 @@ class _Textures:
         }
         self.counts = {}
         self.notes = {}
+        self.key_tags = {}
 
     def count(self, frames):
         text = str(frames) if frames <= DISPLAY_COUNT_LIMIT else f"{DISPLAY_COUNT_LIMIT}+"
         if text not in self.counts:
             self.counts[text] = _text_texture(text, COUNT_FONT_SIZE)
         return self.counts[text]
+
+    def key_tag(self, text):
+        if text not in self.key_tags:
+            label = CoreLabel(text=text, font_size=sp(12), bold=True, color=(0.1, 0.08, 0.02, 1))
+            label.refresh()
+            self.key_tags[text] = label.texture
+        return self.key_tags[text]
 
     def note(self, text):
         if text not in self.notes:
@@ -250,7 +286,8 @@ class InputListLayout(StencilView):
     box as wide as it's held: its left edge reaches the line on the frame it should be pressed and
     its right edge when it should be released. Lanes from the top: a frame meter (one block per
     target frame), the target track, a strip marking each frame green (matched) or red (missed), and
-    the player's attempt. Notes hang underneath as toasts, each with a brace pointing at the frames
+    the player's attempt. Key inputs are outlined in gold with their result over the match strip,
+    and once a track has any, the inputs outside them fade back. Notes hang underneath as toasts, each with a brace pointing at the frames
     it annotates. Mouse wheel or drag scrubs; Ctrl + wheel zooms. Clicking selects a frame (Shift
     extends the selection) and dragging in the frame meter selects a range.
     """
@@ -260,6 +297,7 @@ class InputListLayout(StencilView):
         self.textures = _Textures(controller_type, button_icon_style)
         self.px_per_frame = DEFAULT_PX_PER_FRAME
         self.show_notes = True  # When off, notes only show as bars over their frames.
+        self.dim_non_key = False  # Set by the app while the track has key inputs.
         self.on_scrub = None  # Called with a frame delta when the user scrolls or drags.
         self.on_zoom = None  # Called with the new pixels-per-frame.
         self.on_select = None  # Called with (start, end) frames, inclusive, when the user selects frames.
@@ -274,6 +312,7 @@ class InputListLayout(StencilView):
             self.panels = [Rectangle(), Rectangle(), Rectangle()]  # Meter, target, attempt lanes.
             self.box_layer = InstructionGroup()
             self.strip_layer = InstructionGroup()
+            self.key_layer = InstructionGroup()
             self.meter_layer = InstructionGroup()
             self.meter_divider_layer = InstructionGroup()
             self.note_layer = InstructionGroup()
@@ -298,6 +337,7 @@ class InputListLayout(StencilView):
         self.meter_blocks = _Pool(self.meter_layer, self._make_strip)
         self.meter_dividers = _Pool(self.meter_divider_layer, self._make_strip)
         self.note_graphics = _Pool(self.note_layer, _NoteGraphic)
+        self.key_graphics = _Pool(self.key_layer, _KeyGraphic)
         self.bind(pos=self._layout, size=self._layout)
 
     @staticmethod
@@ -421,7 +461,7 @@ class InputListLayout(StencilView):
 
     # ---- Drawing -----------------------------------------------------------------------------
 
-    def _draw_runs(self, pool, runs, snapshot, lane_y, color, dim_history):
+    def _draw_runs(self, pool, runs, snapshot, lane_y, color, dim_history, key_windows=None):
         line_x = self._line_x()
         track_left, track_right = self._track_left(), self._track_right()
         for start, length, key in runs:
@@ -434,6 +474,8 @@ class InputListLayout(StencilView):
             past = x1 <= line_x
             active = x0 <= line_x < x1
             alpha = HISTORY_ALPHA if past and dim_history else 1
+            if key_windows is not None and not any(s <= start + length - 1 and start <= e for s, e in key_windows):
+                alpha *= NON_KEY_ALPHA
             box.fill_color.rgba = (*color, (0.05 if neutral else 0.16 if not active else 0.28) * alpha)
             box.fill.pos = (x0, lane_y)
             box.fill.size = (x1 - x0, LANE_HEIGHT)
@@ -457,9 +499,11 @@ class InputListLayout(StencilView):
         pool.finish(_Box.hide)
 
     def _draw_matches(self, runs, snapshot, strip_y):
+        # With key inputs marked, their results matter and per-frame matching is just background.
+        alpha = 0.3 if self.dim_non_key else 0.9
         for start, length, matched in runs:
             color, rect = self.strips.next()
-            color.rgba = (*(MATCH_COLOR if matched else MISS_COLOR), 0.9)
+            color.rgba = (*(MATCH_COLOR if matched else MISS_COLOR), alpha)
             rect.pos = (self._frame_x(start, snapshot.frame), strip_y)
             rect.size = (length * self.px_per_frame, STRIP_HEIGHT)
         self.strips.finish(lambda strip: setattr(strip[0], "a", 0))
@@ -534,6 +578,36 @@ class InputListLayout(StencilView):
             self._toast_hits.append((toast_x, toast_top - height, width, height, index))
         self.note_graphics.finish(_NoteGraphic.hide)
 
+    def _draw_key_inputs(self, key_inputs, snapshot, target_y, strip_y):
+        track_left, track_right = self._track_left(), self._track_right()
+        border = dp(2)
+        for index, key_input, outcome in key_inputs:
+            x0 = self._frame_x(key_input["start"], snapshot.frame)
+            x1 = self._frame_x(key_input["end"] + 1, snapshot.frame)
+            if x1 < track_left or x0 > track_right:
+                continue
+            graphic = self.key_graphics.next()
+            graphic.outline_color.a = 0.95
+            y0, y1 = target_y, target_y + LANE_HEIGHT
+            for rect, (pos, size) in zip(graphic.outline, (
+                ((x0, y0), (x1 - x0, border)), ((x0, y1 - border), (x1 - x0, border)),
+                ((x0, y0), (border, y1 - y0)), ((x1 - border, y0), (border, y1 - y0)),
+            )):
+                rect.pos, rect.size = pos, size
+            texture = self.textures.key_tag(describe(key_input))
+            tag_width, tag_height = texture.width + dp(8), texture.height + dp(4)
+            graphic.tag_color.a = 0.95
+            graphic.tag.pos = (x0, y0)
+            graphic.tag.size = (tag_width, tag_height)
+            graphic.tag_text_color.a = 1
+            graphic.tag_text.texture = texture
+            graphic.tag_text.pos = (x0 + dp(4), y0 + dp(2))
+            graphic.tag_text.size = texture.size
+            graphic.result_color.rgba = (*KEY_RESULT_COLORS[outcome], 1)
+            graphic.result.pos = (x0, strip_y - dp(2))
+            graphic.result.size = (x1 - x0, STRIP_HEIGHT + dp(4))
+        self.key_graphics.finish(_KeyGraphic.hide)
+
     def _draw_selection(self, snapshot, meter_y, attempt_y):
         if not self.selection:
             self.selection_color.a = self.selection_edge_color.a = 0
@@ -554,11 +628,13 @@ class InputListLayout(StencilView):
         self._frame = snapshot.frame
         meter_y, target_y, strip_y, attempt_y = self._lanes()
         self._draw_meter(snapshot.target_runs, snapshot, meter_y)
+        key_windows = [(k["start"], k["end"]) for _, k, _ in snapshot.key_inputs] if self.dim_non_key else None
         self._draw_runs(self.target_boxes, snapshot.target_runs, snapshot, target_y, TARGET_BOX_COLOR,
-                        dim_history=not snapshot.recording)
+                        dim_history=not snapshot.recording, key_windows=key_windows)
         self._draw_runs(self.attempt_boxes, snapshot.attempt_runs, snapshot, attempt_y, ATTEMPT_BOX_COLOR,
                         dim_history=False)
         self._draw_matches(snapshot.match_runs, snapshot, strip_y)
+        self._draw_key_inputs(snapshot.key_inputs, snapshot, target_y, strip_y)
         self._draw_notes(snapshot.notes, snapshot, meter_y, attempt_y - LANE_GAP - ICON_SIZE - dp(14))
         self._draw_selection(snapshot, meter_y, attempt_y)
 

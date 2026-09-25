@@ -201,6 +201,7 @@ class WomboComboApp(App):
 
     def refresh(self, dt):
         if self.display is self.input_list_layout:
+            self.input_list_layout.dim_non_key = bool(self.playalong_controller.key_inputs)
             frames_before, frames_after = self.input_list_layout.frames_needed()
             self.input_list_layout.update_state(self.playalong_controller.list_snapshot(frames_before, frames_after))
         else:
