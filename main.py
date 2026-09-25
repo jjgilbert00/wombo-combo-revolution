@@ -48,6 +48,7 @@ HOTKEYS = [
     ("F1", "Show hotkeys", "show_help"),
     ("F2", "Overlay mode (on top, borderless)", "toggle_overlay"),
     ("F3", "Switch between ring and input list", "toggle_display"),
+    ("Shift+F3", "Show / hide notes", "toggle_notes"),
     ("F4", "Practice on/off (record your attempt while playing)", "toggle_practice"),
     ("F5", "Restart playback", "restart_playback"),
     ("F6", "Play", "play"),
@@ -101,6 +102,7 @@ class WomboComboApp(App):
             "practice": 1,
             "list_frame_width": 0,  # Pixels per frame in the input list; 0 = one label wide.
             "input_display": "ring",
+            "show_notes": 1,
         })
 
     def get_application_config(self):
@@ -129,6 +131,7 @@ class WomboComboApp(App):
         self.root_layout.add_widget(self.menu_bar)
         self.display = None
         self.show_display(self.config.get("wombo", "input_display"))
+        self.set_notes_visible(self.config.getboolean("wombo", "show_notes"))
         return self.root_layout
 
     def on_start(self):
@@ -145,15 +148,26 @@ class WomboComboApp(App):
 
         # Global keyboard listener for when the window isn't selected. The callback runs inside a
         # system-wide keyboard hook, so it only hands the action to the UI thread and returns.
-        actions = {getattr(keyboard.Key, key.lower()): action for key, _, action in HOTKEYS}
+        # Keyed by (shift held, key), e.g. "Shift+F3" -> (True, Key.f3).
+        actions = {}
+        for key, _, action in HOTKEYS:
+            *modifiers, name = key.lower().split("+")
+            actions[("shift" in modifiers, getattr(keyboard.Key, name))] = action
+        shift_keys = {keyboard.Key.shift, keyboard.Key.shift_l, keyboard.Key.shift_r}
+        held_shift = set()
 
+        # Neither callback may return False: that stops the listener.
         def on_press(key):
-            # Must not return False: that stops the listener.
-            action = actions.get(key)
+            if key in shift_keys:
+                held_shift.add(key)
+            action = actions.get((bool(held_shift), key))
             if action:
                 Clock.schedule_once(lambda dt: getattr(self, action)())
 
-        self.listener = keyboard.Listener(on_press=on_press)
+        def on_release(key):
+            held_shift.discard(key)
+
+        self.listener = keyboard.Listener(on_press=on_press, on_release=on_release)
         self.listener.start()
 
     def on_stop(self):
@@ -463,6 +477,14 @@ class WomboComboApp(App):
         self.display = display
         self.config.set("wombo", "input_display", mode)
         self.menu_bar.set_display_mode(mode)
+
+    def set_notes_visible(self, visible):
+        self.input_list_layout.show_notes = visible
+        self.config.set("wombo", "show_notes", int(visible))
+        self.menu_bar.set_notes_visible(visible)
+
+    def toggle_notes(self):
+        self.set_notes_visible(not self.input_list_layout.show_notes)
 
     def toggle_display(self):
         self.show_display("ring" if self.display is self.input_list_layout else "list")

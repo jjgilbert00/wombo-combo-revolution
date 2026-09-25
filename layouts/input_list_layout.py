@@ -242,6 +242,7 @@ class InputListLayout(StencilView):
         super().__init__(**kwargs)
         self.textures = _Textures(controller_type, button_icon_style)
         self.px_per_frame = DEFAULT_PX_PER_FRAME
+        self.show_notes = True  # When off, notes only show as bars over their frames.
         self.on_scrub = None  # Called with a frame delta when the user scrolls or drags.
         self.on_zoom = None  # Called with the new pixels-per-frame.
         self._drag_frames = 0.0
@@ -458,6 +459,9 @@ class InputListLayout(StencilView):
             note.tint_color.a = 0.9
             note.tint.pos = (x0 + dp(1), meter_y + METER_HEIGHT + dp(2))
             note.tint.size = (x1 - x0 - dp(2), dp(3))
+            if not self.show_notes:
+                note.brace_color.a = note.toast_color.a = note.accent_color.a = note.text_color.a = 0
+                continue
             note.brace_color.a = alpha
             note.brace.points = _brace_points(x0, x1, notes_top, BRACE_HEIGHT)
             # Reaches down past other toasts when overlapping notes pushed this one to a lower row.

@@ -77,10 +77,10 @@ class MenuItem(HoverBehavior, ButtonBehavior, BoxLayout):
         super().__init__(size_hint_y=None, height=dp(32), padding=(dp(12), 0), **kwargs)
         _paint_background(self, (0, 0, 0, 0))
         self.label = Label(text=text, font_size=FONT_SIZE, color=TEXT_COLOR, halign="left", valign="middle",
-                           text_size=(dp(170), None))
+                           text_size=(dp(158), None))
         self.add_widget(self.label)
         self.add_widget(Label(text=shortcut, font_size=FONT_SIZE, color=DIM_TEXT_COLOR, halign="right",
-                              size_hint_x=None, width=dp(48), text_size=(dp(48), None)))
+                              size_hint_x=None, width=dp(64), text_size=(dp(64), None)))
         self.bind(hovered=self._refresh_color, state=self._refresh_color)
 
     def _refresh_color(self, *args):
@@ -134,6 +134,7 @@ class MenuBar(BoxLayout):
         view_menu = Menu()
         view_menu.add_item("Overlay mode", app.toggle_overlay, "F2")
         self.display_item = view_menu.add_item("Show input list", app.toggle_display, "F3")
+        self.notes_item = view_menu.add_item("Hide notes", app.toggle_notes, "Shift+F3")
         view_menu.add_item("Hotkeys", app.show_help, "F1")
         view_menu.add_separator()
         view_menu.add_widget(self._opacity_row())
@@ -185,6 +186,9 @@ class MenuBar(BoxLayout):
         slider.bind(on_touch_down=lambda s, touch: s.collide_point(*touch.pos) and self.app.preview_opacity(True))
         row.add_widget(slider)
         return row
+
+    def set_notes_visible(self, visible):
+        self.notes_item.label.text = "Hide notes" if visible else "Show notes"
 
     def set_display_mode(self, mode):
         self.display_item.label.text = "Show ring display" if mode == "list" else "Show input list"
