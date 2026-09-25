@@ -263,6 +263,8 @@ class InputListLayout(StencilView):
         self.on_scrub = None  # Called with a frame delta when the user scrolls or drags.
         self.on_zoom = None  # Called with the new pixels-per-frame.
         self.on_select = None  # Called with (start, end) frames, inclusive, when the user selects frames.
+        self.on_note_click = None  # Called with a note's index when its toast is clicked.
+        self._toast_hits = []  # (x, y, width, height, note index) of each toast drawn, for clicks.
         self.selection = None  # (start, end) to highlight, set by the app.
         self._frame = 0  # Frame at the hit line when last drawn, for mapping clicks to frames.
         self._drag_frames = 0.0
@@ -401,6 +403,11 @@ class InputListLayout(StencilView):
         if touch.grab_current is not self:
             return super().on_touch_up(touch)
         touch.ungrab(self)
+        if not touch.ud["dragged"] and self.on_note_click:
+            for x, y, width, height, index in self._toast_hits:
+                if x <= touch.x <= x + width and y <= touch.y <= y + height:
+                    self.on_note_click(index)
+                    return True
         if not touch.ud["dragged"] and self.on_select:
             frame = self.frame_at(touch.x)
             if _modifier_held("shift") and self.selection:
@@ -485,6 +492,7 @@ class InputListLayout(StencilView):
     def _draw_notes(self, notes, snapshot, meter_y, notes_top):
         track_left, track_right = self._track_left(), self._track_right()
         row_ends = []  # Right edge of the last toast placed in each row.
+        self._toast_hits = []
         for index, start, end, text in notes:
             x0 = self._frame_x(start, snapshot.frame)
             x1 = self._frame_x(end + 1, snapshot.frame)
@@ -523,6 +531,7 @@ class InputListLayout(StencilView):
             note.text.texture = texture
             note.text.pos = (toast_x + TOAST_PADDING, toast_top - height + TOAST_PADDING)
             note.text.size = texture.size
+            self._toast_hits.append((toast_x, toast_top - height, width, height, index))
         self.note_graphics.finish(_NoteGraphic.hide)
 
     def _draw_selection(self, snapshot, meter_y, attempt_y):

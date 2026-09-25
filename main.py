@@ -33,7 +33,7 @@ from pynput import keyboard
 import dialogs
 from controller import find_controllers, get_cool_controller_pattern
 from layouts.input_list_layout import InputListLayout
-from layouts.menu_layout import HelpPopup, MenuBar, SettingsPopup
+from layouts.menu_layout import HelpPopup, MenuBar, NotePopup, SettingsPopup
 from layouts.playalong_layout import PlayAlongLayout
 from playalong import PlayalongController
 from sampler import FPS, InputSampler
@@ -128,6 +128,7 @@ class WomboComboApp(App):
         self.input_list_layout.on_scrub = self.scrub
         self.input_list_layout.on_zoom = self.set_list_zoom
         self.input_list_layout.on_select = self.set_selection
+        self.input_list_layout.on_note_click = self.edit_note
         self.playalong_controller.set_practice(self.config.getboolean("wombo", "practice"))
         self.menu_bar = MenuBar(self)
         self.root_layout = BoxLayout(orientation="vertical")
@@ -180,6 +181,9 @@ class WomboComboApp(App):
             return False  # A popup is open; let it have the keys.
         if key == 27:  # Esc
             self.set_selection(None)
+            return True
+        if codepoint == "n" and not modifiers:
+            self.add_note()
             return True
         return False
 
@@ -291,6 +295,36 @@ class WomboComboApp(App):
                 start = None
         self.selection = None if start is None else (start, end)
         self.input_list_layout.selection = self.selection
+
+    def add_note(self):
+        """Opens the note editor for the selected frames, or the frame on the line if none are selected."""
+        controller = self.playalong_controller
+        if controller.is_recording() or not controller.input_track:
+            return
+        start, end = self.selection or (controller.get_current_frame(),) * 2
+        existing = next((i for i, note in enumerate(controller.get_notes())
+                         if (note["start"], note["end"]) == (start, end)), None)
+        if existing is not None:
+            self.edit_note(existing)
+            return
+        self._open_note_popup(None, start, end, "")
+
+    def edit_note(self, index):
+        note = self.playalong_controller.get_notes()[index]
+        self._open_note_popup(index, note["start"], note["end"], note["text"])
+
+    def _open_note_popup(self, index, start, end, text):
+        span = f"frame {start}" if start == end else f"frames {start}-{end}"
+
+        def save(new_text):
+            if new_text:
+                self.playalong_controller.set_note(index, start, end, new_text)
+            elif index is not None:
+                self.playalong_controller.remove_note(index)
+
+        delete = (lambda: self.playalong_controller.remove_note(index)) if index is not None else None
+        title = f"Note on {span}" if index is None else f"Edit note on {span}"
+        NotePopup(title, text, save, delete).open()
 
     def toggle_practice(self):
         practice = not self.playalong_controller.practice
@@ -525,6 +559,10 @@ class WomboComboApp(App):
             ("Wheel", "Scrub the input list (pauses)"),
             ("Drag", "Scrub the input list"),
             ("Ctrl+Wheel", "Zoom the input list"),
+            ("Click", "Select a frame (Shift+click extends)"),
+            ("Frames drag", "Select a range of frames"),
+            ("N", "Add a note to the selection (click a note to edit it)"),
+            ("Esc", "Clear the selection"),
         ]
         HelpPopup([(key, description) for key, description, _ in HOTKEYS] + mouse_help).open()
 
