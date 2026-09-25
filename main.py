@@ -35,7 +35,7 @@ from controller import find_controllers, get_cool_controller_pattern
 from input_list import LIST_BUTTON_ORDER
 from key_inputs import derive, derive_hold, describe, normalized
 from layouts.input_list_layout import LANES, InputListLayout
-from layouts.menu_layout import HelpPopup, KeyInputPopup, MenuBar, NotePopup, SettingsPopup
+from layouts.menu_layout import AttemptsPopup, HelpPopup, KeyInputPopup, MenuBar, NotePopup, SettingsPopup
 from layouts.playalong_layout import PlayAlongLayout
 from playalong import PlayalongController
 from sampler import FPS, InputSampler
@@ -82,6 +82,7 @@ class WomboComboApp(App):
         self.sampler = InputSampler(self.playalong_controller.tick)
         self.screen_recorder = None
         self.capture_path = None  # Video that belongs to the current input track, if any.
+        self.track_path = None  # The current track's .json file, once it's been opened or saved.
         self.temp_dir = tempfile.mkdtemp(prefix="wombo_")
         self.take = 0
         self.jobs = ThreadPoolExecutor(max_workers=1)  # Saves/exports run one at a time, off the UI thread.
@@ -194,6 +195,12 @@ class WomboComboApp(App):
             return True
         if codepoint == "k" and not modifiers:
             self.mark_key_input()
+            return True
+        if codepoint == "s" and not modifiers:
+            self.save_attempt()
+            return True
+        if codepoint == "a" and not modifiers:
+            self.open_attempts()
             return True
         return False
 
@@ -388,6 +395,97 @@ class WomboComboApp(App):
         self.config.set("wombo", "practice", int(practice))
         self.flash("Practice: playing records your attempt" if practice else "Review: playing replays your attempt")
 
+    def save_attempt(self):
+        """Keeps the attempt on screen (or the latest run) with the track."""
+        controller = self.playalong_controller
+        if controller.is_recording():
+            return
+        saved = controller.save_attempt()
+        if not saved:
+            self.flash("No attempt to save yet: turn on Practice (F4) and play", "ffb454")
+            return
+        self.store_saved_attempts(f"Saved attempt as \"{saved['name']}\"")
+
+    def store_saved_attempts(self, message):
+        """Writes the saved attempts into the track's file, so they're kept without re-saving the
+        recording. A track that hasn't been saved yet keeps them until it is. The write queues
+        behind any save still running, so it can't be overwritten by an older list."""
+        if not self.track_path:
+            self.flash(f"{message}; it's kept with the track when you save the recording (F12)")
+            return
+        path, saved_attempts = self.track_path, self.playalong_controller.get_saved()
+
+        def write(progress):
+            with open(path, "r") as fin:
+                data = json.load(fin)
+            if not isinstance(data, dict):
+                data = {"fps": FPS, "inputs": data}  # Older saves are a bare list of frames.
+            data["saved_attempts"] = saved_attempts
+            with open(path, "w") as fout:
+                json.dump(data, fout, indent=1, sort_keys=True)
+
+        self.run_job("Saving attempts", write, message)
+
+    def open_attempts(self):
+        AttemptsPopup(self).open()
+
+    def attempts_overview(self):
+        """Saved attempts and recent runs (newest first) as the attempts manager lists them."""
+        controller = self.playalong_controller
+
+        def describe(kind, item, name):
+            done, total = controller.score(item["attempt"])
+            if controller.key_inputs:
+                score = f"Key inputs {done}/{total}"
+            else:
+                score = f"Match {done / total:.0%}" if total else "Not played"
+            created = time.localtime(item["created"])
+            when = time.strftime("%H:%M:%S" if created[:3] == time.localtime()[:3] else "%b %d %H:%M", created)
+            return {"kind": kind, "id": item["id"], "name": name, "score": score, "when": when,
+                    "shown": item.get("shown")}
+
+        return {
+            "saved": [describe("saved", saved, saved["name"]) for saved in controller.get_saved_attempts()],
+            "recent": [describe("recent", run, f"Run {run['id']}") for run in reversed(controller.get_runs())],
+        }
+
+    def rename_saved(self, saved_id, name):
+        current = next(s for s in self.playalong_controller.get_saved_attempts() if s["id"] == saved_id)
+        if current["name"] != name.strip():
+            self.playalong_controller.update_saved(saved_id, name=name.strip())
+            self.store_saved_attempts(f"Renamed to \"{name.strip()}\"")
+
+    def show_saved(self, saved_id, shown):
+        self.playalong_controller.update_saved(saved_id, shown=shown)
+        self.store_saved_attempts("Shown in the input list" if shown else "Hidden from the input list")
+
+    def save_run(self, run_id):
+        saved = self.playalong_controller.save_attempt(run_id)
+        if saved:
+            self.store_saved_attempts(f"Saved Run {run_id} as \"{saved['name']}\"")
+
+    def delete_attempt(self, kind, attempt_id):
+        if kind == "saved":
+            self.playalong_controller.remove_saved(attempt_id)
+            self.store_saved_attempts("Deleted the saved attempt")
+        else:
+            self.playalong_controller.remove_run(attempt_id)
+
+    def replay_attempt(self, kind, attempt_id):
+        """Plays an earlier attempt back against the recording, in review mode so it isn't overwritten."""
+        controller = self.playalong_controller
+        items = controller.get_saved_attempts() if kind == "saved" else controller.get_runs()
+        item = next((item for item in items if item["id"] == attempt_id), None)
+        if item is None or controller.is_recording():
+            return
+        if controller.practice:
+            self.toggle_practice()
+        controller.pause()
+        controller.set_attempt_track(item["attempt"])
+        controller.set_frame(0)
+        controller.play()
+        self.flash(f"Replaying {item.get('name') or 'Run ' + str(attempt_id)}; F4 to practice again")
+
     def clear_attempt(self):
         self.playalong_controller.clear_attempt()
 
@@ -403,6 +501,7 @@ class WomboComboApp(App):
             self.start_recording()
 
     def start_recording(self):
+        self.track_path = None
         self.playalong_controller.pause()
         self.capture_path = None
         frame_sink = None
@@ -455,6 +554,7 @@ class WomboComboApp(App):
         self.playalong_controller.clear_track()
         self.set_selection(None)
         self.capture_path = None
+        self.track_path = None
 
     def open_track(self):
         path = dialogs.open_file("Open inputs", "Input tracks (*.json)", "*.json")
@@ -470,9 +570,10 @@ class WomboComboApp(App):
             self.stop_recording()
         if isinstance(data, dict):
             self.playalong_controller.set_input_track(data["inputs"], data.get("attempt"), data.get("notes"),
-                                                      data.get("key_inputs"))
+                                                      data.get("key_inputs"), data.get("saved_attempts"))
         else:
             self.playalong_controller.set_input_track(data)  # Older saves are a bare list of frames.
+        self.track_path = path
         video = os.path.splitext(path)[0] + ".mp4"
         self.capture_path = video if os.path.exists(video) else None
         self.flash(f"Opened {os.path.basename(path)}")
@@ -485,6 +586,7 @@ class WomboComboApp(App):
         attempt = self.playalong_controller.get_attempt_track()
         notes = self.playalong_controller.get_notes()
         key_inputs = self.playalong_controller.get_key_inputs()
+        saved_attempts = self.playalong_controller.get_saved()
         if not inputs:
             self.flash("Nothing to save", "ffb454")
             return
@@ -493,6 +595,7 @@ class WomboComboApp(App):
             return
         base = os.path.splitext(path)[0]
         export_overlay = self.config.getboolean("wombo", "export_overlay_on_save")
+        self.track_path = base + ".json"  # Later saved attempts go straight into it.
         capture = self.capture_path  # Read now; a new take started before the job runs would reset it.
 
         def save(progress):
@@ -504,6 +607,8 @@ class WomboComboApp(App):
                     data["notes"] = notes
                 if key_inputs:
                     data["key_inputs"] = key_inputs
+                if saved_attempts:
+                    data["saved_attempts"] = saved_attempts
                 json.dump(data, fout, indent=1, sort_keys=True)
             if not capture:
                 return
@@ -638,6 +743,8 @@ class WomboComboApp(App):
             ("Frames drag", "Select a range of frames"),
             ("N", "Add a note to the selection (click a note to edit it)"),
             ("K", "Mark the selection as a key input (click its tag to edit)"),
+            ("S", "Save the attempt (or the latest run) with the track"),
+            ("A", "Attempts: rename, show, replay or delete saved and recent attempts"),
             ("Esc", "Clear the selection"),
             ("Attempts", "Green hit, blue early, orange late, red missed, grey not reached (+/- frames off)"),
         ]
