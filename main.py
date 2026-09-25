@@ -5,6 +5,7 @@ import shutil
 import tempfile
 import threading
 import time
+import winsound
 from concurrent.futures import ThreadPoolExecutor
 
 from timing import enable_high_resolution_timing, disable_high_resolution_timing
@@ -274,9 +275,22 @@ class WomboComboApp(App):
 
     def flash(self, text, color="dddddd", seconds=4):
         self.message = (f"[color={color}]{text}[/color]", time.time() + seconds)
+        # Also logged: a message shown while the game has focus is never seen.
+        logger.log(logging.WARNING if color in ("ff6b6b", "ffb454") else logging.INFO, "Status: %s", text)
+
+    @staticmethod
+    def beep(ok=True):
+        """A system sound for feedback that has to reach the player in game (asynchronous)."""
+        winsound.MessageBeep(winsound.MB_OK if ok else winsound.MB_ICONHAND)
 
     def update_status(self, dt):
         controller = self.playalong_controller
+        # A demo's countdown ticks once a second, so it can be followed without seeing the app.
+        if controller.demo_kind() and controller.get_lead():
+            second = -(-controller.get_lead() // FPS)
+            if second != getattr(self, "_countdown_second", None):
+                self._countdown_second = second
+                self.beep()
         stats = self.sampler.stats
         frames = len(controller.input_track)
         parts = []
@@ -397,10 +411,12 @@ class WomboComboApp(App):
         controller = self.playalong_controller
         if controller.is_recording() or not controller.input_track:
             self.flash("Open or record something to demo first", "ffb454")
+            self.beep(False)
             return
         if kind == "key inputs":
             if not controller.key_inputs:
                 self.flash("No key inputs to demo: select frames and press K to mark them", "ffb454", 6)
+                self.beep(False)
                 return
             track = demo_track(controller.get_key_inputs(), controller.get_input_track())
         else:
@@ -410,12 +426,14 @@ class WomboComboApp(App):
                 self.virtual_pad = VirtualPad()
             except VirtualPadError as e:
                 self.flash(str(e), "ff6b6b", 12)
+                self.beep(False)
                 return
         controller.pause()  # Also ends a demo already playing.
         countdown = self.config.getint("wombo", "demo_countdown")
         controller.start_demo(track, self.virtual_pad.send, countdown, kind)
         self.set_selection(None)
         self.flash(f"Demo of the {kind} in {countdown / FPS:g}s: switch to the game", "8fd18f", 5)
+        self._countdown_second = None  # update_status ticks each second of the countdown audibly.
 
     def scrub(self, frames):
         """Moves the playhead (pausing playback) so a part of the run can be inspected."""

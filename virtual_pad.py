@@ -9,6 +9,8 @@ Directions go out on the D-pad, as recorded (numpad notation: 6 is right, whiche
 character faces), buttons as buttons, and LT/RT fully pressed or released.
 """
 
+import importlib
+
 SETUP_HELP = ("Demo needs the vgamepad package and the ViGEmBus driver: run  pip install vgamepad  "
               "(it offers to install the driver if it's missing)")
 
@@ -19,6 +21,7 @@ class VirtualPadError(Exception):
 
 class VirtualPad:
     def __init__(self):
+        importlib.invalidate_caches()  # So a vgamepad installed while the app is running is found.
         try:
             import vgamepad
         except ImportError as e:

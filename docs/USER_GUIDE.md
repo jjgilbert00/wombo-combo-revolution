@@ -426,6 +426,7 @@ Settings are saved automatically.
   administrator too. Windows doesn't pass keys from an elevated window to non-elevated apps.
 - **"late frames" while recording, or the rate isn't about 60 Hz.** The PC is too busy to sample
   every frame on time. Close heavy programs, or turn off *Record video* or lower *Video size*.
+- **A demo hotkey seems to do nothing in game.** Listen for a low error beep: the reason is in the app's status bar (and its log). Usually vgamepad isn't installed yet, or no recording is open. When a demo starts, it ticks once a second through the countdown.
 - **Video capture failed.** The recording continues with inputs only, and the message says why.
   Try *Settings > Encoder: CPU (x264)*.
 - **"No inputs for that video".** A recording's `.mp4` can only be opened next to its `.json` with
