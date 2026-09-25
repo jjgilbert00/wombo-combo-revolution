@@ -28,7 +28,8 @@ from kivy.metrics import dp
 from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.modalview import ModalView
 from kivy.uix.widget import Widget
-from KivyOnTop import register_topmost, unregister_topmost
+import win32con
+import win32gui
 from pynput import keyboard
 
 import dialogs
@@ -864,14 +865,29 @@ class WomboComboApp(App):
     def toggle_overlay(self):
         self.topmost = not self.topmost
         if self.topmost:
-            register_topmost(Window, Window.title)  # Found by its current title.
             Window.borderless = True
             self.root_layout.remove_widget(self.menu_bar)
+            Window.bind(on_draw=self._keep_on_top)
+            self._keep_on_top()
         else:
-            unregister_topmost(Window, Window.title)  # Found by its current title.
+            Window.unbind(on_draw=self._keep_on_top)
             Window.borderless = False
             self.root_layout.add_widget(self.menu_bar, index=len(self.root_layout.children))
+            self._set_on_top(False)
         self.preview_opacity(False)
+
+    @staticmethod
+    def _set_on_top(on_top):
+        hwnd = Window.get_window_info().window  # The window's own handle; its title changes with the recording.
+        flags = win32con.SWP_NOMOVE | win32con.SWP_NOSIZE | win32con.SWP_NOACTIVATE
+        win32gui.SetWindowPos(hwnd, win32con.HWND_TOPMOST if on_top else win32con.HWND_NOTOPMOST, 0, 0, 0, 0, flags)
+
+    def _keep_on_top(self, *args):
+        """Keeps overlay mode on top. Checked every frame, since changing the window (e.g. borderless) can
+        drop it, but only reapplied when it has been dropped."""
+        hwnd = Window.get_window_info().window
+        if not win32gui.GetWindowLong(hwnd, win32con.GWL_EXSTYLE) & win32con.WS_EX_TOPMOST:
+            self._set_on_top(True)
 
     def show_display(self, mode):
         display = self.input_list_layout if mode == "list" else self.playalong_layout
