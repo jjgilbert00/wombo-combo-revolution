@@ -59,6 +59,15 @@ HOTKEYS = [
     ("F12", "Save recording as (with its video)", "save_recording"),
 ]
 
+WELCOME = (
+    "[size=22sp][b]No recording loaded[/b][/size]\n\n"
+    "[b]Practise a combo:[/b] File > Open recording ([b]Ctrl+O[/b]), or drop a recording's .json or .mp4 "
+    "file onto this window.\n\n"
+    "[b]Record your own:[/b] press Record ([b]F8[/b], also works while the game has focus), perform the combo, "
+    "press F8 again, then save it with [b]F12[/b].\n\n"
+    "Hover over any button for help, or press [b]F1[/b] for all keys."
+)
+
 VIDEO_HEIGHTS = [("Native", 0), ("1080p", 1080), ("720p", 720)]
 ENCODERS = [("Auto", "auto"), ("CPU (x264)", "x264"), ("NVIDIA (NVENC)", "nvenc")]
 
@@ -296,6 +305,33 @@ class WomboComboApp(App):
         parts.append(f"{stats.rate:.1f} Hz")
         self.menu_bar.update(controller.is_recording(), controller.is_playing(), controller.loop, controller.practice,
                              "   |   ".join(parts))
+        welcome = WELCOME if not frames and not controller.is_recording() else ""
+        self.input_list_layout.set_guidance(self._next_step_hint(), welcome)
+
+    def _next_step_hint(self):
+        """One line on what to do next, for where the player is right now."""
+        controller = self.playalong_controller
+        if controller.is_recording():
+            return ("[b]Recording.[/b] Perform the combo, then press [b]F8[/b] (or Stop) to finish. "
+                    "F-key hotkeys work while the game has focus.")
+        if not controller.input_track:
+            return ""
+        if self.selection:
+            return ("[b]Frames selected.[/b] [b]N[/b] adds a note, [b]K[/b] marks what must be pressed there "
+                    "(a key input), right-click for more, [b]Esc[/b] clears.")
+        if controller.is_playing():
+            if controller.practice:
+                return ("[b]Practising.[/b] Press each input as it reaches the line. "
+                        "[b]Home[/b] / [b]F5[/b] starts over, [b]Space[/b] / [b]F7[/b] pauses.")
+            return "[b]Reviewing[/b] your attempt against the recording. [b]F4[/b] goes back to practice."
+        if controller.attempted_frames:
+            return ("Scroll or drag to look back at your attempt. [b]S[/b] saves it, [b]A[/b] lists all "
+                    "attempts, [b]Space[/b] practises again.")
+        if not controller.key_inputs:
+            return ("Press [b]Space[/b] (or [b]F6[/b] in game) to practise. Tip: drag in the frame meter to select "
+                    "frames and press [b]K[/b] to mark what really matters; only those are scored then.")
+        return ("Press [b]Space[/b] (or [b]F6[/b] in game) to practise. Hit the key inputs (outlined) as they "
+                "reach the line.")
 
     # ---- Transport -----------------------------------------------------------------------------
 
