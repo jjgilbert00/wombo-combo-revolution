@@ -56,6 +56,7 @@ BRACE_HEIGHT = dp(12)
 SELECTION_COLOR = (0.4, 0.65, 1.0)
 KEY_COLOR = (1.0, 0.78, 0.2)
 EXACT_KEY_COLOR = (0.35, 0.85, 1.0)  # Exact spans stand apart from press-anywhere-in-window ones.
+HOLD_KEY_COLOR = (0.72, 0.55, 1.0)  # And holds from both.
 KEY_RESULT_COLORS = {"hit": MATCH_COLOR, "miss": MISS_COLOR, "pending": (0.55, 0.55, 0.6)}
 NON_KEY_ALPHA = 0.35  # Target inputs outside every key input fade back once key inputs exist.
 CLICK_SLOP = dp(4)  # A press that moves less than this is a click, not a drag.
@@ -204,7 +205,11 @@ def _brace_points(x0, x1, top, height):
 
 class _KeyGraphic:
     """A key input: a gold outline around its eligible frames in the target lane, a tag naming the
-    requirement, and a result bar (hit/miss/pending) over the match strip."""
+    requirement, and a result bar (hit/miss/pending) over the match strip.
+
+    A hold also gets a bar along the bottom of the window for the ideal hold (from the first
+    frame), a tick at the last frame it can start and still fit, and its result bar is bright only
+    over the attempt's longest hold, so a late start shows as a gap at the front."""
 
     def __init__(self, layer):
         self.group = InstructionGroup()
@@ -216,13 +221,20 @@ class _KeyGraphic:
         self.tag_text = Rectangle()
         self.result_color = Color(1, 1, 1, 0)
         self.result = Rectangle()
+        self.hold_color = Color(*HOLD_KEY_COLOR, 0)
+        self.ideal = Rectangle()
+        self.deadline = Rectangle()
+        self.run_color = Color(1, 1, 1, 0)
+        self.run = Rectangle()
         for instruction in [self.outline_color, *self.outline, self.tag_color, self.tag, self.tag_text_color,
-                            self.tag_text, self.result_color, self.result]:
+                            self.tag_text, self.result_color, self.result, self.hold_color, self.ideal,
+                            self.deadline, self.run_color, self.run]:
             self.group.add(instruction)
         layer.add(self.group)
 
     def hide(self):
-        for color in (self.outline_color, self.tag_color, self.tag_text_color, self.result_color):
+        for color in (self.outline_color, self.tag_color, self.tag_text_color, self.result_color, self.hold_color,
+                      self.run_color):
             color.a = 0
 
 
@@ -590,13 +602,14 @@ class InputListLayout(StencilView):
         track_left, track_right = self._track_left(), self._track_right()
         border = dp(2)
         self._key_tag_hits = []
-        for index, key_input, outcome in key_inputs:
+        for index, key_input, outcome, hold_run in key_inputs:
             x0 = self._frame_x(key_input["start"], snapshot.frame)
             x1 = self._frame_x(key_input["end"] + 1, snapshot.frame)
             if x1 < track_left or x0 > track_right:
                 continue
             graphic = self.key_graphics.next()
-            color = EXACT_KEY_COLOR if key_input.get("exact") else KEY_COLOR
+            is_hold = key_input["hold"] and not key_input["exact"]
+            color = EXACT_KEY_COLOR if key_input["exact"] else HOLD_KEY_COLOR if is_hold else KEY_COLOR
             graphic.outline_color.rgba = (*color, 0.95)
             graphic.tag_color.rgb = color
             y0, y1 = target_y, target_y + LANE_HEIGHT
@@ -615,9 +628,27 @@ class InputListLayout(StencilView):
             graphic.tag_text.pos = (x0 + dp(4), y0 + dp(2))
             graphic.tag_text.size = texture.size
             self._key_tag_hits.append((x0, y0, tag_width, tag_height, index))
-            graphic.result_color.rgba = (*KEY_RESULT_COLORS[outcome], 1)
+            graphic.result_color.rgba = (*KEY_RESULT_COLORS[outcome], 0.35 if is_hold else 1)
             graphic.result.pos = (x0, strip_y - dp(2))
             graphic.result.size = (x1 - x0, STRIP_HEIGHT + dp(4))
+            if not is_hold:
+                graphic.hold_color.a = graphic.run_color.a = 0
+                continue
+            ideal_end = self._frame_x(key_input["start"] + key_input["hold"], snapshot.frame)
+            deadline = self._frame_x(key_input["end"] - key_input["hold"] + 1, snapshot.frame)
+            graphic.hold_color.a = 0.8
+            graphic.ideal.pos = (x0, y0 + border)
+            graphic.ideal.size = (ideal_end - x0, dp(4))
+            graphic.deadline.pos = (deadline - dp(1), y0)
+            graphic.deadline.size = (dp(3), dp(16))
+            if hold_run:
+                run_start, run_length = hold_run
+                run_x = self._frame_x(run_start, snapshot.frame)
+                graphic.run_color.rgba = (*KEY_RESULT_COLORS[outcome], 1)
+                graphic.run.pos = (run_x, strip_y - dp(2))
+                graphic.run.size = (self._frame_x(run_start + run_length, snapshot.frame) - run_x, STRIP_HEIGHT + dp(4))
+            else:
+                graphic.run_color.a = 0
         self.key_graphics.finish(_KeyGraphic.hide)
 
     def _draw_selection(self, snapshot, meter_y, attempt_y):
@@ -640,7 +671,7 @@ class InputListLayout(StencilView):
         self._frame = snapshot.frame
         meter_y, target_y, strip_y, attempt_y = self._lanes()
         self._draw_meter(snapshot.target_runs, snapshot, meter_y)
-        key_windows = [(k["start"], k["end"]) for _, k, _ in snapshot.key_inputs] if self.dim_non_key else None
+        key_windows = [(k["start"], k["end"]) for _, k, _, _ in snapshot.key_inputs] if self.dim_non_key else None
         self._draw_runs(self.target_boxes, snapshot.target_runs, snapshot, target_y, TARGET_BOX_COLOR,
                         dim_history=not snapshot.recording, key_windows=key_windows)
         self._draw_runs(self.attempt_boxes, snapshot.attempt_runs, snapshot, attempt_y, ATTEMPT_BOX_COLOR,
