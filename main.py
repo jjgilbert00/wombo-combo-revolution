@@ -57,7 +57,7 @@ HOTKEYS = [
     ("F8", "Start / stop recording", "toggle_recording"),
     ("F9", "Clean track (presses only)", "clean_track"),
     ("F10", "Clear track", "clear_track"),
-    ("F11", "Open inputs", "open_track"),
+    ("F11", "Open a recording", "open_track"),
     ("F12", "Save recording", "save_recording"),
 ]
 
@@ -107,6 +107,7 @@ class WomboComboApp(App):
             "input_display": "list",  # The input list is where practice happens; the ring is optional.
             "show_notes": 1,
             "lanes": ",".join(LANES),  # Input list lanes shown.
+            "recent": "",  # Recently opened recordings (.json paths), newest first, separated by "|".
             "recent_attempts": 5,  # Recent runs shown in the input list.
         })
 
@@ -142,6 +143,7 @@ class WomboComboApp(App):
         self.show_display(self.config.get("wombo", "input_display"))
         self.set_notes_visible(self.config.getboolean("wombo", "show_notes"))
         self.set_lanes_shown(set(filter(None, self.config.get("wombo", "lanes").split(","))))
+        self.menu_bar.set_recent(self.recent_recordings())
         return self.root_layout
 
     def on_start(self):
@@ -180,6 +182,7 @@ class WomboComboApp(App):
         self.listener = keyboard.Listener(on_press=on_press, on_release=on_release)
         self.listener.start()
         Window.bind(on_key_down=self.on_key_down)
+        Window.bind(on_drop_file=lambda window, filename, *args: self.open_track(filename.decode("utf-8")))
 
     def on_key_down(self, window, key, scancode, codepoint, modifiers):
         """Shortcuts that only apply while the app window is focused."""
@@ -187,6 +190,9 @@ class WomboComboApp(App):
             return False  # A popup is open; let it have the keys.
         if key == 27:  # Esc
             self.set_selection(None)
+            return True
+        if codepoint == "o" and modifiers == ["ctrl"]:
+            self.open_track()
             return True
         if codepoint == "n" and not modifiers:
             self.add_note()
@@ -554,9 +560,28 @@ class WomboComboApp(App):
         self.capture_path = None
         self.track_path = None
 
-    def open_track(self):
-        path = dialogs.open_file("Open inputs", "Input tracks (*.json)", "*.json")
+    def recent_recordings(self):
+        return [path for path in self.config.get("wombo", "recent").split("|") if path and os.path.exists(path)]
+
+    def _remember_recent(self, path):
+        recent = [path] + [p for p in self.recent_recordings() if os.path.normcase(p) != os.path.normcase(path)]
+        self.config.set("wombo", "recent", "|".join(recent[:5]))
+        self.menu_bar.set_recent(recent[:5])
+
+    def open_track(self, path=None):
+        """Opens a recording ready to practise: its inputs (.json), with its video if there is one.
+        Either file of a saved recording can be picked, or dropped onto the window."""
+        if path is None:
+            path = dialogs.open_file("Open recording", "Recordings (*.json, *.mp4)", "*.json;*.mp4")
         if not path:
+            return
+        if path.lower().endswith(".mp4"):
+            path = os.path.splitext(path)[0] + ".json"
+            if not os.path.exists(path):
+                self.flash(f"No inputs for that video: {os.path.basename(path)} is missing", "ff6b6b", 8)
+                return
+        elif not path.lower().endswith(".json"):
+            self.flash("Open a recording's .json or .mp4 file", "ffb454")
             return
         try:
             with open(path, "r") as fin:
@@ -574,8 +599,14 @@ class WomboComboApp(App):
         self.track_path = path
         video = os.path.splitext(path)[0] + ".mp4"
         self.capture_path = video if os.path.exists(video) else None
-        self.flash(f"Opened {os.path.basename(path)}")
         self.set_selection(None)
+        self._remember_recent(path)
+        # Straight into practice: the input list, practice on, from the first frame.
+        self.show_display("list")
+        if not self.playalong_controller.practice:
+            self.toggle_practice()
+        Window.set_title(f"{TITLE} - {os.path.splitext(os.path.basename(path))[0]}")
+        self.flash(f"Opened {os.path.basename(path)}. Press Play (F6) to practise", "8fd18f", 6)
 
     def save_recording(self):
         if self.playalong_controller.is_recording():
@@ -693,11 +724,11 @@ class WomboComboApp(App):
     def toggle_overlay(self):
         self.topmost = not self.topmost
         if self.topmost:
-            register_topmost(Window, TITLE)
+            register_topmost(Window, Window.title)  # Found by its current title.
             Window.borderless = True
             self.root_layout.remove_widget(self.menu_bar)
         else:
-            unregister_topmost(Window, TITLE)
+            unregister_topmost(Window, Window.title)  # Found by its current title.
             Window.borderless = False
             self.root_layout.add_widget(self.menu_bar, index=len(self.root_layout.children))
         self.preview_opacity(False)

@@ -30,6 +30,7 @@ def _run(dialog, **kwargs):
 
 
 def open_file(title, filter_name, pattern):
+    """pattern may list several, e.g. "*.json;*.mp4"."""
     return _run(win32gui.GetOpenFileNameW, Title=title, Filter=f"{filter_name}\0{pattern}\0",
                 Flags=FLAGS | win32con.OFN_FILEMUSTEXIST)
 

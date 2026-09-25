@@ -1,3 +1,5 @@
+import os
+
 from kivy.core.window import Window
 from kivy.graphics import Color, Rectangle
 from kivy.metrics import dp, sp
@@ -124,13 +126,8 @@ class MenuBar(BoxLayout):
         _paint_background(self, BAR_COLOR)
 
         file_menu = Menu()
-        file_menu.add_item("Open inputs...", app.open_track, "F11")
-        file_menu.add_item("Save recording...", app.save_recording, "F12")
-        file_menu.add_separator()
-        file_menu.add_item("Export overlay video...", app.export_overlay_video)
-        file_menu.add_item("Export input video...", app.export_input_video)
-        file_menu.add_separator()
-        file_menu.add_item("Quit", app.stop)
+        self.file_menu = file_menu
+        self.set_recent([])
 
         edit_menu = Menu()
         edit_menu.add_item("Clean track", app.clean_track, "F9")
@@ -201,6 +198,24 @@ class MenuBar(BoxLayout):
         slider.bind(on_touch_down=lambda s, touch: s.collide_point(*touch.pos) and self.app.preview_opacity(True))
         row.add_widget(slider)
         return row
+
+    def set_recent(self, paths):
+        """Rebuilds the File menu, listing recently opened recordings right under Open."""
+        menu, app = self.file_menu, self.app
+        menu.clear_widgets()
+        menu.add_item("Open recording...", app.open_track, "Ctrl+O")
+        for path in paths:
+            name = os.path.splitext(os.path.basename(path))[0]
+            item = menu.add_item(name, lambda path=path: app.open_track(path))
+            item.label.color = DIM_TEXT_COLOR
+            item.label.shorten = True
+        menu.add_separator()
+        menu.add_item("Save recording...", app.save_recording, "F12")
+        menu.add_separator()
+        menu.add_item("Export overlay video...", app.export_overlay_video)
+        menu.add_item("Export input video...", app.export_input_video)
+        menu.add_separator()
+        menu.add_item("Quit", app.stop)
 
     def set_lanes_shown(self, shown):
         for name, item in self.lane_items.items():
