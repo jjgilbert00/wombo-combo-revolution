@@ -13,6 +13,7 @@ from kivy.uix.slider import Slider
 from kivy.uix.spinner import Spinner, SpinnerOption
 from kivy.uix.switch import Switch
 from kivy.uix.textinput import TextInput
+from kivy.uix.togglebutton import ToggleButton
 from kivy.uix.widget import Widget
 
 BAR_HEIGHT = dp(36)
@@ -133,6 +134,7 @@ class MenuBar(BoxLayout):
         edit_menu.add_item("Clear attempt", app.clear_attempt)
         edit_menu.add_separator()
         edit_menu.add_item("Add note to selection", app.add_note, "N")
+        edit_menu.add_item("Mark key input", app.mark_key_input, "K")
 
         view_menu = Menu()
         view_menu.add_item("Overlay mode", app.toggle_overlay, "F2")
@@ -309,3 +311,108 @@ class NotePopup(ModalView):
     def _save(self, on_save):
         self.dismiss()
         on_save(self.input.text.strip())
+
+
+MINUS = "\u2212"  # A real minus sign; "-" renders as a thin dash on a button.
+
+DIRECTION_CHOICES = [
+    ("Any direction", None), ("1  down-back", 1), ("2  down", 2), ("3  down-forward", 3), ("4  back", 4),
+    ("5  neutral", 5), ("6  forward", 6), ("7  up-back", 7), ("8  up", 8), ("9  up-forward", 9),
+]
+
+
+class _Toggle(ToggleButton):
+    def __init__(self, **kwargs):
+        super().__init__(background_normal="", background_down="", font_size=FONT_SIZE, color=TEXT_COLOR,
+                         **kwargs)
+        self.bind(state=self._refresh_color)
+        self._refresh_color()
+
+    def _refresh_color(self, *args):
+        self.background_color = (1.0, 0.78, 0.2, 0.9) if self.state == "down" else (1, 1, 1, 0.08)
+        self.color = (0.1, 0.08, 0.02, 1) if self.state == "down" else TEXT_COLOR
+
+
+class KeyInputPopup(ModalView):
+    """Edits a key input: its window of eligible frames, required direction and buttons.
+    on_save(key_input) gets the edited copy; on_delete is only offered for an existing one."""
+
+    def __init__(self, title, key_input, last_frame, button_names, on_save, on_delete=None, **kwargs):
+        super().__init__(size_hint=(None, None), size=(dp(480), dp(232)), background="",
+                         background_color=(0, 0, 0, 0.5), **kwargs)
+        self.key_input = dict(key_input, buttons=list(key_input["buttons"]))
+        self.last_frame = last_frame
+        panel = BoxLayout(orientation="vertical", padding=dp(16), spacing=dp(12))
+        _paint_background(panel, PANEL_COLOR)
+        panel.add_widget(Label(text=title, font_size=sp(16), bold=True, color=TEXT_COLOR, size_hint_y=None,
+                               height=dp(22), halign="left", text_size=(dp(448), None)))
+
+        grid = GridLayout(cols=2, spacing=(dp(12), dp(10)), row_default_height=dp(32), row_force_default=True)
+        grid.add_widget(self._label("Eligible frames"))
+        frames = BoxLayout(spacing=dp(4))
+        self.window_label = Label(font_size=FONT_SIZE, color=TEXT_COLOR, size_hint_x=None, width=dp(150))
+        for text, edge, delta in ((MINUS, "start", -1), ("+", "start", 1)):
+            frames.add_widget(self._stepper(text, edge, delta))
+        frames.add_widget(self.window_label)
+        for text, edge, delta in ((MINUS, "end", -1), ("+", "end", 1)):
+            frames.add_widget(self._stepper(text, edge, delta))
+        grid.add_widget(frames)
+        self._refresh_window()
+
+        grid.add_widget(self._label("Direction"))
+        selected = next(text for text, value in DIRECTION_CHOICES if value == key_input["direction"])
+        values = dict(DIRECTION_CHOICES)
+        grid.add_widget(_spinner([text for text, _ in DIRECTION_CHOICES], selected,
+                                 lambda text: self.key_input.update(direction=values[text])))
+
+        grid.add_widget(self._label("Buttons (press)"))
+        buttons = BoxLayout(spacing=dp(4))
+        for name in button_names:
+            toggle = _Toggle(text=name, state="down" if name in self.key_input["buttons"] else "normal")
+            toggle.bind(state=lambda t, state, name=name: self._set_button(name, state == "down"))
+            buttons.add_widget(toggle)
+        grid.add_widget(buttons)
+        panel.add_widget(grid)
+
+        row = BoxLayout(size_hint_y=None, height=dp(32), spacing=dp(8))
+        if on_delete:
+            delete = BarButton(text="Delete", highlight=(0.85, 0.2, 0.2, 0.8))
+            delete.bind(on_release=lambda *_: (self.dismiss(), on_delete()))
+            row.add_widget(delete)
+        row.add_widget(Widget())
+        cancel = BarButton(text="Cancel")
+        cancel.bind(on_release=lambda *_: self.dismiss())
+        save = BarButton(text="Save", highlight=(1, 1, 1, 0.12))
+        save.bind(on_release=lambda *_: (self.dismiss(), on_save(self.key_input)))
+        row.add_widget(cancel)
+        row.add_widget(save)
+        panel.add_widget(row)
+        self.add_widget(panel)
+
+    @staticmethod
+    def _label(text):
+        return Label(text=text, font_size=FONT_SIZE, color=TEXT_COLOR, halign="left", valign="middle",
+                     size_hint_x=None, width=dp(120), text_size=(dp(120), dp(32)))
+
+    def _stepper(self, text, edge, delta):
+        button = BarButton(text=text, highlight=(1, 1, 1, 0.08))
+        button.bind(on_release=lambda *_: self._step(edge, delta))
+        return button
+
+    def _step(self, edge, delta):
+        start, end = self.key_input["start"], self.key_input["end"]
+        if edge == "start":
+            start = max(0, min(start + delta, end))
+        else:
+            end = min(self.last_frame, max(end + delta, start))
+        self.key_input.update(start=start, end=end)
+        self._refresh_window()
+
+    def _refresh_window(self):
+        start, end = self.key_input["start"], self.key_input["end"]
+        count = end - start + 1
+        self.window_label.text = f"{start} - {end}  ({count} frame{'s' if count != 1 else ''})"
+
+    def _set_button(self, name, pressed):
+        buttons = [b for b in self.key_input["buttons"] if b != name]
+        self.key_input["buttons"] = buttons + [name] if pressed else buttons
