@@ -119,6 +119,7 @@ class WomboComboApp(App):
             "lanes": ",".join(LANES),  # Input list lanes shown.
             "recent": "",  # Recently opened recordings (.json paths), newest first, separated by "|".
             "recent_attempts": 5,  # Recent runs shown in the input list.
+            "lead_in": 60,  # Frames of run-up before practice playback, to get ready.
         })
 
     def get_application_config(self):
@@ -147,6 +148,7 @@ class WomboComboApp(App):
         self.input_list_layout.on_context_menu = self.open_context_menu
         self.playalong_controller.set_practice(self.config.getboolean("wombo", "practice"))
         self.playalong_controller.set_history_count(self.config.getint("wombo", "recent_attempts"))
+        self.playalong_controller.lead_in = self.config.getint("wombo", "lead_in")
         self.menu_bar = MenuBar(self)
         self.root_layout = BoxLayout(orientation="vertical")
         self.root_layout.add_widget(self.menu_bar)
@@ -277,7 +279,9 @@ class WomboComboApp(App):
             if backlog > FPS // 2:
                 parts.append(f"[color=ffb454]encoder {backlog / FPS:.1f}s behind[/color]")
         elif frames:
-            if controller.is_playing():
+            if controller.get_lead():
+                state = "GET READY"
+            elif controller.is_playing():
                 state = "PRACTICE" if controller.practice else "REVIEW"
             else:
                 state = "PAUSED"
@@ -321,6 +325,8 @@ class WomboComboApp(App):
         if self.selection:
             return ("[b]Frames selected.[/b] [b]N[/b] adds a note, [b]K[/b] marks what must be pressed there "
                     "(a key input), right-click for more, [b]Esc[/b] clears.")
+        if controller.get_lead():
+            return f"[b]Get ready.[/b] The first input reaches the line in {controller.get_lead() / FPS:.1f}s."
         if controller.is_playing():
             if controller.practice:
                 return ("[b]Practising.[/b] Press each input as it reaches the line. "
@@ -939,6 +945,10 @@ class WomboComboApp(App):
              self.config.get("wombo", "overlay_delay"), setter("overlay_delay")),
             ("Export overlay on save", bool, self.config.getboolean("wombo", "export_overlay_on_save"),
              setter("export_overlay_on_save")),
+            ("Lead-in before practice", [("Off", "0"), ("0.5 s", "30"), ("1 s", "60"), ("2 s", "120")],
+             self.config.get("wombo", "lead_in"),
+             setter("lead_in", lambda: setattr(self.playalong_controller, "lead_in",
+                                               self.config.getint("wombo", "lead_in")))),
             ("Recent attempts shown", [(str(n), str(n)) for n in (0, 1, 2, 3, 5, 8, 10, 15, 20)],
              self.config.get("wombo", "recent_attempts"),
              setter("recent_attempts", lambda: self.playalong_controller.set_history_count(

@@ -69,6 +69,8 @@ class PlayalongController:
         self.saved = []
         self._next_saved_id = 1
         self.history_count = 5  # Recent runs shown in the input list.
+        self.lead_in = 60  # Frames of run-up before practice playback starts, to get ready.
+        self._lead = 0  # Run-up frames left before the playhead moves.
         self._grades_version = 0  # Bumped when key inputs or the target change, invalidating cached grades.
 
     def _fit_key_inputs(self, key_inputs):
@@ -123,13 +125,18 @@ class PlayalongController:
         with self._lock:
             self.live_state = controller_state
             if self.running_state == RUNNING_STATES.PLAYING:
-                if self.practice:
+                if self._lead:
+                    used = min(ticks, self._lead)
+                    self._lead -= used
+                    ticks -= used
+                if ticks and self.practice:
                     # This tick's input answers the frame at the line (and any frames skipped by a late tick).
                     for offset in range(ticks):
                         frame = self.current_frame + offset
                         if frame < len(self.input_track):
                             self._record_attempt(frame, controller_state)
-                self._advance(ticks)
+                if ticks:
+                    self._advance(ticks)
             elif self.running_state == RUNNING_STATES.RECORDING:
                 if not self.input_track:
                     ticks = 1  # Anything missed before recording started isn't part of the take.
@@ -148,6 +155,7 @@ class PlayalongController:
                 self.current_frame %= len(self.input_track)
                 if self.practice:
                     self._start_over()
+                    self._lead = self.lead_in
             else:
                 self.current_frame = max(0, len(self.input_track) - 1)
                 self.running_state = RUNNING_STATES.STOPPED
@@ -164,7 +172,8 @@ class PlayalongController:
         """Target runs, attempt runs and per-frame matches around the playhead, for the input list."""
         with self._lock:
             recording = self.running_state == RUNNING_STATES.RECORDING
-            frame = len(self.input_track) if recording else self.current_frame
+            # During the run-up the view starts before frame 0, so the first inputs scroll in.
+            frame = len(self.input_track) if recording else self.current_frame - self._lead
             lo, hi = frame - frames_before, frame + frames_after + 1
             if recording:
                 return ListSnapshot(self.live_state, frame, True, runs_in_range(self.input_track, lo, hi), [], [], [], [],
@@ -278,6 +287,8 @@ class PlayalongController:
         with self._lock:
             if self.practice:
                 self._start_over()
+                if self.running_state == RUNNING_STATES.PLAYING:
+                    self._lead = self.lead_in
             self.current_frame = 0
 
     def get_key_inputs(self):
@@ -342,8 +353,13 @@ class PlayalongController:
     def set_practice(self, practice):
         self.practice = practice
 
+    def get_lead(self):
+        """Run-up frames left before practice playback starts."""
+        return self._lead
+
     def set_frame(self, frame):
         with self._lock:
+            self._lead = 0
             self.current_frame = max(0, min(frame, len(self.input_track) - 1))
 
     def play(self):
@@ -353,11 +369,14 @@ class PlayalongController:
                     self.current_frame = 0
                     if self.practice:
                         self._start_over()
+                if self.practice:
+                    self._lead = self.lead_in  # Time to get ready, whenever practice (re)starts.
                 self.running_state = RUNNING_STATES.PLAYING
 
     def pause(self):
         with self._lock:
             self.running_state = RUNNING_STATES.STOPPED
+            self._lead = 0
 
     def set_looping(self, loop):
         self.loop = loop
