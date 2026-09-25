@@ -25,6 +25,8 @@ RECORD_COLOR = (0.85, 0.2, 0.2, 1)
 TEXT_COLOR = (0.92, 0.92, 0.92, 1)
 DIM_TEXT_COLOR = (0.6, 0.6, 0.64, 1)
 FONT_SIZE = sp(14)
+LANE_MENU_ITEMS = [("meter", "Frame meter"), ("target", "Recording"), ("keys", "Key inputs"),
+                   ("attempt", "Your attempt")]
 
 
 def _paint_background(widget, color):
@@ -81,8 +83,9 @@ class MenuItem(HoverBehavior, ButtonBehavior, BoxLayout):
         self.label = Label(text=text, font_size=FONT_SIZE, color=TEXT_COLOR, halign="left", valign="middle",
                            text_size=(dp(158), None))
         self.add_widget(self.label)
-        self.add_widget(Label(text=shortcut, font_size=FONT_SIZE, color=DIM_TEXT_COLOR, halign="right",
-                              size_hint_x=None, width=dp(64), text_size=(dp(64), None)))
+        self.shortcut = Label(text=shortcut, font_size=FONT_SIZE, color=DIM_TEXT_COLOR, halign="right",
+                              size_hint_x=None, width=dp(64), text_size=(dp(64), None))
+        self.add_widget(self.shortcut)
         self.bind(hovered=self._refresh_color, state=self._refresh_color)
 
     def _refresh_color(self, *args):
@@ -142,6 +145,10 @@ class MenuBar(BoxLayout):
         self.notes_item = view_menu.add_item("Hide notes", app.toggle_notes, "Shift+F3")
         view_menu.add_item("Hotkeys", app.show_help, "F1")
         view_menu.add_separator()
+        # Input list lanes, each shown or hidden; the right column says which.
+        self.lane_items = {name: view_menu.add_item(text, lambda name=name: app.toggle_lane(name))
+                           for name, text in LANE_MENU_ITEMS}
+        view_menu.add_separator()
         view_menu.add_widget(self._opacity_row())
         view_menu.bind(on_dismiss=lambda *_: app.preview_opacity(False))
 
@@ -191,6 +198,11 @@ class MenuBar(BoxLayout):
         slider.bind(on_touch_down=lambda s, touch: s.collide_point(*touch.pos) and self.app.preview_opacity(True))
         row.add_widget(slider)
         return row
+
+    def set_lanes_shown(self, shown):
+        for name, item in self.lane_items.items():
+            item.shortcut.text = "shown" if name in shown else "hidden"
+            item.label.color = TEXT_COLOR if name in shown else DIM_TEXT_COLOR
 
     def set_notes_visible(self, visible):
         self.notes_item.label.text = "Hide notes" if visible else "Show notes"

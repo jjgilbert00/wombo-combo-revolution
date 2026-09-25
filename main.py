@@ -34,7 +34,7 @@ import dialogs
 from controller import find_controllers, get_cool_controller_pattern
 from input_list import LIST_BUTTON_ORDER
 from key_inputs import derive, derive_hold, describe, normalized
-from layouts.input_list_layout import InputListLayout
+from layouts.input_list_layout import LANES, InputListLayout
 from layouts.menu_layout import HelpPopup, KeyInputPopup, MenuBar, NotePopup, SettingsPopup
 from layouts.playalong_layout import PlayAlongLayout
 from playalong import PlayalongController
@@ -107,6 +107,7 @@ class WomboComboApp(App):
             "list_frame_width": 0,  # Pixels per frame in the input list; 0 = one label wide.
             "input_display": "ring",
             "show_notes": 1,
+            "lanes": ",".join(LANES),  # Input list lanes shown.
         })
 
     def get_application_config(self):
@@ -139,6 +140,7 @@ class WomboComboApp(App):
         self.display = None
         self.show_display(self.config.get("wombo", "input_display"))
         self.set_notes_visible(self.config.getboolean("wombo", "show_notes"))
+        self.set_lanes_shown(set(filter(None, self.config.get("wombo", "lanes").split(","))))
         return self.root_layout
 
     def on_start(self):
@@ -608,6 +610,16 @@ class WomboComboApp(App):
         self.input_list_layout.show_notes = visible
         self.config.set("wombo", "show_notes", int(visible))
         self.menu_bar.set_notes_visible(visible)
+
+    def set_lanes_shown(self, shown):
+        self.input_list_layout.lanes_shown = shown
+        self.config.set("wombo", "lanes", ",".join(name for name in LANES if name in shown))
+        self.menu_bar.set_lanes_shown(shown)
+
+    def toggle_lane(self, name):
+        self.set_lanes_shown(self.input_list_layout.lanes_shown ^ {name})
+        if self.display is not self.input_list_layout:
+            self.show_display("list")  # Lanes are part of the input list.
 
     def toggle_notes(self):
         self.set_notes_visible(not self.input_list_layout.show_notes)
