@@ -337,6 +337,7 @@ class InputListLayout(StencilView):
     run's per-frame matches. The player's live input sits under the lanes. Notes hang underneath as toasts, each with a
     brace pointing at the frames it annotates. Mouse wheel or drag scrubs; Ctrl + wheel zooms. Clicking selects a frame (Shift
     extends the selection) and dragging in the frame meter or key inputs lane selects a range.
+    Right-clicking opens a menu of things to do with the selection.
 
     Guidance from the app shows as a hint line under everything, and with no recording loaded, as
     a card explaining how to get started.
@@ -355,6 +356,7 @@ class InputListLayout(StencilView):
         self.on_select = None  # Called with (start, end) frames, inclusive, when the user selects frames.
         self.on_note_click = None  # Called with a note's index when its toast is clicked.
         self.on_key_input_click = None  # Called with a key input's index when its tag is clicked.
+        self.on_context_menu = None  # Called with (frame, window position) on a right click.
         self._key_tag_hits = []  # (x, y, width, height, key input index) of each tag drawn, for clicks.
         self._toast_hits = []  # (x, y, width, height, note index) of each toast drawn, for clicks.
         self.selection = None  # (start, end) to highlight, set by the app.
@@ -518,6 +520,10 @@ class InputListLayout(StencilView):
     def on_touch_down(self, touch):
         if not self.collide_point(*touch.pos):
             return super().on_touch_down(touch)
+        if touch.button == "right":
+            if self.on_context_menu:
+                self.on_context_menu(self.frame_at(touch.x), touch.pos)
+            return True
         if touch.is_mouse_scrolling:
             # Kivy reports wheel-away-from-you as "scrolldown"; that moves forward in time.
             direction = {"scrolldown": 1, "scrollright": 1, "scrollup": -1, "scrollleft": -1}.get(touch.button, 0)

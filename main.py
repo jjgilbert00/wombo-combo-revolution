@@ -27,6 +27,7 @@ from kivy.core.window import Window
 from kivy.metrics import dp
 from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.modalview import ModalView
+from kivy.uix.widget import Widget
 from KivyOnTop import register_topmost, unregister_topmost
 from pynput import keyboard
 
@@ -35,7 +36,7 @@ from controller import find_controllers
 from input_list import LIST_BUTTON_ORDER
 from key_inputs import derive, derive_hold, describe, normalized
 from layouts.input_list_layout import LANES, InputListLayout
-from layouts.menu_layout import AttemptsPopup, HelpPopup, KeyInputPopup, MenuBar, NotePopup, SettingsPopup
+from layouts.menu_layout import AttemptsPopup, HelpPopup, KeyInputPopup, Menu, MenuBar, NotePopup, SettingsPopup
 from layouts.playalong_layout import PlayAlongLayout
 from playalong import PlayalongController
 from sampler import FPS, InputSampler
@@ -143,6 +144,7 @@ class WomboComboApp(App):
         self.input_list_layout.on_select = self.set_selection
         self.input_list_layout.on_note_click = self.edit_note
         self.input_list_layout.on_key_input_click = self.edit_key_input
+        self.input_list_layout.on_context_menu = self.open_context_menu
         self.playalong_controller.set_practice(self.config.getboolean("wombo", "practice"))
         self.playalong_controller.set_history_count(self.config.getint("wombo", "recent_attempts"))
         self.menu_bar = MenuBar(self)
@@ -369,6 +371,31 @@ class WomboComboApp(App):
                 start = None
         self.selection = None if start is None else (start, end)
         self.input_list_layout.selection = self.selection
+
+    def open_context_menu(self, frame, pos):
+        """Right-click menu in the input list, for the selection (or the frame clicked, if it's
+        outside the selection)."""
+        controller = self.playalong_controller
+        if controller.is_recording() or not controller.input_track:
+            return
+        frame = max(0, min(frame, len(controller.input_track) - 1))
+        if not self.selection or not self.selection[0] <= frame <= self.selection[1]:
+            self.set_selection(frame, frame)
+        start = self.selection[0]
+        menu = Menu()
+        menu.add_item("Add note", self.add_note, "N")
+        menu.add_item("Mark key input", self.mark_key_input, "K")
+        menu.add_item("Practise from here", lambda: (controller.set_frame(start), self.play()))
+        menu.add_item("Clear selection", lambda: self.set_selection(None), "Esc")
+        menu.add_separator()
+        menu.add_item("Save attempt", self.save_attempt, "S")
+        menu.add_item("Attempts...", self.open_attempts, "A")
+        # A dropdown opens from a widget, so a one-pixel anchor stands in for the cursor.
+        anchor = Widget(size_hint=(None, None), size=(1, 1), pos=pos)
+        self.input_list_layout.add_widget(anchor)
+        menu.bind(on_dismiss=lambda *_: self.input_list_layout.remove_widget(anchor))
+        self._context_menu = menu  # Kivy holds bound callbacks weakly; keep the menu alive while open.
+        menu.open(anchor)
 
     def add_note(self):
         """Opens the note editor for the selected frames, or the frame on the line if none are selected."""
@@ -882,6 +909,7 @@ class WomboComboApp(App):
             ("S", "Save the attempt (or the latest run) with the track"),
             ("A", "Attempts: rename, show, replay or delete saved and recent attempts"),
             ("Esc", "Clear the selection"),
+            ("Right-click", "Menu for the selection: note, key input, practise from here, attempts"),
             ("Attempts", "Green hit, blue early, orange late, red missed, grey not reached (+/- frames off)"),
         ]
         HelpPopup([(key, description) for key, description, _ in HOTKEYS] + mouse_help).open()
