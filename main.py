@@ -335,7 +335,7 @@ class WomboComboApp(App):
         if self.playalong_controller.is_recording():
             self.stop_recording()
         if isinstance(data, dict):
-            self.playalong_controller.set_input_track(data["inputs"], data.get("attempt"))
+            self.playalong_controller.set_input_track(data["inputs"], data.get("attempt"), data.get("notes"))
         else:
             self.playalong_controller.set_input_track(data)  # Older saves are a bare list of frames.
         video = os.path.splitext(path)[0] + ".mp4"
@@ -347,6 +347,7 @@ class WomboComboApp(App):
             self.stop_recording()
         inputs = self.playalong_controller.get_input_track()
         attempt = self.playalong_controller.get_attempt_track()
+        notes = self.playalong_controller.get_notes()
         if not inputs:
             self.flash("Nothing to save", "ffb454")
             return
@@ -362,6 +363,8 @@ class WomboComboApp(App):
                 data = {"fps": FPS, "inputs": inputs}
                 if any(frame is not None for frame in attempt):
                     data["attempt"] = attempt
+                if notes:
+                    data["notes"] = notes
                 json.dump(data, fout, indent=1, sort_keys=True)
             if not capture:
                 return
