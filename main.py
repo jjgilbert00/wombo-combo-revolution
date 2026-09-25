@@ -33,7 +33,7 @@ from pynput import keyboard
 import dialogs
 from controller import find_controllers, get_cool_controller_pattern
 from input_list import LIST_BUTTON_ORDER
-from key_inputs import derive, describe, normalized
+from key_inputs import derive, derive_hold, describe, normalized
 from layouts.input_list_layout import InputListLayout
 from layouts.menu_layout import HelpPopup, KeyInputPopup, MenuBar, NotePopup, SettingsPopup
 from layouts.playalong_layout import PlayAlongLayout
@@ -361,13 +361,22 @@ class WomboComboApp(App):
             if not edited.get("exact") and not (edited["motion"] or edited["buttons"] or edited["direction"]):
                 self.flash("A key input needs a motion, a direction or a button (or to be an exact span)", "ffb454")
                 return
+            if edited["hold"] and not edited["exact"]:
+                count = edited["end"] - edited["start"] + 1
+                if not (edited["buttons"] or edited["direction"]):
+                    self.flash("A hold needs a direction or a button to hold", "ffb454")
+                    return
+                if edited["hold"] > count:
+                    self.flash(f"The hold is longer than its {count}-frame window", "ffb454")
+                    return
             controller.set_key_input(index, edited)
             self.flash(f"Key input {describe(edited)} on frames {edited['start']}-{edited['end']}")
 
         delete = (lambda: controller.remove_key_input(index)) if index is not None else None
         title = "Mark key input" if index is None else "Edit key input"
-        KeyInputPopup(title, normalized(key_input), len(controller.input_track) - 1, LIST_BUTTON_ORDER, describe,
-                      save, delete).open()
+        track = controller.get_input_track()
+        KeyInputPopup(title, normalized(key_input), len(track) - 1, LIST_BUTTON_ORDER, describe,
+                      lambda edited: derive_hold(track, edited["start"], edited["end"]), save, delete).open()
 
     def toggle_practice(self):
         practice = not self.playalong_controller.practice

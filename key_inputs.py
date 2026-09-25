@@ -165,6 +165,22 @@ def derive(track, start, end):
     return {"start": start, "end": end, "motion": [], "direction": held[0] if held else 5, "buttons": []}
 
 
+def derive_hold(track, start, end):
+    """Guesses what's held over track frames start..end: the direction held longest (charge-style),
+    or failing that the button held longest. Returns the direction, buttons and hold length."""
+    window = {"start": start, "end": end, "motion": [], "direction": None, "buttons": []}
+    candidates = [dict(window, direction=d) for d in (2, 4, 6, 8, 1, 3, 7, 9)]
+    candidates += [dict(window, buttons=[b]) for b in LIST_BUTTON_ORDER]
+    best, length = None, 0
+    for candidate in candidates:
+        run = best_hold(candidate, track)
+        if run and run[1] > length:
+            best, length = candidate, run[1]
+    if best is None:
+        return {"direction": None, "buttons": [], "hold": end - start + 1}
+    return {"direction": best["direction"], "buttons": best["buttons"], "hold": length}
+
+
 def describe(key_input):
     """Numpad notation, e.g. "236X", "6X", "X", "2" or "A+B"; "EXACT 3f" for an exact span and
     "[2] 45f" for a hold (down held for 45 frames)."""
