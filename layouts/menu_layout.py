@@ -26,6 +26,7 @@ PANEL_COLOR = (0.14, 0.14, 0.17, 1)
 HOVER_COLOR = (1, 1, 1, 0.08)
 ACTIVE_COLOR = (1, 1, 1, 0.16)
 RECORD_COLOR = (0.85, 0.2, 0.2, 1)
+DEMO_COLOR = (0.25, 0.5, 0.9, 1)
 TEXT_COLOR = (0.92, 0.92, 0.92, 1)
 DIM_TEXT_COLOR = (0.6, 0.6, 0.64, 1)
 FONT_SIZE = sp(14)
@@ -40,6 +41,9 @@ MENU_TIPS = {
     "Restart": "Back to the first frame: Home in this window, F5 in game. "
                "While practising this starts a fresh attempt",
     "Loop": "Loop on: the recording repeats, and each pass is kept as a recent attempt",
+    "Demo": "Watch the combo in game: a virtual controller plays the recording, either as recorded or cleaned "
+            "down to its key inputs (Shift+F6 / Shift+F7, even while the game has focus). Needs vgamepad; see the "
+            "user guide",
     "Practice": "Practice: playing scores your controller against the recording.\n"
                 "Review: playing replays your last attempt instead. F4 switches",
 }
@@ -243,6 +247,15 @@ class MenuBar(BoxLayout):
         self._transport("Restart", app.restart_playback)
         self.loop_button = self._transport("Loop", app.toggle_loop)
         self.practice_button = self._transport("Practice", app.toggle_practice)
+        demo_menu = Menu()
+        demo_menu.add_item("Demo the recording", app.demo_recording, "Shift+F6")
+        demo_menu.add_item("Demo the key inputs", app.demo_key_inputs, "Shift+F7")
+        demo_menu.add_separator()
+        demo_menu.add_item("Stop the demo", app.stop_demo, "F7")
+        self.menus["Demo"] = demo_menu
+        self.demo_button = BarButton(text="Demo", tooltip=MENU_TIPS["Demo"])
+        self.demo_button.bind(on_release=demo_menu.open)
+        self.add_widget(self.demo_button)
 
         self.status = Label(markup=True, font_size=FONT_SIZE, color=DIM_TEXT_COLOR, halign="right", valign="middle",
                             shorten=True, shorten_from="left", padding=(dp(10), 0))
@@ -311,7 +324,7 @@ class MenuBar(BoxLayout):
     def set_display_mode(self, mode):
         self.display_item.label.text = "Show ring display" if mode == "list" else "Show input list"
 
-    def update(self, recording, playing, looping, practicing, status):
+    def update(self, recording, playing, looping, practicing, status, demoing=False):
         self.record_button.text = "Stop" if recording else "Record"
         self.record_button.highlight = RECORD_COLOR if recording else (0, 0, 0, 0)
         self.play_button.text = "Pause" if playing else "Play"
@@ -321,6 +334,7 @@ class MenuBar(BoxLayout):
         self.loop_button.highlight = ACTIVE_COLOR if looping else (0, 0, 0, 0)
         self.practice_button.text = "Practice" if practicing else "Review"
         self.practice_button.highlight = ACTIVE_COLOR if practicing else (0, 0, 0, 0)
+        self.demo_button.highlight = DEMO_COLOR if demoing else (0, 0, 0, 0)
         self.status.text = status
 
 

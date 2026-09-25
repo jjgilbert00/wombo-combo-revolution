@@ -44,7 +44,7 @@ class VirtualPad:
         """Sets the controller to a recorded frame's state, or to neutral for None. Called once a
         frame from the sampler thread; unchanged frames aren't resent."""
         key = None if state is None else (state["direction"], tuple(sorted(b for b in state if b != "direction" and state[b])))
-        if key == self._last:
+        if key == self._last or self._pad is None:
             return
         self._last = key
         pad = self._pad
@@ -63,8 +63,8 @@ class VirtualPad:
         pad.update()
 
     def close(self):
-        """Releases everything and unplugs the controller."""
+        """Releases everything and unplugs the controller. Safe to call more than once."""
         try:
             self.send(None)
         finally:
-            del self._pad
+            self._pad = None  # Dropping the last reference unplugs it.

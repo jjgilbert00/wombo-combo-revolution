@@ -35,13 +35,14 @@ from pynput import keyboard
 import dialogs
 from controller import find_controllers
 from input_list import LIST_BUTTON_ORDER
-from key_inputs import derive, derive_hold, describe, normalized
+from key_inputs import demo_track, derive, derive_hold, describe, normalized
 from layouts.input_list_layout import LANES, InputListLayout
 from layouts.menu_layout import AttemptsPopup, HelpPopup, KeyInputPopup, Menu, MenuBar, NotePopup, SettingsPopup
 from layouts.playalong_layout import PlayAlongLayout
 from playalong import PlayalongController
 from sampler import FPS, InputSampler
 from screen_capture import ScreenRecorder, list_displays, prepare_capture
+from virtual_pad import VirtualPad, VirtualPadError
 from video_writer import nvenc_available, resolve_encoder, write_capture_and_overlay, write_input_video
 
 logger = logging.getLogger(__name__)
@@ -55,7 +56,9 @@ HOTKEYS = [
     ("F4", "Practice on/off (record your attempt while playing)", "toggle_practice"),
     ("F5", "Restart playback", "restart_playback"),
     ("F6", "Play", "play"),
-    ("F7", "Pause", "pause"),
+    ("F7", "Pause (also stops a demo)", "pause"),
+    ("Shift+F6", "Demo the recording in game (virtual controller)", "demo_recording"),
+    ("Shift+F7", "Demo just the key inputs in game", "demo_key_inputs"),
     ("F8", "Start / stop recording", "toggle_recording"),
     ("F11", "Open a recording", "open_track"),
     ("F12", "Save recording as (with its video)", "save_recording"),
@@ -90,6 +93,7 @@ class WomboComboApp(App):
         self.screen_recorder = None
         self.capture_path = None  # Video that belongs to the current input track, if any.
         self.track_path = None  # The current track's .json file, once it's been opened or saved.
+        self.virtual_pad = None  # Plugged in the first time a demo plays.
         self.unsaved_take = False  # A new take that hasn't been saved anywhere yet.
         self.unsaved_edits = False  # Notes, key inputs or cleaning not yet saved.
         self.temp_dir = tempfile.mkdtemp(prefix="wombo_")
@@ -121,6 +125,7 @@ class WomboComboApp(App):
             "recent": "",  # Recently opened recordings (.json paths), newest first, separated by "|".
             "recent_attempts": 5,  # Recent runs shown in the input list.
             "lead_in": 60,  # Frames of run-up before practice playback, to get ready.
+            "demo_countdown": 180,  # Frames before a demo starts, to switch to the game.
         })
 
     def get_application_config(self):
@@ -234,6 +239,9 @@ class WomboComboApp(App):
 
     def on_stop(self):
         self.listener.stop()
+        self.playalong_controller.stop_demo()
+        if self.virtual_pad:
+            self.virtual_pad.close()
         if self.playalong_controller.is_recording():
             self.stop_recording()
         self.sampler.stop()
@@ -280,7 +288,10 @@ class WomboComboApp(App):
             if backlog > FPS // 2:
                 parts.append(f"[color=ffb454]encoder {backlog / FPS:.1f}s behind[/color]")
         elif frames:
-            if controller.get_lead():
+            if controller.demo_kind():
+                lead = controller.get_lead()
+                state = f"DEMO IN {lead / FPS:.1f}s" if lead else f"DEMO ({controller.demo_kind()})"
+            elif controller.get_lead():
                 state = "GET READY"
             elif controller.is_playing():
                 state = "PRACTICE" if controller.practice else "REVIEW"
@@ -311,7 +322,7 @@ class WomboComboApp(App):
         parts.append(reader.name if reader and reader.connected else "[color=ffb454]No controller[/color]")
         parts.append(f"{stats.rate:.1f} Hz")
         self.menu_bar.update(controller.is_recording(), controller.is_playing(), controller.loop, controller.practice,
-                             "   |   ".join(parts))
+                             "   |   ".join(parts), demoing=bool(controller.demo_kind()))
         welcome = WELCOME if not frames and not controller.is_recording() else ""
         self.input_list_layout.set_guidance(self._next_step_hint(), welcome)
 
@@ -323,6 +334,13 @@ class WomboComboApp(App):
                     "F-key hotkeys work while the game has focus.")
         if not controller.input_track:
             return ""
+        if controller.demo_kind():
+            if controller.get_lead():
+                return (f"[b]Demo of the {controller.demo_kind()}[/b] starts in {controller.get_lead() / FPS:.1f}s. "
+                        "Switch to the game: the virtual controller has to be the one playing your character. "
+                        "[b]Space[/b] / [b]F7[/b] stops.")
+            return (f"[b]Demo:[/b] the virtual controller is playing the {controller.demo_kind()}; the You lane "
+                    "shows what it presses. [b]Space[/b] / [b]F7[/b] stops.")
         if self.selection:
             return ("[b]Frames selected.[/b] [b]N[/b] adds a note, [b]K[/b] marks what must be pressed there "
                     "(a key input), right-click for more, [b]Esc[/b] clears.")
@@ -356,7 +374,48 @@ class WomboComboApp(App):
         self.pause() if self.playalong_controller.is_playing() else self.play()
 
     def restart_playback(self):
-        self.playalong_controller.restart()
+        kind = self.playalong_controller.demo_kind()
+        if kind:
+            self._demo(kind)  # Start the demo again from the top.
+        else:
+            self.playalong_controller.restart()
+
+    # ---- Demo ----------------------------------------------------------------------------------
+
+    def demo_recording(self):
+        """Plays the recording, exactly as recorded, on a virtual controller for the game to see."""
+        self._demo("recording")
+
+    def demo_key_inputs(self):
+        """Plays just the key inputs (the recording cleaned of stray and over-held inputs)."""
+        self._demo("key inputs")
+
+    def stop_demo(self):
+        self.playalong_controller.stop_demo()
+
+    def _demo(self, kind):
+        controller = self.playalong_controller
+        if controller.is_recording() or not controller.input_track:
+            self.flash("Open or record something to demo first", "ffb454")
+            return
+        if kind == "key inputs":
+            if not controller.key_inputs:
+                self.flash("No key inputs to demo: select frames and press K to mark them", "ffb454", 6)
+                return
+            track = demo_track(controller.get_key_inputs(), controller.get_input_track())
+        else:
+            track = controller.get_input_track()
+        if self.virtual_pad is None:
+            try:
+                self.virtual_pad = VirtualPad()
+            except VirtualPadError as e:
+                self.flash(str(e), "ff6b6b", 12)
+                return
+        controller.pause()  # Also ends a demo already playing.
+        countdown = self.config.getint("wombo", "demo_countdown")
+        controller.start_demo(track, self.virtual_pad.send, countdown, kind)
+        self.set_selection(None)
+        self.flash(f"Demo of the {kind} in {countdown / FPS:g}s: switch to the game", "8fd18f", 5)
 
     def scrub(self, frames):
         """Moves the playhead (pausing playback) so a part of the run can be inspected."""
@@ -651,6 +710,7 @@ class WomboComboApp(App):
             self.flash("Track cleaned")
 
     def clear_track(self):
+        self.playalong_controller.stop_demo()
         if self.playalong_controller.is_recording():
             self.stop_recording()
         if not self._keep_unsaved_work("clearing it"):
@@ -682,6 +742,7 @@ class WomboComboApp(App):
         Either file of a saved recording can be picked, or dropped onto the window."""
         if not self._keep_unsaved_work("opening another"):
             return
+        self.playalong_controller.stop_demo()
         if path is None:
             path = dialogs.open_file("Open recording", "Recordings (*.json, *.mp4)", "*.json;*.mp4")
         if not path:
@@ -1002,6 +1063,8 @@ class WomboComboApp(App):
              self.config.get("wombo", "lead_in"),
              setter("lead_in", lambda: setattr(self.playalong_controller, "lead_in",
                                                self.config.getint("wombo", "lead_in")))),
+            ("Demo countdown", [("1 s", "60"), ("2 s", "120"), ("3 s", "180"), ("5 s", "300")],
+             self.config.get("wombo", "demo_countdown"), setter("demo_countdown")),
             ("Recent attempts shown", [(str(n), str(n)) for n in (0, 1, 2, 3, 5, 8, 10, 15, 20)],
              self.config.get("wombo", "recent_attempts"),
              setter("recent_attempts", lambda: self.playalong_controller.set_history_count(
