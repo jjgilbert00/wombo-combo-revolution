@@ -302,6 +302,8 @@ class InputListLayout(StencilView):
         self.on_zoom = None  # Called with the new pixels-per-frame.
         self.on_select = None  # Called with (start, end) frames, inclusive, when the user selects frames.
         self.on_note_click = None  # Called with a note's index when its toast is clicked.
+        self.on_key_input_click = None  # Called with a key input's index when its tag is clicked.
+        self._key_tag_hits = []  # (x, y, width, height, key input index) of each tag drawn, for clicks.
         self._toast_hits = []  # (x, y, width, height, note index) of each toast drawn, for clicks.
         self.selection = None  # (start, end) to highlight, set by the app.
         self._frame = 0  # Frame at the hit line when last drawn, for mapping clicks to frames.
@@ -443,6 +445,11 @@ class InputListLayout(StencilView):
         if touch.grab_current is not self:
             return super().on_touch_up(touch)
         touch.ungrab(self)
+        if not touch.ud["dragged"] and self.on_key_input_click:
+            for x, y, width, height, index in self._key_tag_hits:
+                if x <= touch.x <= x + width and y <= touch.y <= y + height:
+                    self.on_key_input_click(index)
+                    return True
         if not touch.ud["dragged"] and self.on_note_click:
             for x, y, width, height, index in self._toast_hits:
                 if x <= touch.x <= x + width and y <= touch.y <= y + height:
@@ -581,6 +588,7 @@ class InputListLayout(StencilView):
     def _draw_key_inputs(self, key_inputs, snapshot, target_y, strip_y):
         track_left, track_right = self._track_left(), self._track_right()
         border = dp(2)
+        self._key_tag_hits = []
         for index, key_input, outcome in key_inputs:
             x0 = self._frame_x(key_input["start"], snapshot.frame)
             x1 = self._frame_x(key_input["end"] + 1, snapshot.frame)
@@ -603,6 +611,7 @@ class InputListLayout(StencilView):
             graphic.tag_text.texture = texture
             graphic.tag_text.pos = (x0 + dp(4), y0 + dp(2))
             graphic.tag_text.size = texture.size
+            self._key_tag_hits.append((x0, y0, tag_width, tag_height, index))
             graphic.result_color.rgba = (*KEY_RESULT_COLORS[outcome], 1)
             graphic.result.pos = (x0, strip_y - dp(2))
             graphic.result.size = (x1 - x0, STRIP_HEIGHT + dp(4))

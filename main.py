@@ -32,8 +32,10 @@ from pynput import keyboard
 
 import dialogs
 from controller import find_controllers, get_cool_controller_pattern
+from input_list import LIST_BUTTON_ORDER
+from key_inputs import derive, describe
 from layouts.input_list_layout import InputListLayout
-from layouts.menu_layout import HelpPopup, MenuBar, NotePopup, SettingsPopup
+from layouts.menu_layout import HelpPopup, KeyInputPopup, MenuBar, NotePopup, SettingsPopup
 from layouts.playalong_layout import PlayAlongLayout
 from playalong import PlayalongController
 from sampler import FPS, InputSampler
@@ -129,6 +131,7 @@ class WomboComboApp(App):
         self.input_list_layout.on_zoom = self.set_list_zoom
         self.input_list_layout.on_select = self.set_selection
         self.input_list_layout.on_note_click = self.edit_note
+        self.input_list_layout.on_key_input_click = self.edit_key_input
         self.playalong_controller.set_practice(self.config.getboolean("wombo", "practice"))
         self.menu_bar = MenuBar(self)
         self.root_layout = BoxLayout(orientation="vertical")
@@ -184,6 +187,9 @@ class WomboComboApp(App):
             return True
         if codepoint == "n" and not modifiers:
             self.add_note()
+            return True
+        if codepoint == "k" and not modifiers:
+            self.mark_key_input()
             return True
         return False
 
@@ -330,6 +336,37 @@ class WomboComboApp(App):
         delete = (lambda: self.playalong_controller.remove_note(index)) if index is not None else None
         title = f"Note on {span}" if index is None else f"Edit note on {span}"
         NotePopup(title, text, save, delete).open()
+
+    def mark_key_input(self):
+        """Marks the selected frames (or the frame on the line) as a key input, guessing the
+        requirement from the target, and opens it for review. Edits an overlapping one instead."""
+        controller = self.playalong_controller
+        if controller.is_recording() or not controller.input_track:
+            return
+        start, end = self.selection or (controller.get_current_frame(),) * 2
+        existing = next((i for i, k in enumerate(controller.get_key_inputs())
+                         if k["start"] <= end and start <= k["end"]), None)
+        if existing is not None:
+            self.edit_key_input(existing)
+            return
+        self._open_key_input_popup(None, derive(controller.get_input_track(), start, end))
+
+    def edit_key_input(self, index):
+        self._open_key_input_popup(index, self.playalong_controller.get_key_inputs()[index])
+
+    def _open_key_input_popup(self, index, key_input):
+        controller = self.playalong_controller
+
+        def save(edited):
+            if edited["direction"] is None and not edited["buttons"]:
+                self.flash("A key input needs a direction or at least one button", "ffb454")
+                return
+            controller.set_key_input(index, edited)
+            self.flash(f"Key input {describe(edited)} on frames {edited['start']}-{edited['end']}")
+
+        delete = (lambda: controller.remove_key_input(index)) if index is not None else None
+        title = "Mark key input" if index is None else "Edit key input"
+        KeyInputPopup(title, key_input, len(controller.input_track) - 1, LIST_BUTTON_ORDER, save, delete).open()
 
     def toggle_practice(self):
         practice = not self.playalong_controller.practice
@@ -576,6 +613,7 @@ class WomboComboApp(App):
             ("Click", "Select a frame (Shift+click extends)"),
             ("Frames drag", "Select a range of frames"),
             ("N", "Add a note to the selection (click a note to edit it)"),
+            ("K", "Mark the selection as a key input (click its tag to edit)"),
             ("Esc", "Clear the selection"),
         ]
         HelpPopup([(key, description) for key, description, _ in HOTKEYS] + mouse_help).open()
