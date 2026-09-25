@@ -1,7 +1,10 @@
+import os
+
+from kivy.clock import Clock
 from kivy.core.window import Window
 from kivy.graphics import Color, Rectangle
 from kivy.metrics import dp, sp
-from kivy.properties import BooleanProperty, ListProperty
+from kivy.properties import BooleanProperty, ListProperty, StringProperty
 from kivy.uix.behaviors import ButtonBehavior
 from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.button import Button
@@ -26,6 +29,20 @@ RECORD_COLOR = (0.85, 0.2, 0.2, 1)
 TEXT_COLOR = (0.92, 0.92, 0.92, 1)
 DIM_TEXT_COLOR = (0.6, 0.6, 0.64, 1)
 FONT_SIZE = sp(14)
+MENU_TIPS = {
+    "File": "Open a recording (or drop one on the window), save, and export videos",
+    "Edit": "Notes, key inputs and attempts. Select frames in the input list first (right-click for a menu)",
+    "View": "Choose which lanes to show, hide notes, overlay mode",
+    "Settings": "Controller, video capture, lead-in and attempt history",
+    "Record": "Record a new take from your controller: F8 starts and stops, even while the game has focus. "
+              "Also captures the screen if Record video is on in Settings",
+    "Play": "Play or pause: Space in this window, F6 / F7 in game",
+    "Restart": "Back to the first frame: Home in this window, F5 in game. "
+               "While practising this starts a fresh attempt",
+    "Loop": "Loop on: the recording repeats, and each pass is kept as a recent attempt",
+    "Practice": "Practice: playing scores your controller against the recording.\n"
+                "Review: playing replays your last attempt instead. F4 switches",
+}
 LANE_MENU_ITEMS = [("meter", "Frame meter"), ("target", "Recording"), ("keys", "Key inputs"),
                    ("attempt", "Your attempt"), ("saved", "Saved attempts"), ("recent", "Recent attempts")]
 
@@ -49,10 +66,61 @@ class HoverBehavior:
         self.hovered = bool(self.get_root_window()) and not self.disabled and self.collide_point(*self.to_widget(*pos))
 
 
+class Tooltip(Label):
+    """One shared tooltip, shown under a hovered widget after a short delay."""
+
+    DELAY = 0.5
+    _instance = None
+
+    def __init__(self, **kwargs):
+        super().__init__(markup=True, font_size=sp(13), color=TEXT_COLOR, size_hint=(None, None), halign="left",
+                         valign="middle", padding=(dp(10), dp(6)), **kwargs)
+        _paint_background(self, (0.05, 0.05, 0.07, 0.96))
+        self.bind(texture_size=lambda *_: setattr(self, "size", self.texture_size))
+        self._pending = None
+        self._owner = None
+
+    @classmethod
+    def get(cls):
+        if cls._instance is None:
+            cls._instance = cls()
+        return cls._instance
+
+    def schedule(self, widget, text):
+        self.hide()
+        self._owner = widget
+        self._pending = Clock.schedule_once(lambda dt: self._show(widget, text), self.DELAY)
+
+    def _show(self, widget, text):
+        self.text_size = (None, None)
+        self.text = text
+        self.texture_update()
+        if self.texture_size[0] > dp(340):
+            self.text_size = (dp(340) - dp(20), None)  # Long tips wrap.
+            self.texture_update()
+        self.size = self.texture_size
+        x, y = widget.to_window(widget.x, widget.y)
+        self.pos = (max(dp(4), min(x, Window.width - self.width - dp(4))), y - self.height - dp(4))
+        if not self.parent:
+            Window.add_widget(self)
+
+    def hide(self, owner=None):
+        """Hides the tooltip, or with owner, only if it's that widget's (another may have just taken over)."""
+        if owner is not None and owner is not self._owner:
+            return
+        if self._pending:
+            self._pending.cancel()
+            self._pending = None
+        if self.parent:
+            self.parent.remove_widget(self)
+
+
 class BarButton(HoverBehavior, Button):
-    """Flat, text-sized button for the menu bar. `highlight` tints it, e.g. while recording."""
+    """Flat, text-sized button for the menu bar. `highlight` tints it, e.g. while recording.
+    `tooltip` is shown after hovering for a moment."""
 
     highlight = ListProperty([0, 0, 0, 0])
+    tooltip = StringProperty("")
 
     def __init__(self, **kwargs):
         kwargs.setdefault("size_hint_x", None)
@@ -62,7 +130,14 @@ class BarButton(HoverBehavior, Button):
         )
         self.bind(texture_size=lambda *_: setattr(self, "width", self.texture_size[0] + dp(24)))
         self.bind(hovered=self._refresh_color, state=self._refresh_color, highlight=self._refresh_color)
+        self.bind(hovered=self._refresh_tooltip, state=self._refresh_tooltip)
         self._refresh_color()
+
+    def _refresh_tooltip(self, *args):
+        if self.tooltip and self.hovered and self.state == "normal":
+            Tooltip.get().schedule(self, self.tooltip)
+        else:
+            Tooltip.get().hide(self)
 
     def _refresh_color(self, *args):
         if self.highlight[3]:
@@ -124,29 +199,26 @@ class MenuBar(BoxLayout):
         _paint_background(self, BAR_COLOR)
 
         file_menu = Menu()
-        file_menu.add_item("Open inputs...", app.open_track, "F11")
-        file_menu.add_item("Save recording...", app.save_recording, "F12")
-        file_menu.add_separator()
-        file_menu.add_item("Export overlay video...", app.export_overlay_video)
-        file_menu.add_item("Export input video...", app.export_input_video)
-        file_menu.add_separator()
-        file_menu.add_item("Quit", app.stop)
+        self.file_menu = file_menu
+        self.set_recent([])
 
         edit_menu = Menu()
-        edit_menu.add_item("Clean track", app.clean_track, "F9")
-        edit_menu.add_item("Clear track", app.clear_track, "F10")
+        # The selection, then attempts, then whole-track changes last so they're hard to hit by accident.
+        edit_menu.add_item("Add note to selection", app.add_note, "N")
+        edit_menu.add_item("Mark key input", app.mark_key_input, "K")
+        edit_menu.add_separator()
         edit_menu.add_item("Save attempt", app.save_attempt, "S")
         edit_menu.add_item("Attempts...", app.open_attempts, "A")
         edit_menu.add_item("Clear attempt", app.clear_attempt)
         edit_menu.add_separator()
-        edit_menu.add_item("Add note to selection", app.add_note, "N")
-        edit_menu.add_item("Mark key input", app.mark_key_input, "K")
+        edit_menu.add_item("Clean track (presses only)", app.clean_track)
+        edit_menu.add_item("Clear track", app.clear_track)
 
         view_menu = Menu()
         view_menu.add_item("Overlay mode", app.toggle_overlay, "F2")
         self.display_item = view_menu.add_item("Show input list", app.toggle_display, "F3")
         self.notes_item = view_menu.add_item("Hide notes", app.toggle_notes, "Shift+F3")
-        view_menu.add_item("Hotkeys", app.show_help, "F1")
+        view_menu.add_item("Help and keys", app.show_help, "F1")
         view_menu.add_separator()
         # Input list lanes, each shown or hidden; the right column says which.
         self.lane_items = {name: view_menu.add_item(text, lambda name=name: app.toggle_lane(name))
@@ -158,10 +230,10 @@ class MenuBar(BoxLayout):
         # Kivy holds bound methods weakly, so the menus must be kept alive here.
         self.menus = {"File": file_menu, "Edit": edit_menu, "View": view_menu}
         for text, menu in self.menus.items():
-            button = BarButton(text=text)
+            button = BarButton(text=text, tooltip=MENU_TIPS[text])
             button.bind(on_release=menu.open)
             self.add_widget(button)
-        settings_button = BarButton(text="Settings")
+        settings_button = BarButton(text="Settings", tooltip=MENU_TIPS["Settings"])
         settings_button.bind(on_release=lambda *_: app.open_settings_popup())
         self.add_widget(settings_button)
 
@@ -178,7 +250,7 @@ class MenuBar(BoxLayout):
         self.add_widget(self.status)
 
     def _transport(self, text, callback):
-        button = BarButton(text=text)
+        button = BarButton(text=text, tooltip=MENU_TIPS[text])
         button.bind(on_release=lambda *_: callback())
         self.add_widget(button)
         return button
@@ -202,6 +274,25 @@ class MenuBar(BoxLayout):
         row.add_widget(slider)
         return row
 
+    def set_recent(self, paths):
+        """Rebuilds the File menu, listing recently opened recordings right under Open."""
+        menu, app = self.file_menu, self.app
+        menu.clear_widgets()
+        menu.add_item("Open recording...", app.open_track, "Ctrl+O")
+        for path in paths:
+            name = os.path.splitext(os.path.basename(path))[0]
+            item = menu.add_item(name, lambda path=path: app.open_track(path))
+            item.label.color = DIM_TEXT_COLOR
+            item.label.shorten = True
+        menu.add_separator()
+        menu.add_item("Save", app.save, "Ctrl+S")
+        menu.add_item("Save recording as...", app.save_recording, "F12")
+        menu.add_separator()
+        menu.add_item("Export overlay video...", app.export_overlay_video)
+        menu.add_item("Export input video...", app.export_input_video)
+        menu.add_separator()
+        menu.add_item("Quit", app.quit)
+
     def set_lanes_shown(self, shown):
         for name, item in self.lane_items.items():
             item.shortcut.text = "shown" if name in shown else "hidden"
@@ -218,7 +309,10 @@ class MenuBar(BoxLayout):
         self.record_button.highlight = RECORD_COLOR if recording else (0, 0, 0, 0)
         self.play_button.text = "Pause" if playing else "Play"
         self.play_button.disabled = recording
+        # The toggles say what they're set to, rather than relying on a highlight.
+        self.loop_button.text = "Loop on" if looping else "Loop off"
         self.loop_button.highlight = ACTIVE_COLOR if looping else (0, 0, 0, 0)
+        self.practice_button.text = "Practice" if practicing else "Review"
         self.practice_button.highlight = ACTIVE_COLOR if practicing else (0, 0, 0, 0)
         self.status.text = status
 
@@ -271,23 +365,56 @@ class SettingsPopup(ModalView):
 
 
 class HelpPopup(ModalView):
-    def __init__(self, hotkeys, **kwargs):
-        super().__init__(size_hint=(None, None), size=(dp(420), dp(64) + dp(26) * len(hotkeys)),
+    """Getting-started steps across the top, then key sections in two columns.
+    columns is [[(section title, [(key, description)])]]; on_manual opens the user guide."""
+
+    KEY_WIDTH = dp(96)
+    COLUMN_WIDTH = dp(440)
+
+    def __init__(self, steps, columns, on_manual, **kwargs):
+        row_count = max(sum(len(rows) + 1.4 for _, rows in column) for column in columns)
+        super().__init__(size_hint=(None, None), size=(dp(940), dp(170) + dp(24) * len(steps) + dp(25) * row_count),
                          background="", background_color=(0, 0, 0, 0.5), **kwargs)
-        panel = BoxLayout(orientation="vertical", padding=dp(16), spacing=dp(8))
+        panel = BoxLayout(orientation="vertical", padding=dp(20), spacing=dp(8))
         _paint_background(panel, PANEL_COLOR)
-        panel.add_widget(Label(text="Hotkeys (work while the game has focus)", font_size=sp(16), bold=True,
-                               color=TEXT_COLOR, size_hint_y=None, height=dp(24), halign="left",
-                               text_size=(dp(388), None)))
-        grid = GridLayout(cols=2, row_default_height=dp(26), row_force_default=True)
-        for key, description in hotkeys:
-            grid.add_widget(Label(text=key, font_size=FONT_SIZE, color=DIM_TEXT_COLOR, size_hint_x=None,
-                                  width=dp(90), halign="left", text_size=(dp(90), None)))
-            grid.add_widget(Label(text=description, font_size=FONT_SIZE, color=TEXT_COLOR, halign="left",
-                                  text_size=(dp(298), None)))
-        panel.add_widget(grid)
+        panel.add_widget(self._label("Getting started", sp(17), TEXT_COLOR, dp(26), bold=True))
+        for number, step in enumerate(steps, 1):
+            panel.add_widget(self._label(f"{number}.  {step}", FONT_SIZE, TEXT_COLOR, dp(24), markup=True))
+        body = BoxLayout(spacing=dp(20), padding=(0, dp(10), 0, 0))
+        for column in columns:
+            box = BoxLayout(orientation="vertical", spacing=dp(1))
+            for title, rows in column:
+                box.add_widget(self._label(title, FONT_SIZE, TEXT_COLOR, dp(32), bold=True, valign="bottom"))
+                for key, description in rows:
+                    row = BoxLayout(size_hint_y=None, height=dp(24))
+                    row.add_widget(Label(text=key, font_size=FONT_SIZE, color=(1.0, 0.78, 0.2, 1), size_hint_x=None,
+                                         width=self.KEY_WIDTH, halign="left", valign="middle",
+                                         text_size=(self.KEY_WIDTH, dp(24))))
+                    row.add_widget(Label(text=description, font_size=FONT_SIZE, color=TEXT_COLOR, halign="left",
+                                         valign="middle", shorten=True,
+                                         text_size=(self.COLUMN_WIDTH - self.KEY_WIDTH, dp(24))))
+                    box.add_widget(row)
+            box.add_widget(Widget())
+            body.add_widget(box)
+        panel.add_widget(body)
+        actions = BoxLayout(size_hint_y=None, height=dp(32), spacing=dp(8))
+        actions.add_widget(self._label("Hover over any button for a tip. The user guide covers everything in detail.",
+                                       sp(12), DIM_TEXT_COLOR, dp(32)))
+        guide = BarButton(text="Open user guide", highlight=(1, 1, 1, 0.1))
+        guide.bind(on_release=lambda *_: (self.dismiss(), on_manual()))
+        close = BarButton(text="Close", highlight=(1, 1, 1, 0.1))
+        close.bind(on_release=lambda *_: self.dismiss())
+        actions.add_widget(guide)
+        actions.add_widget(close)
+        panel.add_widget(actions)
         self.add_widget(panel)
-        self.bind(on_touch_down=lambda *_: self.dismiss())
+
+    @staticmethod
+    def _label(text, font_size, color, height, bold=False, markup=False, valign="middle"):
+        label = Label(text=text, font_size=font_size, color=color, bold=bold, markup=markup, size_hint_y=None,
+                      height=height, halign="left", valign=valign)
+        label.bind(size=lambda l, size: setattr(l, "text_size", size))
+        return label
 
 
 class NotePopup(ModalView):

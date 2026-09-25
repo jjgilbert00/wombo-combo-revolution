@@ -8,6 +8,7 @@ from kivy.graphics import Color, InstructionGroup, Line, Rectangle
 from kivy.graphics.texture import Texture
 from kivy.metrics import dp, sp
 from kivy.resources import resource_find
+from kivy.uix.label import Label
 from kivy.uix.stencilview import StencilView
 from PIL import Image
 
@@ -336,6 +337,10 @@ class InputListLayout(StencilView):
     run's per-frame matches. The player's live input sits under the lanes. Notes hang underneath as toasts, each with a
     brace pointing at the frames it annotates. Mouse wheel or drag scrubs; Ctrl + wheel zooms. Clicking selects a frame (Shift
     extends the selection) and dragging in the frame meter or key inputs lane selects a range.
+    Right-clicking opens a menu of things to do with the selection.
+
+    Guidance from the app shows as a hint line under everything, and with no recording loaded, as
+    a card explaining how to get started.
     """
 
     def __init__(self, controller_type="XGamepad", button_icon_style="Alt", **kwargs):
@@ -351,6 +356,7 @@ class InputListLayout(StencilView):
         self.on_select = None  # Called with (start, end) frames, inclusive, when the user selects frames.
         self.on_note_click = None  # Called with a note's index when its toast is clicked.
         self.on_key_input_click = None  # Called with a key input's index when its tag is clicked.
+        self.on_context_menu = None  # Called with (frame, window position) on a right click.
         self._key_tag_hits = []  # (x, y, width, height, key input index) of each tag drawn, for clicks.
         self._toast_hits = []  # (x, y, width, height, note index) of each toast drawn, for clicks.
         self.selection = None  # (start, end) to highlight, set by the app.
@@ -390,6 +396,18 @@ class InputListLayout(StencilView):
         self.note_graphics = _Pool(self.note_layer, _NoteGraphic)
         self.key_graphics = _Pool(self.key_layer, _KeyGraphic)
         self.panels = _Pool(self.panel_layer, self._make_strip)
+        self.hint = Label(markup=True, font_size=sp(14), color=(0.78, 0.78, 0.82, 1), halign="left", valign="top",
+                          size_hint=(None, None))
+        self.add_widget(self.hint)
+        self.welcome = Label(markup=True, font_size=sp(15), color=(0.9, 0.9, 0.92, 1), halign="left",
+                             valign="middle", size_hint=(None, None), padding=(dp(28), dp(22)), opacity=0)
+        with self.welcome.canvas.before:
+            Color(0.1, 0.1, 0.13, 0.97)
+            self._welcome_bg = Rectangle()
+        self.welcome.bind(pos=lambda w, pos: setattr(self._welcome_bg, "pos", pos),
+                          size=lambda w, size: setattr(self._welcome_bg, "size", size),
+                          texture_size=lambda w, size: setattr(w, "size", size))
+        self.add_widget(self.welcome)
         self.history_cells = _Pool(self.history_layer, self._make_strip)
         self.history_texts = _Pool(self.history_text_layer, self._make_strip)
         self.labels = _Pool(self.label_layer, self._make_strip)
@@ -468,6 +486,23 @@ class InputListLayout(StencilView):
         self._select_bands = [(y - LANE_GAP / 2, y + height + (MARGIN if name == "meter" else LANE_GAP / 2))
                               for name, (y, height) in lanes.items() if name in ("meter", "keys")]
 
+    def set_guidance(self, hint, welcome=""):
+        """The hint line's text, and the getting-started card's (empty hides it)."""
+        if self.hint.text != hint:
+            self.hint.text = hint
+        if self.welcome.text != welcome:
+            self.welcome.text = welcome
+            self.welcome.text_size = (dp(620), None)
+        self.welcome.opacity = 1 if welcome else 0
+
+    def _place_guidance(self, notes_bottom):
+        left, right = self._track_left(), self._track_right()
+        self.hint.text_size = (right - left, None)
+        self.hint.texture_update()
+        self.hint.size = (right - left, self.hint.texture_size[1])
+        self.hint.pos = (left, max(self.y + dp(12), notes_bottom - self.hint.height))
+        self.welcome.pos = (self.center_x - self.welcome.width / 2, self.center_y - self.welcome.height / 2)
+
     def frames_needed(self):
         """How many frames fit (before, after) the hit line."""
         line_x = self._line_x()
@@ -485,6 +520,10 @@ class InputListLayout(StencilView):
     def on_touch_down(self, touch):
         if not self.collide_point(*touch.pos):
             return super().on_touch_down(touch)
+        if touch.button == "right":
+            if self.on_context_menu:
+                self.on_context_menu(self.frame_at(touch.x), touch.pos)
+            return True
         if touch.is_mouse_scrolling:
             # Kivy reports wheel-away-from-you as "scrolldown"; that moves forward in time.
             direction = {"scrolldown": 1, "scrollright": 1, "scrollup": -1, "scrollleft": -1}.get(touch.button, 0)
@@ -808,6 +847,8 @@ class InputListLayout(StencilView):
         lanes_top = self.top - MARGIN
         live_y = bottom - ICON_SIZE
         self._draw_notes(snapshot.notes, snapshot, lanes_top, live_y - dp(14))
+        # The hint sits under the live input, below any notes (which take up to three toast rows).
+        self._place_guidance(live_y - dp(24) - (TOAST_ROWS * dp(40) if snapshot.notes and self.show_notes else 0))
         self._draw_selection(snapshot, lanes_top, bottom + LANE_GAP)
 
         # The player's live input sits under the line, which turns green when it matches.
