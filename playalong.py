@@ -5,7 +5,7 @@ from collections import namedtuple
 
 from controller import get_neutral_controller_state
 from input_list import match_runs, runs_in_range
-from key_inputs import HIT, result
+from key_inputs import HIT, normalized, result
 
 PLAYALONG_FRAMELENGTH = 120
 
@@ -56,7 +56,7 @@ class PlayalongController:
     def _fit_key_inputs(self, key_inputs):
         """Drops key inputs that start past the end of the track and trims ones that run off it."""
         last = len(self.input_track) - 1
-        fitted = [dict(k, end=min(k["end"], last)) for k in key_inputs if k["start"] <= last]
+        fitted = [normalized(dict(k, end=min(k["end"], last))) for k in key_inputs if k["start"] <= last]
         self.key_inputs = sorted(fitted, key=lambda k: (k["start"], k["end"]))
 
     def _fit_notes(self, notes):
