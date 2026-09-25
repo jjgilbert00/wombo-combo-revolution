@@ -35,7 +35,7 @@ from controller import find_controllers, get_cool_controller_pattern
 from input_list import LIST_BUTTON_ORDER
 from key_inputs import derive, derive_hold, describe, normalized
 from layouts.input_list_layout import LANES, InputListLayout
-from layouts.menu_layout import HelpPopup, KeyInputPopup, MenuBar, NotePopup, SettingsPopup
+from layouts.menu_layout import AttemptsPopup, HelpPopup, KeyInputPopup, MenuBar, NotePopup, SettingsPopup
 from layouts.playalong_layout import PlayAlongLayout
 from playalong import PlayalongController
 from sampler import FPS, InputSampler
@@ -198,6 +198,9 @@ class WomboComboApp(App):
             return True
         if codepoint == "s" and not modifiers:
             self.save_attempt()
+            return True
+        if codepoint == "a" and not modifiers:
+            self.open_attempts()
             return True
         return False
 
@@ -422,6 +425,66 @@ class WomboComboApp(App):
                 json.dump(data, fout, indent=1, sort_keys=True)
 
         self.run_job("Saving attempts", write, message)
+
+    def open_attempts(self):
+        AttemptsPopup(self).open()
+
+    def attempts_overview(self):
+        """Saved attempts and recent runs (newest first) as the attempts manager lists them."""
+        controller = self.playalong_controller
+
+        def describe(kind, item, name):
+            done, total = controller.score(item["attempt"])
+            if controller.key_inputs:
+                score = f"Key inputs {done}/{total}"
+            else:
+                score = f"Match {done / total:.0%}" if total else "Not played"
+            created = time.localtime(item["created"])
+            when = time.strftime("%H:%M:%S" if created[:3] == time.localtime()[:3] else "%b %d %H:%M", created)
+            return {"kind": kind, "id": item["id"], "name": name, "score": score, "when": when,
+                    "shown": item.get("shown")}
+
+        return {
+            "saved": [describe("saved", saved, saved["name"]) for saved in controller.get_saved_attempts()],
+            "recent": [describe("recent", run, f"Run {run['id']}") for run in reversed(controller.get_runs())],
+        }
+
+    def rename_saved(self, saved_id, name):
+        current = next(s for s in self.playalong_controller.get_saved_attempts() if s["id"] == saved_id)
+        if current["name"] != name.strip():
+            self.playalong_controller.update_saved(saved_id, name=name.strip())
+            self.store_saved_attempts(f"Renamed to \"{name.strip()}\"")
+
+    def show_saved(self, saved_id, shown):
+        self.playalong_controller.update_saved(saved_id, shown=shown)
+        self.store_saved_attempts("Shown in the input list" if shown else "Hidden from the input list")
+
+    def save_run(self, run_id):
+        saved = self.playalong_controller.save_attempt(run_id)
+        if saved:
+            self.store_saved_attempts(f"Saved Run {run_id} as \"{saved['name']}\"")
+
+    def delete_attempt(self, kind, attempt_id):
+        if kind == "saved":
+            self.playalong_controller.remove_saved(attempt_id)
+            self.store_saved_attempts("Deleted the saved attempt")
+        else:
+            self.playalong_controller.remove_run(attempt_id)
+
+    def replay_attempt(self, kind, attempt_id):
+        """Plays an earlier attempt back against the recording, in review mode so it isn't overwritten."""
+        controller = self.playalong_controller
+        items = controller.get_saved_attempts() if kind == "saved" else controller.get_runs()
+        item = next((item for item in items if item["id"] == attempt_id), None)
+        if item is None or controller.is_recording():
+            return
+        if controller.practice:
+            self.toggle_practice()
+        controller.pause()
+        controller.set_attempt_track(item["attempt"])
+        controller.set_frame(0)
+        controller.play()
+        self.flash(f"Replaying {item.get('name') or 'Run ' + str(attempt_id)}; F4 to practice again")
 
     def clear_attempt(self):
         self.playalong_controller.clear_attempt()
@@ -681,6 +744,7 @@ class WomboComboApp(App):
             ("N", "Add a note to the selection (click a note to edit it)"),
             ("K", "Mark the selection as a key input (click its tag to edit)"),
             ("S", "Save the attempt (or the latest run) with the track"),
+            ("A", "Attempts: rename, show, replay or delete saved and recent attempts"),
             ("Esc", "Clear the selection"),
             ("Attempts", "Green hit, blue early, orange late, red missed, grey not reached (+/- frames off)"),
         ]
