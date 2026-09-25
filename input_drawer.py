@@ -1,8 +1,14 @@
-from PIL import Image, ImageDraw
+import os
+
+import kivy
+from PIL import Image, ImageDraw, ImageFont
 import math
 
 from controller import get_cool_controller_pattern
 from images import get_standard_button_icon
+
+FONT_PATH = os.path.join(os.path.dirname(kivy.__file__), "data", "fonts", "Roboto-Regular.ttf")
+NOTE_ACCENT = (255, 217, 89, 255)
 
 
 class DirectionalPromptDrawer:
@@ -246,6 +252,34 @@ class ButtonDrawer:
         image.paste(self.transparent_button, (int(x), int(y + height - new_height)), mask=self.transparent_button)
 
 
+class NoteDrawer:
+    """Draws note texts as toasts stacked down from the top centre of the frame, clear of the
+    button row along the bottom."""
+
+    def __init__(self, width, height):
+        self.width = width
+        self.height = height
+        self.font = ImageFont.truetype(FONT_PATH, max(16, height // 36))
+        self.padding = self.font.size // 2
+
+    def draw(self, image, texts):
+        overlay = Image.new("RGBA", image.size, (0, 0, 0, 0))
+        draw = ImageDraw.Draw(overlay)
+        y = self.padding * 2
+        for text in texts:
+            left, top, right, bottom = draw.textbbox((0, 0), text, font=self.font)
+            box_width = right - left + self.padding * 3
+            box_height = bottom - top + self.padding * 2
+            x = (self.width - box_width) // 2
+            draw.rounded_rectangle([x, y, x + box_width, y + box_height], radius=self.padding // 2,
+                                   fill=(30, 30, 38, 235))
+            draw.rectangle([x, y, x + max(3, self.padding // 3), y + box_height], fill=NOTE_ACCENT)
+            draw.text((x + self.padding * 2 - left, y + self.padding - top), text, font=self.font,
+                      fill=(245, 245, 245, 255))
+            y += box_height + self.padding
+        image.alpha_composite(overlay)
+
+
 class InputDrawer:
     button_names = ["A", "X", "B", "Y", "RT", "RB", "LT", "LB"]
 
@@ -253,12 +287,13 @@ class InputDrawer:
         self.width = width
         self.height = height
         self.directional_drawer = DirectionalPromptDrawer()
+        self.note_drawer = NoteDrawer(width, height)
         self.button_drawers = [
             ButtonDrawer(get_standard_button_icon(controller_type, button_icon_style, name), width * 7 // 100)
             for name in self.button_names
         ]
 
-    def draw(self, inputs):
+    def draw(self, inputs, notes=()):
         image = Image.new("RGBA", (self.width, self.height), (0, 0, 0, 0))
         draw = ImageDraw.Draw(image)
         self.directional_drawer.draw(
@@ -267,6 +302,8 @@ class InputDrawer:
         for i, (name, drawer) in enumerate(zip(self.button_names, self.button_drawers)):
             button_x = self.width * (0.5 + i * (0.48 / 8))
             drawer.draw(image, [frame[name] for frame in inputs], button_x, 0, self.height)
+        if notes:
+            self.note_drawer.draw(image, notes)
         return image
 
 

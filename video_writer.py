@@ -139,7 +139,18 @@ def _padded(inputs, before, after):
     )
 
 
-def write_input_video(inputs, output_path, playalong_length=120, width=1600, height=800, encoder="libx264", progress=None):
+# A note is shown from half a second before its frames until a second after them.
+NOTE_LEAD_FRAMES = 30
+NOTE_LINGER_FRAMES = 60
+
+
+def notes_at(notes, frame):
+    return [note["text"] for note in notes or ()
+            if note["start"] - NOTE_LEAD_FRAMES <= frame <= note["end"] + NOTE_LINGER_FRAMES]
+
+
+def write_input_video(inputs, output_path, playalong_length=120, width=1600, height=800, encoder="libx264", progress=None,
+                      notes=None):
     if not inputs:
         return
     drawer = InputDrawer(width, height)
@@ -147,14 +158,15 @@ def write_input_video(inputs, output_path, playalong_length=120, width=1600, hei
     extended_inputs = _padded(inputs, 0, playalong_length)
     try:
         for i in range(len(inputs)):
-            writer.write(np.asarray(drawer.draw(extended_inputs[i : i + playalong_length])))
+            writer.write(np.asarray(drawer.draw(extended_inputs[i : i + playalong_length], notes_at(notes, i))))
             if progress and i % 30 == 0:
                 progress(i / len(inputs))
     finally:
         writer.close()
 
 
-def write_capture_and_overlay(capture_path, inputs, output_path, playalong_length=120, delay_frames=4, opacity=0.8, encoder="libx264", progress=None):
+def write_capture_and_overlay(capture_path, inputs, output_path, playalong_length=120, delay_frames=4, opacity=0.8,
+                              encoder="libx264", progress=None, notes=None):
     """Draws the input display over a captured video, frame for frame.
 
     delay_frames shifts the inputs later to line them up with what the game shows on screen.
@@ -174,7 +186,8 @@ def write_capture_and_overlay(capture_path, inputs, output_path, playalong_lengt
             ok, frame = capture.read()
             if not ok:
                 break
-            overlay = np.asarray(drawer.draw(extended_inputs[i : i + playalong_length]))
+            # Inputs (and their notes) are shown delay_frames later, to match what the game shows.
+            overlay = np.asarray(drawer.draw(extended_inputs[i : i + playalong_length], notes_at(notes, i - delay_frames)))
             # Alpha-blend using the overlay's own alpha channel so only the drawn inputs cover the video.
             weight = overlay[:, :, 3].astype(np.float32) * (opacity / 255)
             overlay_bgr = cv2.cvtColor(overlay, cv2.COLOR_RGBA2BGR)

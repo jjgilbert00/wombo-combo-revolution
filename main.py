@@ -451,7 +451,8 @@ class WomboComboApp(App):
                 shutil.copyfile(capture, base + ".mp4")
             if export_overlay:
                 self.job_label = "Exporting overlay"
-                write_capture_and_overlay(capture, inputs, base + "_overlay.mp4", **self._export_options(progress))
+                write_capture_and_overlay(capture, inputs, base + "_overlay.mp4", notes=notes,
+                                          **self._export_options(progress))
 
         self.run_job("Saving", save, f"Saved {os.path.basename(base)}")
 
@@ -464,15 +465,18 @@ class WomboComboApp(App):
         path = dialogs.save_file("Export overlay video", "Videos (*.mp4)", "*.mp4", "mp4")
         if path:
             inputs = self.playalong_controller.get_input_track()
+            notes = self.playalong_controller.get_notes()
             capture = self.capture_path
             self.run_job(
                 "Exporting overlay",
-                lambda progress: write_capture_and_overlay(capture, inputs, path, **self._export_options(progress)),
+                lambda progress: write_capture_and_overlay(capture, inputs, path, notes=notes,
+                                                           **self._export_options(progress)),
                 f"Exported {os.path.basename(path)}",
             )
 
     def export_input_video(self):
         inputs = self.playalong_controller.get_input_track()
+        notes = self.playalong_controller.get_notes()
         if not inputs:
             self.flash("Nothing to export", "ffb454")
             return
@@ -481,7 +485,7 @@ class WomboComboApp(App):
             encoder = resolve_encoder(self.config.get("wombo", "encoder"))
             self.run_job(
                 "Exporting inputs",
-                lambda progress: write_input_video(inputs, path, encoder=encoder, progress=progress),
+                lambda progress: write_input_video(inputs, path, encoder=encoder, progress=progress, notes=notes),
                 f"Exported {os.path.basename(path)}",
             )
 
