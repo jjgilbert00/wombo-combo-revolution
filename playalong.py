@@ -5,11 +5,14 @@ from collections import namedtuple
 
 from controller import get_neutral_controller_state
 from input_list import match_runs, runs_in_range
+from key_inputs import HIT, result
 
 PLAYALONG_FRAMELENGTH = 120
 
 
-ListSnapshot = namedtuple("ListSnapshot", "live_state frame recording target_runs attempt_runs match_runs notes")
+ListSnapshot = namedtuple(
+    "ListSnapshot", "live_state frame recording target_runs attempt_runs match_runs notes key_inputs"
+)
 
 
 class RUNNING_STATES(Enum):
@@ -30,6 +33,9 @@ class PlayalongController:
 
     Notes annotate a range of track frames with text: {"start": frame, "end": frame, "text": str},
     with an inclusive range. They're kept sorted by start frame.
+
+    Key inputs (see key_inputs.py) mark the inputs that matter, each with a window of eligible
+    frames; the attempt is scored against them. They're also kept sorted by start frame.
     """
 
     def __init__(self, input_track=None):
@@ -45,6 +51,13 @@ class PlayalongController:
         self.practice = True  # Playing records the player's attempt; off, playback just replays it.
         self._reset_attempt()
         self.notes = []
+        self.key_inputs = []
+
+    def _fit_key_inputs(self, key_inputs):
+        """Drops key inputs that start past the end of the track and trims ones that run off it."""
+        last = len(self.input_track) - 1
+        fitted = [dict(k, end=min(k["end"], last)) for k in key_inputs if k["start"] <= last]
+        self.key_inputs = sorted(fitted, key=lambda k: (k["start"], k["end"]))
 
     def _fit_notes(self, notes):
         """Drops notes that start past the end of the track and trims ones that run off it."""
@@ -116,7 +129,7 @@ class PlayalongController:
             frame = len(self.input_track) if recording else self.current_frame
             lo, hi = frame - frames_before, frame + frames_after + 1
             if recording:
-                return ListSnapshot(self.live_state, frame, True, runs_in_range(self.input_track, lo, hi), [], [], [])
+                return ListSnapshot(self.live_state, frame, True, runs_in_range(self.input_track, lo, hi), [], [], [], [])
             return ListSnapshot(
                 self.live_state, frame, False,
                 runs_in_range(self.input_track, lo, hi),
@@ -124,7 +137,36 @@ class PlayalongController:
                 match_runs(self.input_track, self.attempt_track, lo, hi),
                 [(i, note["start"], note["end"], note["text"]) for i, note in enumerate(self.notes)
                  if note["start"] < hi and note["end"] >= lo],
+                [(i, dict(k), result(k, self.attempt_track)) for i, k in enumerate(self.key_inputs)
+                 if k["start"] < hi and k["end"] >= lo],
             )
+
+    def get_key_inputs(self):
+        with self._lock:
+            return [dict(k) for k in self.key_inputs]
+
+    def set_key_input(self, index, key_input):
+        """Adds a key input (index None) or replaces the one at index. Returns its new index."""
+        with self._lock:
+            key_inputs = [dict(k) for k in self.key_inputs]
+            key_input = dict(key_input, start=min(key_input["start"], key_input["end"]),
+                             end=max(key_input["start"], key_input["end"]))
+            if index is None:
+                key_inputs.append(key_input)
+            else:
+                key_inputs[index] = key_input
+            self._fit_key_inputs(key_inputs)
+            return self.key_inputs.index(key_input) if key_input in self.key_inputs else None
+
+    def remove_key_input(self, index):
+        with self._lock:
+            del self.key_inputs[index]
+
+    def key_input_score(self):
+        """(hits, total) for the attempt against the key inputs."""
+        with self._lock:
+            results = [result(k, self.attempt_track) for k in self.key_inputs]
+            return sum(r == HIT for r in results), len(results)
 
     def get_notes(self):
         with self._lock:
@@ -191,13 +233,14 @@ class PlayalongController:
         with self._lock:
             return list(self.input_track)
 
-    def set_input_track(self, input_track, attempt=None, notes=None):
+    def set_input_track(self, input_track, attempt=None, notes=None, key_inputs=None):
         with self._lock:
             self.running_state = RUNNING_STATES.STOPPED
             self.input_track = list(input_track)
             self.current_frame = 0
             self._reset_attempt(attempt)
             self._fit_notes(notes or [])
+            self._fit_key_inputs(key_inputs or [])
 
     def get_playalong_frames(self):
         playalong_frames = self.input_track[
@@ -221,6 +264,7 @@ class PlayalongController:
             self.current_frame = 0
             self._reset_attempt()
             self.notes = []
+            self.key_inputs = []
             self.running_state = RUNNING_STATES.RECORDING
 
     def stop_recording(self):
@@ -236,6 +280,7 @@ class PlayalongController:
             del self.input_track[frame_count:]
             self._reset_attempt(self.attempt_track)
             self._fit_notes(self.notes)
+            self._fit_key_inputs(self.key_inputs)
 
     def clean_track(self):
         """Reduces held buttons to their first frame so prompts show presses, not holds."""

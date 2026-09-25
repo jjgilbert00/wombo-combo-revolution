@@ -239,7 +239,11 @@ class WomboComboApp(App):
             else:
                 state = "PAUSED"
             parts.append(f"{state} {format_time(controller.get_current_frame())} / {format_time(frames)}")
-            if controller.attempted_frames:
+            hits, total = controller.key_input_score()
+            if total:
+                # With key inputs marked, only they count; other frames are non-essential.
+                parts.append(f"Key inputs {hits}/{total}")
+            elif controller.attempted_frames:
                 accuracy = controller.matched_frames / controller.attempted_frames
                 parts.append(f"Match {accuracy:.0%} of {controller.attempted_frames}f")
         else:
@@ -413,7 +417,8 @@ class WomboComboApp(App):
         if self.playalong_controller.is_recording():
             self.stop_recording()
         if isinstance(data, dict):
-            self.playalong_controller.set_input_track(data["inputs"], data.get("attempt"), data.get("notes"))
+            self.playalong_controller.set_input_track(data["inputs"], data.get("attempt"), data.get("notes"),
+                                                      data.get("key_inputs"))
         else:
             self.playalong_controller.set_input_track(data)  # Older saves are a bare list of frames.
         video = os.path.splitext(path)[0] + ".mp4"
@@ -427,6 +432,7 @@ class WomboComboApp(App):
         inputs = self.playalong_controller.get_input_track()
         attempt = self.playalong_controller.get_attempt_track()
         notes = self.playalong_controller.get_notes()
+        key_inputs = self.playalong_controller.get_key_inputs()
         if not inputs:
             self.flash("Nothing to save", "ffb454")
             return
@@ -444,6 +450,8 @@ class WomboComboApp(App):
                     data["attempt"] = attempt
                 if notes:
                     data["notes"] = notes
+                if key_inputs:
+                    data["key_inputs"] = key_inputs
                 json.dump(data, fout, indent=1, sort_keys=True)
             if not capture:
                 return
@@ -477,6 +485,7 @@ class WomboComboApp(App):
     def export_input_video(self):
         inputs = self.playalong_controller.get_input_track()
         notes = self.playalong_controller.get_notes()
+        key_inputs = self.playalong_controller.get_key_inputs()
         if not inputs:
             self.flash("Nothing to export", "ffb454")
             return
