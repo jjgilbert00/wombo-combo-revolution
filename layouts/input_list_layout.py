@@ -1,7 +1,10 @@
+import ctypes
+import sys
+
 from kivy.core.image import Image as CoreImage
 from kivy.core.text import Label as CoreLabel
 from kivy.core.window import Window
-from kivy.graphics import Color, InstructionGroup, Rectangle
+from kivy.graphics import Color, InstructionGroup, Line, Rectangle
 from kivy.graphics.texture import Texture
 from kivy.metrics import dp, sp
 from kivy.resources import resource_find
@@ -43,6 +46,25 @@ HISTORY_ALPHA = 0.45
 METER_NEUTRAL_COLOR = (0.38, 0.38, 0.42)
 METER_DIRECTION_COLOR = (0.3, 0.55, 0.95)
 METER_BUTTON_COLOR = (1.0, 0.68, 0.2)
+NOTE_COLOR = (1.0, 0.85, 0.35)
+TOAST_COLOR = (0.12, 0.12, 0.15)
+TOAST_MAX_WIDTH = dp(260)
+TOAST_PADDING = dp(8)
+TOAST_ROWS = 3  # Overlapping notes stack into this many rows; any more are skipped.
+BRACE_HEIGHT = dp(12)
+SELECTION_COLOR = (0.4, 0.65, 1.0)
+CLICK_SLOP = dp(4)  # A press that moves less than this is a click, not a drag.
+
+
+_VIRTUAL_KEYS = {"shift": 0x10, "ctrl": 0x11}
+
+
+def _modifier_held(name):
+    """Whether Shift/Ctrl is down right now. Asks Windows directly: Kivy's Window.modifiers isn't
+    reliably updated for mouse events, so it can miss a held key."""
+    if sys.platform == "win32":
+        return bool(ctypes.windll.user32.GetKeyState(_VIRTUAL_KEYS[name]) & 0x8000)
+    return name in Window.modifiers
 
 
 def _texture_from_pil(image):
@@ -121,6 +143,60 @@ class _Box:
         self.fill_color.a = self.edge_color.a = self.content_color.a = 0
 
 
+class _NoteGraphic:
+    """A note: a bar over its frames above the meter, a brace under the display spanning them, and a
+    toast with the text hanging from the brace's tip."""
+
+    def __init__(self, layer):
+        self.group = InstructionGroup()
+        self.tint_color = Color(*NOTE_COLOR, 0)
+        self.tint = Rectangle()
+        self.brace_color = Color(*NOTE_COLOR, 0)
+        self.brace = Line(width=dp(1.3))
+        self.connector = Line(width=dp(1.3))  # From the brace's tip down to the toast.
+        self.toast_color = Color(*TOAST_COLOR, 0)
+        self.toast = Rectangle()
+        self.accent_color = Color(*NOTE_COLOR, 0)
+        self.accent = Rectangle()
+        self.text_color = Color(1, 1, 1, 0)
+        self.text = Rectangle()
+        for instruction in (self.tint_color, self.tint, self.brace_color, self.brace, self.connector,
+                            self.toast_color, self.toast,
+                            self.accent_color, self.accent, self.text_color, self.text):
+            self.group.add(instruction)
+        layer.add(self.group)
+
+    def hide(self):
+        for color in (self.tint_color, self.brace_color, self.toast_color, self.accent_color, self.text_color):
+            color.a = 0
+
+
+def _quadratic(p0, p1, p2, steps=6):
+    points = []
+    for step in range(1, steps + 1):
+        t = step / steps
+        points += [(1 - t) ** 2 * p0[0] + 2 * (1 - t) * t * p1[0] + t * t * p2[0],
+                   (1 - t) ** 2 * p0[1] + 2 * (1 - t) * t * p1[1] + t * t * p2[1]]
+    return points
+
+
+def _brace_points(x0, x1, top, height):
+    """An underbrace from x0 to x1 hanging down from top, with its tip at the middle. Too narrow for
+    curls (e.g. a single frame), it's a V pointing at the frame instead."""
+    middle = (x0 + x1) / 2
+    if x1 - x0 < 4 * height:
+        return [x0, top, middle, top - height, x1, top]
+    r = height / 2
+    points = [x0, top]
+    points += _quadratic((x0, top), (x0, top - r), (x0 + r, top - r))
+    points += [middle - r, top - r]
+    points += _quadratic((middle - r, top - r), (middle, top - r), (middle, top - height))
+    points += _quadratic((middle, top - height), (middle, top - r), (middle + r, top - r))
+    points += [x1 - r, top - r]
+    points += _quadratic((x1 - r, top - r), (x1, top - r), (x1, top))
+    return points
+
+
 class _Pool:
     def __init__(self, layer, factory):
         self.layer, self.factory, self.items, self.used = layer, factory, [], 0
@@ -147,12 +223,24 @@ class _Textures:
             for name in LIST_BUTTON_ORDER
         }
         self.counts = {}
+        self.notes = {}
 
     def count(self, frames):
         text = str(frames) if frames <= DISPLAY_COUNT_LIMIT else f"{DISPLAY_COUNT_LIMIT}+"
         if text not in self.counts:
             self.counts[text] = _text_texture(text, COUNT_FONT_SIZE)
         return self.counts[text]
+
+    def note(self, text):
+        if text not in self.notes:
+            label = CoreLabel(text=text, font_size=sp(14))
+            label.refresh()
+            if label.texture.width > TOAST_MAX_WIDTH - 2 * TOAST_PADDING:
+                # Only long notes wrap; short ones keep a toast that fits their text.
+                label = CoreLabel(text=text, font_size=sp(14), text_size=(TOAST_MAX_WIDTH - 2 * TOAST_PADDING, None))
+                label.refresh()
+            self.notes[text] = label.texture
+        return self.notes[text]
 
 
 class InputListLayout(StencilView):
@@ -162,15 +250,23 @@ class InputListLayout(StencilView):
     box as wide as it's held: its left edge reaches the line on the frame it should be pressed and
     its right edge when it should be released. Lanes from the top: a frame meter (one block per
     target frame), the target track, a strip marking each frame green (matched) or red (missed), and
-    the player's attempt. Mouse wheel or drag scrubs; Ctrl + wheel zooms.
+    the player's attempt. Notes hang underneath as toasts, each with a brace pointing at the frames
+    it annotates. Mouse wheel or drag scrubs; Ctrl + wheel zooms. Clicking selects a frame (Shift
+    extends the selection) and dragging in the frame meter selects a range.
     """
 
     def __init__(self, controller_type="XGamepad", button_icon_style="Alt", **kwargs):
         super().__init__(**kwargs)
         self.textures = _Textures(controller_type, button_icon_style)
         self.px_per_frame = DEFAULT_PX_PER_FRAME
+        self.show_notes = True  # When off, notes only show as bars over their frames.
         self.on_scrub = None  # Called with a frame delta when the user scrolls or drags.
         self.on_zoom = None  # Called with the new pixels-per-frame.
+        self.on_select = None  # Called with (start, end) frames, inclusive, when the user selects frames.
+        self.on_note_click = None  # Called with a note's index when its toast is clicked.
+        self._toast_hits = []  # (x, y, width, height, note index) of each toast drawn, for clicks.
+        self.selection = None  # (start, end) to highlight, set by the app.
+        self._frame = 0  # Frame at the hit line when last drawn, for mapping clicks to frames.
         self._drag_frames = 0.0
 
         with self.canvas:
@@ -180,6 +276,11 @@ class InputListLayout(StencilView):
             self.strip_layer = InstructionGroup()
             self.meter_layer = InstructionGroup()
             self.meter_divider_layer = InstructionGroup()
+            self.note_layer = InstructionGroup()
+            self.selection_color = Color(*SELECTION_COLOR, 0)
+            self.selection_fill = Rectangle()
+            self.selection_edge_color = Color(*SELECTION_COLOR, 0)
+            self.selection_edges = [Rectangle(), Rectangle()]
         with self.canvas.after:
             # The gutter covers boxes that scroll past the left edge of the track.
             Color(*GUTTER_COLOR)
@@ -196,6 +297,7 @@ class InputListLayout(StencilView):
         self.strips = _Pool(self.strip_layer, self._make_strip)
         self.meter_blocks = _Pool(self.meter_layer, self._make_strip)
         self.meter_dividers = _Pool(self.meter_divider_layer, self._make_strip)
+        self.note_graphics = _Pool(self.note_layer, _NoteGraphic)
         self.bind(pos=self._layout, size=self._layout)
 
     @staticmethod
@@ -250,6 +352,9 @@ class InputListLayout(StencilView):
         return (int((line_x - self._track_left()) / self.px_per_frame) + 2,
                 int((self._track_right() - line_x) / self.px_per_frame) + 2)
 
+    def frame_at(self, x):
+        return self._frame + int((x - self._line_x()) // self.px_per_frame)
+
     def set_zoom(self, px_per_frame):
         self.px_per_frame = max(MIN_PX_PER_FRAME, min(MAX_PX_PER_FRAME, px_per_frame))
 
@@ -261,7 +366,7 @@ class InputListLayout(StencilView):
         if touch.is_mouse_scrolling:
             # Kivy reports wheel-away-from-you as "scrolldown"; that moves forward in time.
             direction = {"scrolldown": 1, "scrollright": 1, "scrollup": -1, "scrollleft": -1}.get(touch.button, 0)
-            if "ctrl" in Window.modifiers:
+            if _modifier_held("ctrl"):
                 self.set_zoom(self.px_per_frame * (1.25 if direction > 0 else 0.8))
                 if self.on_zoom:
                     self.on_zoom(self.px_per_frame)
@@ -270,11 +375,22 @@ class InputListLayout(StencilView):
             return True
         touch.grab(self)
         self._drag_frames = 0.0
+        meter_y = self._lanes()[0]
+        # Dragging in the frame meter selects frames; anywhere else it scrubs.
+        touch.ud["selecting"] = meter_y - LANE_GAP / 2 <= touch.y <= meter_y + METER_HEIGHT + MARGIN
+        touch.ud["anchor"] = self.frame_at(touch.x)
+        touch.ud["dragged"] = False
         return True
 
     def on_touch_move(self, touch):
         if touch.grab_current is not self:
             return super().on_touch_move(touch)
+        if abs(touch.x - touch.ox) > CLICK_SLOP or abs(touch.y - touch.oy) > CLICK_SLOP:
+            touch.ud["dragged"] = True
+        if touch.ud["selecting"]:
+            if touch.ud["dragged"] and self.on_select:
+                self.on_select(touch.ud["anchor"], self.frame_at(touch.x))
+            return True
         # Dragging the track left brings later frames onto the line.
         self._drag_frames -= touch.dx / self.px_per_frame
         whole = int(self._drag_frames)
@@ -284,10 +400,24 @@ class InputListLayout(StencilView):
         return True
 
     def on_touch_up(self, touch):
-        if touch.grab_current is self:
-            touch.ungrab(self)
-            return True
-        return super().on_touch_up(touch)
+        if touch.grab_current is not self:
+            return super().on_touch_up(touch)
+        touch.ungrab(self)
+        if not touch.ud["dragged"] and self.on_note_click:
+            for x, y, width, height, index in self._toast_hits:
+                if x <= touch.x <= x + width and y <= touch.y <= y + height:
+                    self.on_note_click(index)
+                    return True
+        if not touch.ud["dragged"] and self.on_select:
+            frame = self.frame_at(touch.x)
+            if _modifier_held("shift") and self.selection:
+                # Extend from whichever end of the current selection is farther away.
+                start, end = self.selection
+                anchor = start if abs(frame - start) > abs(frame - end) else end
+                self.on_select(anchor, frame)
+            else:
+                self.on_select(frame, frame)
+        return True
 
     # ---- Drawing -----------------------------------------------------------------------------
 
@@ -359,7 +489,69 @@ class InputListLayout(StencilView):
         self.meter_blocks.finish(hide)
         self.meter_dividers.finish(hide)
 
+    def _draw_notes(self, notes, snapshot, meter_y, notes_top):
+        track_left, track_right = self._track_left(), self._track_right()
+        row_ends = []  # Right edge of the last toast placed in each row.
+        self._toast_hits = []
+        for index, start, end, text in notes:
+            x0 = self._frame_x(start, snapshot.frame)
+            x1 = self._frame_x(end + 1, snapshot.frame)
+            if x1 < track_left or x0 > track_right:
+                continue
+            texture = self.textures.note(text)
+            width, height = texture.width + 2 * TOAST_PADDING, texture.height + 2 * TOAST_PADDING
+            middle = (x0 + x1) / 2
+            toast_x = max(track_left, min(middle - width / 2, track_right - width))
+            row = next((i for i, row_end in enumerate(row_ends) if row_end + dp(8) <= toast_x), len(row_ends))
+            if row >= TOAST_ROWS:
+                continue
+            row_ends[row:row + 1] = [toast_x + width]
+            toast_top = notes_top - BRACE_HEIGHT - dp(2) - row * (height + dp(6))
+            active = start <= snapshot.frame <= end
+            alpha = 1 if active else 0.75
+
+            note = self.note_graphics.next()
+            note.tint_color.a = 0.9
+            note.tint.pos = (x0 + dp(1), meter_y + METER_HEIGHT + dp(2))
+            note.tint.size = (x1 - x0 - dp(2), dp(3))
+            if not self.show_notes:
+                note.brace_color.a = note.toast_color.a = note.accent_color.a = note.text_color.a = 0
+                continue
+            note.brace_color.a = alpha
+            note.brace.points = _brace_points(x0, x1, notes_top, BRACE_HEIGHT)
+            # Reaches down past other toasts when overlapping notes pushed this one to a lower row.
+            note.connector.points = [middle, notes_top - BRACE_HEIGHT, middle, toast_top]
+            note.toast_color.a = 0.92 * alpha
+            note.toast.pos = (toast_x, toast_top - height)
+            note.toast.size = (width, height)
+            note.accent_color.a = alpha
+            note.accent.pos = (toast_x, toast_top - height)
+            note.accent.size = (dp(3), height)
+            note.text_color.a = alpha
+            note.text.texture = texture
+            note.text.pos = (toast_x + TOAST_PADDING, toast_top - height + TOAST_PADDING)
+            note.text.size = texture.size
+            self._toast_hits.append((toast_x, toast_top - height, width, height, index))
+        self.note_graphics.finish(_NoteGraphic.hide)
+
+    def _draw_selection(self, snapshot, meter_y, attempt_y):
+        if not self.selection:
+            self.selection_color.a = self.selection_edge_color.a = 0
+            return
+        start, end = self.selection
+        x0 = self._frame_x(start, snapshot.frame)
+        x1 = self._frame_x(end + 1, snapshot.frame)
+        top = meter_y + METER_HEIGHT
+        self.selection_color.a = 0.16
+        self.selection_fill.pos = (x0, attempt_y)
+        self.selection_fill.size = (x1 - x0, top - attempt_y)
+        self.selection_edge_color.a = 0.9
+        for edge, x in zip(self.selection_edges, (x0, x1 - dp(2))):
+            edge.pos = (x, attempt_y)
+            edge.size = (dp(2), top - attempt_y)
+
     def update_state(self, snapshot):
+        self._frame = snapshot.frame
         meter_y, target_y, strip_y, attempt_y = self._lanes()
         self._draw_meter(snapshot.target_runs, snapshot, meter_y)
         self._draw_runs(self.target_boxes, snapshot.target_runs, snapshot, target_y, TARGET_BOX_COLOR,
@@ -367,6 +559,8 @@ class InputListLayout(StencilView):
         self._draw_runs(self.attempt_boxes, snapshot.attempt_runs, snapshot, attempt_y, ATTEMPT_BOX_COLOR,
                         dim_history=False)
         self._draw_matches(snapshot.match_runs, snapshot, strip_y)
+        self._draw_notes(snapshot.notes, snapshot, meter_y, attempt_y - LANE_GAP - ICON_SIZE - dp(14))
+        self._draw_selection(snapshot, meter_y, attempt_y)
 
         # The player's live input sits under the line, which turns green when it matches.
         live_key = input_key(snapshot.live_state)

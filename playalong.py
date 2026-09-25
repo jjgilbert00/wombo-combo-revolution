@@ -9,7 +9,7 @@ from input_list import match_runs, runs_in_range
 PLAYALONG_FRAMELENGTH = 120
 
 
-ListSnapshot = namedtuple("ListSnapshot", "live_state frame recording target_runs attempt_runs match_runs")
+ListSnapshot = namedtuple("ListSnapshot", "live_state frame recording target_runs attempt_runs match_runs notes")
 
 
 class RUNNING_STATES(Enum):
@@ -27,6 +27,9 @@ class PlayalongController:
     Alongside the track it keeps the player's attempt: one entry per track frame, None where they
     haven't played it. While playing in practice mode, live input is written into the attempt at the
     playhead, so the two can be compared frame for frame and replayed together afterwards.
+
+    Notes annotate a range of track frames with text: {"start": frame, "end": frame, "text": str},
+    with an inclusive range. They're kept sorted by start frame.
     """
 
     def __init__(self, input_track=None):
@@ -41,6 +44,13 @@ class PlayalongController:
         self.filled_frames = 0  # Recorded frames that repeat the previous one because the sampler ran late.
         self.practice = True  # Playing records the player's attempt; off, playback just replays it.
         self._reset_attempt()
+        self.notes = []
+
+    def _fit_notes(self, notes):
+        """Drops notes that start past the end of the track and trims ones that run off it."""
+        last = len(self.input_track) - 1
+        fitted = [dict(note, end=min(note["end"], last)) for note in notes if note["start"] <= last]
+        self.notes = sorted(fitted, key=lambda note: (note["start"], note["end"]))
 
     def _reset_attempt(self, attempt=None):
         self.attempt_track = list(attempt) if attempt else [None] * len(self.input_track)
@@ -106,13 +116,35 @@ class PlayalongController:
             frame = len(self.input_track) if recording else self.current_frame
             lo, hi = frame - frames_before, frame + frames_after + 1
             if recording:
-                return ListSnapshot(self.live_state, frame, True, runs_in_range(self.input_track, lo, hi), [], [])
+                return ListSnapshot(self.live_state, frame, True, runs_in_range(self.input_track, lo, hi), [], [], [])
             return ListSnapshot(
                 self.live_state, frame, False,
                 runs_in_range(self.input_track, lo, hi),
                 runs_in_range(self.attempt_track, lo, hi),
                 match_runs(self.input_track, self.attempt_track, lo, hi),
+                [(i, note["start"], note["end"], note["text"]) for i, note in enumerate(self.notes)
+                 if note["start"] < hi and note["end"] >= lo],
             )
+
+    def get_notes(self):
+        with self._lock:
+            return [dict(note) for note in self.notes]
+
+    def set_note(self, index, start, end, text):
+        """Adds a note (index None) or replaces the note at index. Returns the note's new index."""
+        with self._lock:
+            notes = [dict(note) for note in self.notes]
+            note = {"start": min(start, end), "end": max(start, end), "text": text}
+            if index is None:
+                notes.append(note)
+            else:
+                notes[index] = note
+            self._fit_notes(notes)
+            return self.notes.index(note) if note in self.notes else None
+
+    def remove_note(self, index):
+        with self._lock:
+            del self.notes[index]
 
     def get_attempt_track(self):
         with self._lock:
@@ -159,12 +191,13 @@ class PlayalongController:
         with self._lock:
             return list(self.input_track)
 
-    def set_input_track(self, input_track, attempt=None):
+    def set_input_track(self, input_track, attempt=None, notes=None):
         with self._lock:
             self.running_state = RUNNING_STATES.STOPPED
             self.input_track = list(input_track)
             self.current_frame = 0
             self._reset_attempt(attempt)
+            self._fit_notes(notes or [])
 
     def get_playalong_frames(self):
         playalong_frames = self.input_track[
@@ -187,6 +220,7 @@ class PlayalongController:
             self.input_track = []
             self.current_frame = 0
             self._reset_attempt()
+            self.notes = []
             self.running_state = RUNNING_STATES.RECORDING
 
     def stop_recording(self):
@@ -201,6 +235,7 @@ class PlayalongController:
         with self._lock:
             del self.input_track[frame_count:]
             self._reset_attempt(self.attempt_track)
+            self._fit_notes(self.notes)
 
     def clean_track(self):
         """Reduces held buttons to their first frame so prompts show presses, not holds."""

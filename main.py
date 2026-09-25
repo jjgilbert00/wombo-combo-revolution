@@ -26,13 +26,14 @@ from kivy.clock import Clock
 from kivy.core.window import Window
 from kivy.metrics import dp
 from kivy.uix.boxlayout import BoxLayout
+from kivy.uix.modalview import ModalView
 from KivyOnTop import register_topmost, unregister_topmost
 from pynput import keyboard
 
 import dialogs
 from controller import find_controllers, get_cool_controller_pattern
 from layouts.input_list_layout import InputListLayout
-from layouts.menu_layout import HelpPopup, MenuBar, SettingsPopup
+from layouts.menu_layout import HelpPopup, MenuBar, NotePopup, SettingsPopup
 from layouts.playalong_layout import PlayAlongLayout
 from playalong import PlayalongController
 from sampler import FPS, InputSampler
@@ -48,6 +49,7 @@ HOTKEYS = [
     ("F1", "Show hotkeys", "show_help"),
     ("F2", "Overlay mode (on top, borderless)", "toggle_overlay"),
     ("F3", "Switch between ring and input list", "toggle_display"),
+    ("Shift+F3", "Show / hide notes", "toggle_notes"),
     ("F4", "Practice on/off (record your attempt while playing)", "toggle_practice"),
     ("F5", "Restart playback", "restart_playback"),
     ("F6", "Play", "play"),
@@ -84,6 +86,7 @@ class WomboComboApp(App):
         self.job_label = None
         self.job_progress = None
         self.message = None  # (markup text, expiry time)
+        self.selection = None  # (start, end) frames selected in the input list, inclusive.
 
     # ---- Setup ---------------------------------------------------------------------------------
 
@@ -101,6 +104,7 @@ class WomboComboApp(App):
             "practice": 1,
             "list_frame_width": 0,  # Pixels per frame in the input list; 0 = one label wide.
             "input_display": "ring",
+            "show_notes": 1,
         })
 
     def get_application_config(self):
@@ -123,12 +127,15 @@ class WomboComboApp(App):
             self.input_list_layout.set_zoom(dp(frame_width))
         self.input_list_layout.on_scrub = self.scrub
         self.input_list_layout.on_zoom = self.set_list_zoom
+        self.input_list_layout.on_select = self.set_selection
+        self.input_list_layout.on_note_click = self.edit_note
         self.playalong_controller.set_practice(self.config.getboolean("wombo", "practice"))
         self.menu_bar = MenuBar(self)
         self.root_layout = BoxLayout(orientation="vertical")
         self.root_layout.add_widget(self.menu_bar)
         self.display = None
         self.show_display(self.config.get("wombo", "input_display"))
+        self.set_notes_visible(self.config.getboolean("wombo", "show_notes"))
         return self.root_layout
 
     def on_start(self):
@@ -145,16 +152,40 @@ class WomboComboApp(App):
 
         # Global keyboard listener for when the window isn't selected. The callback runs inside a
         # system-wide keyboard hook, so it only hands the action to the UI thread and returns.
-        actions = {getattr(keyboard.Key, key.lower()): action for key, _, action in HOTKEYS}
+        # Keyed by (shift held, key), e.g. "Shift+F3" -> (True, Key.f3).
+        actions = {}
+        for key, _, action in HOTKEYS:
+            *modifiers, name = key.lower().split("+")
+            actions[("shift" in modifiers, getattr(keyboard.Key, name))] = action
+        shift_keys = {keyboard.Key.shift, keyboard.Key.shift_l, keyboard.Key.shift_r}
+        held_shift = set()
 
+        # Neither callback may return False: that stops the listener.
         def on_press(key):
-            # Must not return False: that stops the listener.
-            action = actions.get(key)
+            if key in shift_keys:
+                held_shift.add(key)
+            action = actions.get((bool(held_shift), key))
             if action:
                 Clock.schedule_once(lambda dt: getattr(self, action)())
 
-        self.listener = keyboard.Listener(on_press=on_press)
+        def on_release(key):
+            held_shift.discard(key)
+
+        self.listener = keyboard.Listener(on_press=on_press, on_release=on_release)
         self.listener.start()
+        Window.bind(on_key_down=self.on_key_down)
+
+    def on_key_down(self, window, key, scancode, codepoint, modifiers):
+        """Shortcuts that only apply while the app window is focused."""
+        if any(isinstance(child, ModalView) for child in Window.children):
+            return False  # A popup is open; let it have the keys.
+        if key == 27:  # Esc
+            self.set_selection(None)
+            return True
+        if codepoint == "n" and not modifiers:
+            self.add_note()
+            return True
+        return False
 
     def on_stop(self):
         self.listener.stop()
@@ -216,6 +247,10 @@ class WomboComboApp(App):
         if self.job_label:
             progress = f" {int(self.job_progress * 100)}%" if self.job_progress is not None else "..."
             parts.append(f"{self.job_label}{progress}")
+        if self.selection:
+            start, end = self.selection
+            span = f"frame {start}" if start == end else f"frames {start}-{end} ({end - start + 1}f)"
+            parts.append(f"[color=8fb8ff]Selected {span}[/color]")
         if self.message and time.time() < self.message[1]:
             parts.append(self.message[0])
         reader = self.sampler.reader
@@ -249,6 +284,47 @@ class WomboComboApp(App):
 
     def set_list_zoom(self, px_per_frame):
         self.config.set("wombo", "list_frame_width", round(px_per_frame / dp(1), 1))
+
+    def set_selection(self, start, end=None):
+        """Selects frames start..end (inclusive, either order) of the track, or clears with None."""
+        if start is not None:
+            last = len(self.playalong_controller.input_track) - 1
+            start, end = sorted((start, start if end is None else end))
+            start, end = max(0, start), min(end, last)
+            if start > end:
+                start = None
+        self.selection = None if start is None else (start, end)
+        self.input_list_layout.selection = self.selection
+
+    def add_note(self):
+        """Opens the note editor for the selected frames, or the frame on the line if none are selected."""
+        controller = self.playalong_controller
+        if controller.is_recording() or not controller.input_track:
+            return
+        start, end = self.selection or (controller.get_current_frame(),) * 2
+        existing = next((i for i, note in enumerate(controller.get_notes())
+                         if (note["start"], note["end"]) == (start, end)), None)
+        if existing is not None:
+            self.edit_note(existing)
+            return
+        self._open_note_popup(None, start, end, "")
+
+    def edit_note(self, index):
+        note = self.playalong_controller.get_notes()[index]
+        self._open_note_popup(index, note["start"], note["end"], note["text"])
+
+    def _open_note_popup(self, index, start, end, text):
+        span = f"frame {start}" if start == end else f"frames {start}-{end}"
+
+        def save(new_text):
+            if new_text:
+                self.playalong_controller.set_note(index, start, end, new_text)
+            elif index is not None:
+                self.playalong_controller.remove_note(index)
+
+        delete = (lambda: self.playalong_controller.remove_note(index)) if index is not None else None
+        title = f"Note on {span}" if index is None else f"Edit note on {span}"
+        NotePopup(title, text, save, delete).open()
 
     def toggle_practice(self):
         practice = not self.playalong_controller.practice
@@ -289,6 +365,7 @@ class WomboComboApp(App):
                 self.flash(f"Recording inputs only, video capture failed: {e}", "ffb454", 8)
                 self.screen_recorder = None
         self.playalong_controller.start_recording(frame_sink)
+        self.set_selection(None)
 
     def stop_recording(self):
         self.playalong_controller.stop_recording()
@@ -320,6 +397,7 @@ class WomboComboApp(App):
         if self.playalong_controller.is_recording():
             self.stop_recording()
         self.playalong_controller.clear_track()
+        self.set_selection(None)
         self.capture_path = None
 
     def open_track(self):
@@ -335,18 +413,20 @@ class WomboComboApp(App):
         if self.playalong_controller.is_recording():
             self.stop_recording()
         if isinstance(data, dict):
-            self.playalong_controller.set_input_track(data["inputs"], data.get("attempt"))
+            self.playalong_controller.set_input_track(data["inputs"], data.get("attempt"), data.get("notes"))
         else:
             self.playalong_controller.set_input_track(data)  # Older saves are a bare list of frames.
         video = os.path.splitext(path)[0] + ".mp4"
         self.capture_path = video if os.path.exists(video) else None
         self.flash(f"Opened {os.path.basename(path)}")
+        self.set_selection(None)
 
     def save_recording(self):
         if self.playalong_controller.is_recording():
             self.stop_recording()
         inputs = self.playalong_controller.get_input_track()
         attempt = self.playalong_controller.get_attempt_track()
+        notes = self.playalong_controller.get_notes()
         if not inputs:
             self.flash("Nothing to save", "ffb454")
             return
@@ -362,6 +442,8 @@ class WomboComboApp(App):
                 data = {"fps": FPS, "inputs": inputs}
                 if any(frame is not None for frame in attempt):
                     data["attempt"] = attempt
+                if notes:
+                    data["notes"] = notes
                 json.dump(data, fout, indent=1, sort_keys=True)
             if not capture:
                 return
@@ -369,7 +451,8 @@ class WomboComboApp(App):
                 shutil.copyfile(capture, base + ".mp4")
             if export_overlay:
                 self.job_label = "Exporting overlay"
-                write_capture_and_overlay(capture, inputs, base + "_overlay.mp4", **self._export_options(progress))
+                write_capture_and_overlay(capture, inputs, base + "_overlay.mp4", notes=notes,
+                                          **self._export_options(progress))
 
         self.run_job("Saving", save, f"Saved {os.path.basename(base)}")
 
@@ -382,15 +465,18 @@ class WomboComboApp(App):
         path = dialogs.save_file("Export overlay video", "Videos (*.mp4)", "*.mp4", "mp4")
         if path:
             inputs = self.playalong_controller.get_input_track()
+            notes = self.playalong_controller.get_notes()
             capture = self.capture_path
             self.run_job(
                 "Exporting overlay",
-                lambda progress: write_capture_and_overlay(capture, inputs, path, **self._export_options(progress)),
+                lambda progress: write_capture_and_overlay(capture, inputs, path, notes=notes,
+                                                           **self._export_options(progress)),
                 f"Exported {os.path.basename(path)}",
             )
 
     def export_input_video(self):
         inputs = self.playalong_controller.get_input_track()
+        notes = self.playalong_controller.get_notes()
         if not inputs:
             self.flash("Nothing to export", "ffb454")
             return
@@ -399,7 +485,7 @@ class WomboComboApp(App):
             encoder = resolve_encoder(self.config.get("wombo", "encoder"))
             self.run_job(
                 "Exporting inputs",
-                lambda progress: write_input_video(inputs, path, encoder=encoder, progress=progress),
+                lambda progress: write_input_video(inputs, path, encoder=encoder, progress=progress, notes=notes),
                 f"Exported {os.path.basename(path)}",
             )
 
@@ -461,6 +547,14 @@ class WomboComboApp(App):
         self.config.set("wombo", "input_display", mode)
         self.menu_bar.set_display_mode(mode)
 
+    def set_notes_visible(self, visible):
+        self.input_list_layout.show_notes = visible
+        self.config.set("wombo", "show_notes", int(visible))
+        self.menu_bar.set_notes_visible(visible)
+
+    def toggle_notes(self):
+        self.set_notes_visible(not self.input_list_layout.show_notes)
+
     def toggle_display(self):
         self.show_display("ring" if self.display is self.input_list_layout else "list")
 
@@ -469,6 +563,10 @@ class WomboComboApp(App):
             ("Wheel", "Scrub the input list (pauses)"),
             ("Drag", "Scrub the input list"),
             ("Ctrl+Wheel", "Zoom the input list"),
+            ("Click", "Select a frame (Shift+click extends)"),
+            ("Frames drag", "Select a range of frames"),
+            ("N", "Add a note to the selection (click a note to edit it)"),
+            ("Esc", "Clear the selection"),
         ]
         HelpPopup([(key, description) for key, description, _ in HOTKEYS] + mouse_help).open()
 

@@ -12,6 +12,7 @@ from kivy.uix.modalview import ModalView
 from kivy.uix.slider import Slider
 from kivy.uix.spinner import Spinner, SpinnerOption
 from kivy.uix.switch import Switch
+from kivy.uix.textinput import TextInput
 from kivy.uix.widget import Widget
 
 BAR_HEIGHT = dp(36)
@@ -77,10 +78,10 @@ class MenuItem(HoverBehavior, ButtonBehavior, BoxLayout):
         super().__init__(size_hint_y=None, height=dp(32), padding=(dp(12), 0), **kwargs)
         _paint_background(self, (0, 0, 0, 0))
         self.label = Label(text=text, font_size=FONT_SIZE, color=TEXT_COLOR, halign="left", valign="middle",
-                           text_size=(dp(170), None))
+                           text_size=(dp(158), None))
         self.add_widget(self.label)
         self.add_widget(Label(text=shortcut, font_size=FONT_SIZE, color=DIM_TEXT_COLOR, halign="right",
-                              size_hint_x=None, width=dp(48), text_size=(dp(48), None)))
+                              size_hint_x=None, width=dp(64), text_size=(dp(64), None)))
         self.bind(hovered=self._refresh_color, state=self._refresh_color)
 
     def _refresh_color(self, *args):
@@ -130,10 +131,13 @@ class MenuBar(BoxLayout):
         edit_menu.add_item("Clean track", app.clean_track, "F9")
         edit_menu.add_item("Clear track", app.clear_track, "F10")
         edit_menu.add_item("Clear attempt", app.clear_attempt)
+        edit_menu.add_separator()
+        edit_menu.add_item("Add note to selection", app.add_note, "N")
 
         view_menu = Menu()
         view_menu.add_item("Overlay mode", app.toggle_overlay, "F2")
         self.display_item = view_menu.add_item("Show input list", app.toggle_display, "F3")
+        self.notes_item = view_menu.add_item("Hide notes", app.toggle_notes, "Shift+F3")
         view_menu.add_item("Hotkeys", app.show_help, "F1")
         view_menu.add_separator()
         view_menu.add_widget(self._opacity_row())
@@ -185,6 +189,9 @@ class MenuBar(BoxLayout):
         slider.bind(on_touch_down=lambda s, touch: s.collide_point(*touch.pos) and self.app.preview_opacity(True))
         row.add_widget(slider)
         return row
+
+    def set_notes_visible(self, visible):
+        self.notes_item.label.text = "Hide notes" if visible else "Show notes"
 
     def set_display_mode(self, mode):
         self.display_item.label.text = "Show ring display" if mode == "list" else "Show input list"
@@ -264,3 +271,41 @@ class HelpPopup(ModalView):
         panel.add_widget(grid)
         self.add_widget(panel)
         self.bind(on_touch_down=lambda *_: self.dismiss())
+
+
+class NotePopup(ModalView):
+    """Edits a note's text. on_save(text) is called with the new text; saving empty text counts as a
+    delete. on_delete is only offered when editing an existing note."""
+
+    def __init__(self, title, text, on_save, on_delete=None, **kwargs):
+        super().__init__(size_hint=(None, None), size=(dp(420), dp(150)), background="",
+                         background_color=(0, 0, 0, 0.5), **kwargs)
+        panel = BoxLayout(orientation="vertical", padding=dp(16), spacing=dp(12))
+        _paint_background(panel, PANEL_COLOR)
+        panel.add_widget(Label(text=title, font_size=sp(16), bold=True, color=TEXT_COLOR, size_hint_y=None,
+                               height=dp(22), halign="left", text_size=(dp(388), None)))
+        self.input = TextInput(text=text, multiline=False, size_hint_y=None, height=dp(34), font_size=FONT_SIZE,
+                               background_color=(1, 1, 1, 0.08), foreground_color=TEXT_COLOR,
+                               cursor_color=TEXT_COLOR, hint_text="e.g. hit confirm here")
+        self.input.bind(on_text_validate=lambda *_: self._save(on_save))
+        panel.add_widget(self.input)
+
+        buttons = BoxLayout(size_hint_y=None, height=dp(32), spacing=dp(8))
+        if on_delete:
+            delete = BarButton(text="Delete", highlight=(0.85, 0.2, 0.2, 0.8))
+            delete.bind(on_release=lambda *_: (self.dismiss(), on_delete()))
+            buttons.add_widget(delete)
+        buttons.add_widget(Widget())
+        cancel = BarButton(text="Cancel")
+        cancel.bind(on_release=lambda *_: self.dismiss())
+        save = BarButton(text="Save", highlight=(1, 1, 1, 0.12))
+        save.bind(on_release=lambda *_: self._save(on_save))
+        buttons.add_widget(cancel)
+        buttons.add_widget(save)
+        panel.add_widget(buttons)
+        self.add_widget(panel)
+        self.bind(on_open=lambda *_: setattr(self.input, "focus", True))
+
+    def _save(self, on_save):
+        self.dismiss()
+        on_save(self.input.text.strip())
