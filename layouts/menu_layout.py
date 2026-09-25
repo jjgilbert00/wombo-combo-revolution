@@ -130,8 +130,8 @@ class MenuBar(BoxLayout):
         self.set_recent([])
 
         edit_menu = Menu()
-        edit_menu.add_item("Clean track", app.clean_track, "F9")
-        edit_menu.add_item("Clear track", app.clear_track, "F10")
+        edit_menu.add_item("Clean track (presses only)", app.clean_track)
+        edit_menu.add_item("Clear track", app.clear_track)
         edit_menu.add_item("Save attempt", app.save_attempt, "S")
         edit_menu.add_item("Attempts...", app.open_attempts, "A")
         edit_menu.add_item("Clear attempt", app.clear_attempt)

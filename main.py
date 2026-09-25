@@ -55,8 +55,6 @@ HOTKEYS = [
     ("F6", "Play", "play"),
     ("F7", "Pause", "pause"),
     ("F8", "Start / stop recording", "toggle_recording"),
-    ("F9", "Clean track (presses only)", "clean_track"),
-    ("F10", "Clear track", "clear_track"),
     ("F11", "Open a recording", "open_track"),
     ("F12", "Save recording as (with its video)", "save_recording"),
 ]
@@ -193,6 +191,12 @@ class WomboComboApp(App):
             return False  # A popup is open; let it have the keys.
         if key == 27:  # Esc
             self.set_selection(None)
+            return True
+        if key == 32 and not modifiers:  # Space
+            self.toggle_playback()
+            return True
+        if key == 278 and not modifiers:  # Home
+            self.restart_playback()
             return True
         if codepoint == "o" and modifiers == ["ctrl"]:
             self.open_track()
@@ -636,7 +640,7 @@ class WomboComboApp(App):
         if not self.playalong_controller.practice:
             self.toggle_practice()
         Window.set_title(f"{TITLE} - {os.path.splitext(os.path.basename(path))[0]}")
-        self.flash(f"Opened {os.path.basename(path)}. Press Play (F6) to practise", "8fd18f", 6)
+        self.flash(f"Opened {os.path.basename(path)}. Press Space (or F6 in game) to practise", "8fd18f", 6)
 
     def _track_data(self):
         """The track and everything made for it, as saved in its .json."""
