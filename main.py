@@ -64,7 +64,7 @@ HOTKEYS = [
 WELCOME = (
     "[size=22sp][b]No recording loaded[/b][/size]\n\n"
     "[b]Practise a combo:[/b] File > Open recording ([b]Ctrl+O[/b]), or drop a recording's .json or .mp4 "
-    "file onto this window.\n\n"
+    "file onto this window. New here? The File menu has sample Street Fighter 6 combos to try.\n\n"
     "[b]Record your own:[/b] press Record ([b]F8[/b], also works while the game has focus), perform the combo, "
     "press F8 again, then save it with [b]F12[/b].\n\n"
     "Hover over any button for help, or press [b]F1[/b] for all keys."
@@ -663,6 +663,14 @@ class WomboComboApp(App):
 
     def recent_recordings(self):
         return [path for path in self.config.get("wombo", "recent").split("|") if path and os.path.exists(path)]
+
+    def sample_recordings(self):
+        """The sample recordings that come with the app (samples/*.json)."""
+        folder = os.path.join(os.path.dirname(os.path.abspath(__file__)), "samples")
+        try:
+            return sorted(os.path.join(folder, name) for name in os.listdir(folder) if name.endswith(".json"))
+        except OSError:
+            return []
 
     def _remember_recent(self, path):
         recent = [path] + [p for p in self.recent_recordings() if os.path.normcase(p) != os.path.normcase(path)]
