@@ -137,7 +137,7 @@ class PlayalongController:
                 match_runs(self.input_track, self.attempt_track, lo, hi),
                 [(i, note["start"], note["end"], note["text"]) for i, note in enumerate(self.notes)
                  if note["start"] < hi and note["end"] >= lo],
-                [(i, dict(k), result(k, self.attempt_track)) for i, k in enumerate(self.key_inputs)
+                [(i, dict(k), result(k, self.attempt_track, self.input_track)) for i, k in enumerate(self.key_inputs)
                  if k["start"] < hi and k["end"] >= lo],
             )
 
@@ -165,7 +165,7 @@ class PlayalongController:
     def key_input_score(self):
         """(hits, total) for the attempt against the key inputs."""
         with self._lock:
-            results = [result(k, self.attempt_track) for k in self.key_inputs]
+            results = [result(k, self.attempt_track, self.input_track) for k in self.key_inputs]
             return sum(r == HIT for r in results), len(results)
 
     def get_notes(self):

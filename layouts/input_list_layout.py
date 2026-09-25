@@ -55,6 +55,7 @@ TOAST_ROWS = 3  # Overlapping notes stack into this many rows; any more are skip
 BRACE_HEIGHT = dp(12)
 SELECTION_COLOR = (0.4, 0.65, 1.0)
 KEY_COLOR = (1.0, 0.78, 0.2)
+EXACT_KEY_COLOR = (0.35, 0.85, 1.0)  # Exact spans stand apart from press-anywhere-in-window ones.
 KEY_RESULT_COLORS = {"hit": MATCH_COLOR, "miss": MISS_COLOR, "pending": (0.55, 0.55, 0.6)}
 NON_KEY_ALPHA = 0.35  # Target inputs outside every key input fade back once key inputs exist.
 CLICK_SLOP = dp(4)  # A press that moves less than this is a click, not a drag.
@@ -595,7 +596,9 @@ class InputListLayout(StencilView):
             if x1 < track_left or x0 > track_right:
                 continue
             graphic = self.key_graphics.next()
-            graphic.outline_color.a = 0.95
+            color = EXACT_KEY_COLOR if key_input.get("exact") else KEY_COLOR
+            graphic.outline_color.rgba = (*color, 0.95)
+            graphic.tag_color.rgb = color
             y0, y1 = target_y, target_y + LANE_HEIGHT
             for rect, (pos, size) in zip(graphic.outline, (
                 ((x0, y0), (x1 - x0, border)), ((x0, y1 - border), (x1 - x0, border)),

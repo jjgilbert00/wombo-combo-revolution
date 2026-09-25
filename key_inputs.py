@@ -9,8 +9,12 @@ A key input is a dict:
     {"start": frame, "end": frame,       # the window, inclusive
      "motion": [2, 3, 6],                # directions to pass through in order, or []
      "direction": 6 or None,             # direction held when the buttons are pressed; None = any
-     "buttons": ["X"]}                   # buttons to press, or [] for a direction/motion alone
+     "buttons": ["X"],                   # buttons to press, or [] for a direction/motion alone
+     "exact": False}                     # True: every frame must match the recording instead
 Written in numpad notation, that one is "236X".
+
+An exact key input ignores motion/direction/buttons: the attempt must match the recording on every
+frame of the window, for things like a 3-frame micro-walk or holding a charge for exactly so long.
 """
 from input_list import LIST_BUTTON_ORDER
 
@@ -19,7 +23,7 @@ HIT, MISS, PENDING = "hit", "miss", "pending"
 
 def normalized(key_input):
     """Fills in fields that older saves don't have."""
-    return dict({"motion": [], "direction": None, "buttons": []}, **key_input)
+    return dict({"motion": [], "direction": None, "buttons": [], "exact": False}, **key_input)
 
 
 def _pressed_at(key_input, attempt, frame):
@@ -65,10 +69,15 @@ def satisfied_at(key_input, attempt, frame):
     return _pressed_at(key_input, attempt, frame)
 
 
-def result(key_input, attempt):
+def result(key_input, attempt, target):
     """HIT if completed on any eligible frame, MISS once the whole window was played without it,
-    otherwise PENDING."""
+    otherwise PENDING. An exact key input is a MISS on the first frame that differs from the target
+    and a HIT once every frame has matched."""
     frames = range(key_input["start"], min(key_input["end"], len(attempt) - 1) + 1)
+    if key_input.get("exact"):
+        if any(attempt[frame] is not None and attempt[frame] != target[frame] for frame in frames):
+            return MISS
+        return HIT if all(attempt[frame] is not None for frame in frames) else PENDING
     if any(satisfied_at(key_input, attempt, frame) for frame in frames):
         return HIT
     if frames and all(attempt[frame] is not None for frame in frames):
@@ -106,8 +115,10 @@ def derive(track, start, end):
 
 
 def describe(key_input):
-    """Numpad notation, e.g. "236X", "6X", "X", "2" or "A+B"."""
+    """Numpad notation, e.g. "236X", "6X", "X", "2" or "A+B"; "EXACT 3f" for an exact span."""
     key_input = normalized(key_input)
+    if key_input["exact"]:
+        return f"EXACT {key_input['end'] - key_input['start'] + 1}f"
     motion = "".join(str(direction) for direction in key_input["motion"])
     direction = key_input["direction"]
     # The press direction is usually the motion's last step, so don't repeat it.
