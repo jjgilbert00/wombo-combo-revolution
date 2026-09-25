@@ -954,24 +954,47 @@ class WomboComboApp(App):
 
     def toggle_overlay(self):
         self.topmost = not self.topmost
+        hwnd = Window.get_window_info().window
         if self.topmost:
-            self._normal_size = Window.size
+            # Windows' own record of where the window was (maximized or not), to put it back exactly.
+            self._normal_placement = win32gui.GetWindowPlacement(hwnd)
+            left, top = win32gui.ClientToScreen(hwnd, (0, 0))
+            _, _, width, height = win32gui.GetClientRect(hwnd)
+            # The overlay sits where the window's content was, at the same width; _fit_overlay (every
+            # frame) trims its height and puts it back there if the style change nudged it. Set before
+            # anything below, which can run frames from inside Windows' message handling.
+            self._overlay_origin = (left, top, width)
             self._overlay_note_rows = 0
+            if self._normal_placement[1] == win32con.SW_SHOWMAXIMIZED:
+                win32gui.ShowWindow(hwnd, win32con.SW_RESTORE)  # A maximized window can't be resized.
             Window.borderless = True
             self.root_layout.remove_widget(self.menu_bar)
+            self._place_window(left, top, width, height)
             Window.bind(on_draw=self._keep_on_top)
-            self._keep_on_top()
         else:
             Window.unbind(on_draw=self._keep_on_top)
             Window.borderless = False
             self.root_layout.add_widget(self.menu_bar, index=len(self.root_layout.children))
             self._set_on_top(False)
-            Window.size = self._normal_size
+            self._overlay_origin = None
+            # Put back exactly where it was. Again shortly after, as the border comes back after a delay
+            # and would otherwise grow the window by its own size.
+            placement = self._normal_placement
+            win32gui.SetWindowPlacement(hwnd, placement)
+            Clock.schedule_once(lambda dt: self.topmost or win32gui.SetWindowPlacement(hwnd, placement), 0.15)
         self.preview_opacity(False)
+
+    @staticmethod
+    def _place_window(left, top, width, height):
+        """Moves and sizes the window (in screen pixels) through Windows directly; Kivy follows along."""
+        win32gui.SetWindowPos(Window.get_window_info().window, win32con.HWND_TOPMOST, left, top, width, height,
+                              win32con.SWP_NOACTIVATE)
 
     def _fit_overlay(self):
         """Trims the overlay window to what the input list draws, so no empty space covers the game.
         It keeps its top edge and grows again when more is shown (e.g. another attempt row)."""
+        if not getattr(self, "_overlay_origin", None):
+            return  # Overlay mode is still being set up (or torn down).
         layout = self.input_list_layout
         # Room for as many rows of notes as have been needed so far: one to start with if there are
         # notes, more only if overlapping notes stack up. It doesn't shrink back, so the window
@@ -980,9 +1003,13 @@ class WomboComboApp(App):
         self._overlay_note_rows = max(getattr(self, "_overlay_note_rows", 0), wanted, layout.note_rows_used)
         if not layout.show_notes:
             self._overlay_note_rows = 0
-        height = round(layout.content_height(self._overlay_note_rows) + Window.height - layout.height)
-        if abs(height - Window.height) > 2:
-            Window.size = (Window.width, height)
+        left, top, width = self._overlay_origin
+        # Kivy measures in its own units; scale to pixels by the width, which doesn't change.
+        pixels = width / Window.width if Window.width else 1
+        height = round((layout.content_height(self._overlay_note_rows) + Window.height - layout.height) * pixels)
+        actual = win32gui.GetWindowRect(Window.get_window_info().window)
+        if max(abs(a - b) for a, b in zip(actual, (left, top, left + width, top + height))) > 2:
+            self._place_window(left, top, width, height)
 
     @staticmethod
     def _set_on_top(on_top):
