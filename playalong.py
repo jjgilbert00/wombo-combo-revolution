@@ -46,6 +46,10 @@ class PlayalongController:
     end, or is restarted partway, the attempt so far is archived and (when starting over) cleared,
     so the next pass starts fresh. Runs are {"id", "created", "attempt"}, oldest first.
 
+    A demo plays a track (the recording, or a cleaned version of it) out through a virtual
+    controller, one frame per tick, so the combo can be watched in game. It takes over playback:
+    nothing is scored, and it stops at the end of the track or when paused.
+
     Saved attempts are ones the player chose to keep with the track (they're saved in its file):
     {"id", "name", "created", "attempt", "shown"}, where shown puts them in the input list.
     """
@@ -71,6 +75,7 @@ class PlayalongController:
         self.history_count = 5  # Recent runs shown in the input list.
         self.lead_in = 60  # Frames of run-up before practice playback starts, to get ready.
         self._lead = 0  # Run-up frames left before the playhead moves.
+        self.demo = None  # {"track", "output", "kind"} while a demo plays.
         self._grades_version = 0  # Bumped when key inputs or the target change, invalidating cached grades.
 
     def _fit_key_inputs(self, key_inputs):
@@ -122,9 +127,13 @@ class PlayalongController:
 
     def tick(self, controller_state, ticks=1):
         sink = None
+        demo_output = demo_state = None
         with self._lock:
             self.live_state = controller_state
-            if self.running_state == RUNNING_STATES.PLAYING:
+            if self.running_state == RUNNING_STATES.PLAYING and self.demo:
+                demo_output = self.demo["output"]
+                demo_state = self._demo_frame(ticks)
+            elif self.running_state == RUNNING_STATES.PLAYING:
                 if self._lead:
                     used = min(ticks, self._lead)
                     self._lead -= used
@@ -147,6 +156,55 @@ class PlayalongController:
                 sink = self.frame_sink
         if sink:
             sink(ticks)
+        if demo_output:
+            demo_output(demo_state)
+
+    def _demo_frame(self, ticks):
+        """The demo frame due on this tick (None, neutral, during the countdown), or ends the demo
+        once the track is done. A late tick skips to the latest frame due, so the demo keeps time."""
+        if self._lead:
+            used = min(ticks, self._lead)
+            self._lead -= used
+            ticks -= used
+        if not ticks:
+            return None
+        track = self.demo["track"]
+        frame = self.current_frame + ticks - 1
+        if frame >= len(track):
+            self._end_demo()
+            return None
+        self.current_frame = frame + 1
+        return track[frame]
+
+    def _end_demo(self):
+        self.demo = None
+        self._lead = 0
+        self.running_state = RUNNING_STATES.STOPPED
+        self.current_frame = max(0, min(self.current_frame, len(self.input_track) - 1))
+
+    def start_demo(self, track, output, countdown, kind):
+        """Plays track out through output(state) from the first frame, after countdown frames of
+        neutral. kind names what's being demoed, for the display."""
+        with self._lock:
+            if self.running_state == RUNNING_STATES.RECORDING or not track:
+                return
+            self.demo = {"track": list(track), "output": output, "kind": kind}
+            self.current_frame = 0
+            self._lead = countdown
+            self.running_state = RUNNING_STATES.PLAYING
+
+    def stop_demo(self):
+        """Stops a demo and releases everything on the controller."""
+        with self._lock:
+            output = self.demo["output"] if self.demo else None
+            if self.demo:
+                self._end_demo()
+        if output:
+            output(None)
+
+    def demo_kind(self):
+        demo = self.demo
+        return demo["kind"] if demo else None
 
     def _advance(self, ticks):
         self.current_frame += ticks
@@ -178,11 +236,13 @@ class PlayalongController:
             if recording:
                 return ListSnapshot(self.live_state, frame, True, runs_in_range(self.input_track, lo, hi), [], [], [], [],
                                     [])
+            # A demo shows what it's sending where the attempt would go.
+            shown = self.demo["track"] if self.demo else self.attempt_track
             return ListSnapshot(
                 self.live_state, frame, False,
                 runs_in_range(self.input_track, lo, hi),
-                runs_in_range(self.attempt_track, lo, hi),
-                match_runs(self.input_track, self.attempt_track, lo, hi),
+                runs_in_range(shown, lo, hi),
+                [] if self.demo else match_runs(self.input_track, self.attempt_track, lo, hi),
                 [(i, note["start"], note["end"], note["text"]) for i, note in enumerate(self.notes)
                  if note["start"] < hi and note["end"] >= lo],
                 [(i, dict(k), result(k, self.attempt_track, self.input_track),
@@ -364,6 +424,8 @@ class PlayalongController:
 
     def play(self):
         with self._lock:
+            if self.demo:
+                return
             if self.running_state == RUNNING_STATES.STOPPED and self.input_track:
                 if self.current_frame >= len(self.input_track) - 1:
                     self.current_frame = 0
@@ -374,6 +436,7 @@ class PlayalongController:
                 self.running_state = RUNNING_STATES.PLAYING
 
     def pause(self):
+        self.stop_demo()
         with self._lock:
             self.running_state = RUNNING_STATES.STOPPED
             self._lead = 0
