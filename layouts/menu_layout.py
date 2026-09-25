@@ -1,9 +1,10 @@
 import os
 
+from kivy.clock import Clock
 from kivy.core.window import Window
 from kivy.graphics import Color, Rectangle
 from kivy.metrics import dp, sp
-from kivy.properties import BooleanProperty, ListProperty
+from kivy.properties import BooleanProperty, ListProperty, StringProperty
 from kivy.uix.behaviors import ButtonBehavior
 from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.button import Button
@@ -28,6 +29,20 @@ RECORD_COLOR = (0.85, 0.2, 0.2, 1)
 TEXT_COLOR = (0.92, 0.92, 0.92, 1)
 DIM_TEXT_COLOR = (0.6, 0.6, 0.64, 1)
 FONT_SIZE = sp(14)
+MENU_TIPS = {
+    "File": "Open a recording (or drop one on the window), save, and export videos",
+    "Edit": "Notes, key inputs and attempts. Select frames in the input list first (right-click for a menu)",
+    "View": "Choose which lanes to show, hide notes, overlay mode",
+    "Settings": "Controller, video capture, lead-in and attempt history",
+    "Record": "Record a new take from your controller: F8 starts and stops, even while the game has focus. "
+              "Also captures the screen if Record video is on in Settings",
+    "Play": "Play or pause: Space in this window, F6 / F7 in game",
+    "Restart": "Back to the first frame: Home in this window, F5 in game. "
+               "While practising this starts a fresh attempt",
+    "Loop": "Loop on: the recording repeats, and each pass is kept as a recent attempt",
+    "Practice": "Practice: playing scores your controller against the recording.\n"
+                "Review: playing replays your last attempt instead. F4 switches",
+}
 LANE_MENU_ITEMS = [("meter", "Frame meter"), ("target", "Recording"), ("keys", "Key inputs"),
                    ("attempt", "Your attempt"), ("saved", "Saved attempts"), ("recent", "Recent attempts")]
 
@@ -51,10 +66,61 @@ class HoverBehavior:
         self.hovered = bool(self.get_root_window()) and not self.disabled and self.collide_point(*self.to_widget(*pos))
 
 
+class Tooltip(Label):
+    """One shared tooltip, shown under a hovered widget after a short delay."""
+
+    DELAY = 0.5
+    _instance = None
+
+    def __init__(self, **kwargs):
+        super().__init__(markup=True, font_size=sp(13), color=TEXT_COLOR, size_hint=(None, None), halign="left",
+                         valign="middle", padding=(dp(10), dp(6)), **kwargs)
+        _paint_background(self, (0.05, 0.05, 0.07, 0.96))
+        self.bind(texture_size=lambda *_: setattr(self, "size", self.texture_size))
+        self._pending = None
+        self._owner = None
+
+    @classmethod
+    def get(cls):
+        if cls._instance is None:
+            cls._instance = cls()
+        return cls._instance
+
+    def schedule(self, widget, text):
+        self.hide()
+        self._owner = widget
+        self._pending = Clock.schedule_once(lambda dt: self._show(widget, text), self.DELAY)
+
+    def _show(self, widget, text):
+        self.text_size = (None, None)
+        self.text = text
+        self.texture_update()
+        if self.texture_size[0] > dp(340):
+            self.text_size = (dp(340) - dp(20), None)  # Long tips wrap.
+            self.texture_update()
+        self.size = self.texture_size
+        x, y = widget.to_window(widget.x, widget.y)
+        self.pos = (max(dp(4), min(x, Window.width - self.width - dp(4))), y - self.height - dp(4))
+        if not self.parent:
+            Window.add_widget(self)
+
+    def hide(self, owner=None):
+        """Hides the tooltip, or with owner, only if it's that widget's (another may have just taken over)."""
+        if owner is not None and owner is not self._owner:
+            return
+        if self._pending:
+            self._pending.cancel()
+            self._pending = None
+        if self.parent:
+            self.parent.remove_widget(self)
+
+
 class BarButton(HoverBehavior, Button):
-    """Flat, text-sized button for the menu bar. `highlight` tints it, e.g. while recording."""
+    """Flat, text-sized button for the menu bar. `highlight` tints it, e.g. while recording.
+    `tooltip` is shown after hovering for a moment."""
 
     highlight = ListProperty([0, 0, 0, 0])
+    tooltip = StringProperty("")
 
     def __init__(self, **kwargs):
         kwargs.setdefault("size_hint_x", None)
@@ -64,7 +130,14 @@ class BarButton(HoverBehavior, Button):
         )
         self.bind(texture_size=lambda *_: setattr(self, "width", self.texture_size[0] + dp(24)))
         self.bind(hovered=self._refresh_color, state=self._refresh_color, highlight=self._refresh_color)
+        self.bind(hovered=self._refresh_tooltip, state=self._refresh_tooltip)
         self._refresh_color()
+
+    def _refresh_tooltip(self, *args):
+        if self.tooltip and self.hovered and self.state == "normal":
+            Tooltip.get().schedule(self, self.tooltip)
+        else:
+            Tooltip.get().hide(self)
 
     def _refresh_color(self, *args):
         if self.highlight[3]:
@@ -155,10 +228,10 @@ class MenuBar(BoxLayout):
         # Kivy holds bound methods weakly, so the menus must be kept alive here.
         self.menus = {"File": file_menu, "Edit": edit_menu, "View": view_menu}
         for text, menu in self.menus.items():
-            button = BarButton(text=text)
+            button = BarButton(text=text, tooltip=MENU_TIPS[text])
             button.bind(on_release=menu.open)
             self.add_widget(button)
-        settings_button = BarButton(text="Settings")
+        settings_button = BarButton(text="Settings", tooltip=MENU_TIPS["Settings"])
         settings_button.bind(on_release=lambda *_: app.open_settings_popup())
         self.add_widget(settings_button)
 
@@ -175,7 +248,7 @@ class MenuBar(BoxLayout):
         self.add_widget(self.status)
 
     def _transport(self, text, callback):
-        button = BarButton(text=text)
+        button = BarButton(text=text, tooltip=MENU_TIPS[text])
         button.bind(on_release=lambda *_: callback())
         self.add_widget(button)
         return button
@@ -234,7 +307,10 @@ class MenuBar(BoxLayout):
         self.record_button.highlight = RECORD_COLOR if recording else (0, 0, 0, 0)
         self.play_button.text = "Pause" if playing else "Play"
         self.play_button.disabled = recording
+        # The toggles say what they're set to, rather than relying on a highlight.
+        self.loop_button.text = "Loop on" if looping else "Loop off"
         self.loop_button.highlight = ACTIVE_COLOR if looping else (0, 0, 0, 0)
+        self.practice_button.text = "Practice" if practicing else "Review"
         self.practice_button.highlight = ACTIVE_COLOR if practicing else (0, 0, 0, 0)
         self.status.text = status
 
