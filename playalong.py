@@ -1,18 +1,23 @@
 import threading
+import time
 from enum import Enum
 
 from collections import namedtuple
 
 from controller import get_neutral_controller_state
 from input_list import match_runs, runs_in_range
-from key_inputs import HIT, best_hold, normalized, result
+from key_inputs import HIT, best_hold, grade_all, normalized, result
 
 PLAYALONG_FRAMELENGTH = 120
+MAX_RUNS = 50  # Recent attempts kept in memory.
 
 
 ListSnapshot = namedtuple(
-    "ListSnapshot", "live_state frame recording target_runs attempt_runs match_runs notes key_inputs"
+    "ListSnapshot", "live_state frame recording target_runs attempt_runs match_runs notes key_inputs history"
 )
+# One earlier attempt in the input list: its label, its key input grades as (start, end, grade, offset),
+# and when the track has no key inputs, its per-frame match runs instead.
+HistoryRow = namedtuple("HistoryRow", "label grades match_runs")
 
 
 class RUNNING_STATES(Enum):
@@ -36,6 +41,10 @@ class PlayalongController:
 
     Key inputs (see key_inputs.py) mark the inputs that matter, each with a window of eligible
     frames; the attempt is scored against them. They're also kept sorted by start frame.
+
+    Each practice pass is kept as a run in the recent history: when playback loops or reaches the
+    end, or is restarted partway, the attempt so far is archived and (when starting over) cleared,
+    so the next pass starts fresh. Runs are {"id", "created", "attempt"}, oldest first.
     """
 
     def __init__(self, input_track=None):
@@ -52,12 +61,17 @@ class PlayalongController:
         self._reset_attempt()
         self.notes = []
         self.key_inputs = []
+        self.runs = []
+        self._next_run_id = 1
+        self.history_count = 5  # Recent runs shown in the input list.
+        self._grades_version = 0  # Bumped when key inputs or the target change, invalidating cached grades.
 
     def _fit_key_inputs(self, key_inputs):
         """Drops key inputs that start past the end of the track and trims ones that run off it."""
         last = len(self.input_track) - 1
         fitted = [normalized(dict(k, end=min(k["end"], last))) for k in key_inputs if k["start"] <= last]
         self.key_inputs = sorted(fitted, key=lambda k: (k["start"], k["end"]))
+        self._grades_version += 1
 
     def _fit_notes(self, notes):
         """Drops notes that start past the end of the track and trims ones that run off it."""
@@ -73,6 +87,21 @@ class PlayalongController:
         self.matched_frames = sum(
             attempt is not None and attempt == target for attempt, target in zip(self.attempt_track, self.input_track)
         )
+        self._attempt_archived = True  # Nothing new to archive until the player plays a frame.
+
+    def _archive_attempt(self):
+        """Keeps the attempt as a recent run, unless it's empty or already kept."""
+        if self._attempt_archived or not self.attempted_frames:
+            return
+        self.runs.append({"id": self._next_run_id, "created": time.time(), "attempt": list(self.attempt_track)})
+        self._next_run_id += 1
+        del self.runs[:-MAX_RUNS]
+        self._attempt_archived = True
+
+    def _start_over(self):
+        """Archives the attempt and clears it for a fresh pass."""
+        self._archive_attempt()
+        self._reset_attempt()
 
     def _record_attempt(self, frame, state):
         previous = self.attempt_track[frame]
@@ -80,6 +109,7 @@ class PlayalongController:
             self.attempted_frames -= 1
             self.matched_frames -= previous == self.input_track[frame]
         self.attempt_track[frame] = state
+        self._attempt_archived = False
         self.attempted_frames += 1
         self.matched_frames += state == self.input_track[frame]
 
@@ -111,9 +141,12 @@ class PlayalongController:
         if self.current_frame >= len(self.input_track):
             if self.loop and self.input_track:
                 self.current_frame %= len(self.input_track)
+                if self.practice:
+                    self._start_over()
             else:
                 self.current_frame = max(0, len(self.input_track) - 1)
                 self.running_state = RUNNING_STATES.STOPPED
+                self._archive_attempt()  # Kept on screen to review, and in the history.
 
     def snapshot(self):
         """Returns (live controller state, upcoming frames to prompt) for the view."""
@@ -129,7 +162,8 @@ class PlayalongController:
             frame = len(self.input_track) if recording else self.current_frame
             lo, hi = frame - frames_before, frame + frames_after + 1
             if recording:
-                return ListSnapshot(self.live_state, frame, True, runs_in_range(self.input_track, lo, hi), [], [], [], [])
+                return ListSnapshot(self.live_state, frame, True, runs_in_range(self.input_track, lo, hi), [], [], [], [],
+                                    [])
             return ListSnapshot(
                 self.live_state, frame, False,
                 runs_in_range(self.input_track, lo, hi),
@@ -141,7 +175,42 @@ class PlayalongController:
                   best_hold(k, self.attempt_track) if k["hold"] and not k["exact"] else None)
                  for i, k in enumerate(self.key_inputs)
                  if k["start"] < hi and k["end"] >= lo],
+                self._history_rows(lo, hi),
             )
+
+    def _grades(self, run):
+        """The run's key input grades, cached until the key inputs or target change."""
+        if run.get("_grades", (None,))[0] != self._grades_version:
+            run["_grades"] = (self._grades_version, grade_all(self.key_inputs, run["attempt"], self.input_track))
+        return run["_grades"][1]
+
+    def _history_rows(self, lo, hi):
+        """The most recent history_count runs, newest first, trimmed to frames lo..hi."""
+        rows = []
+        for run in reversed(self.runs[-self.history_count:] if self.history_count else []):
+            if self.key_inputs:
+                grades = [(k["start"], k["end"], grade, offset)
+                          for k, (grade, offset) in zip(self.key_inputs, self._grades(run))
+                          if k["start"] < hi and k["end"] >= lo]
+                rows.append(HistoryRow(f"Run {run['id']}", grades, []))
+            else:
+                rows.append(HistoryRow(f"Run {run['id']}", [], match_runs(self.input_track, run["attempt"], lo, hi)))
+        return rows
+
+    def get_runs(self):
+        with self._lock:
+            return [dict(run) for run in self.runs]
+
+    def set_history_count(self, count):
+        self.history_count = count
+
+    def restart(self):
+        """Back to the first frame. In practice mode that starts a fresh attempt, keeping the
+        current one in the history."""
+        with self._lock:
+            if self.practice:
+                self._start_over()
+            self.current_frame = 0
 
     def get_key_inputs(self):
         with self._lock:
@@ -195,6 +264,7 @@ class PlayalongController:
             return list(self.attempt_track)
 
     def set_attempt_track(self, attempt):
+        """Shows the given attempt (e.g. a run to replay); it isn't archived again."""
         with self._lock:
             self._reset_attempt(attempt)
 
@@ -213,6 +283,8 @@ class PlayalongController:
             if self.running_state == RUNNING_STATES.STOPPED and self.input_track:
                 if self.current_frame >= len(self.input_track) - 1:
                     self.current_frame = 0
+                    if self.practice:
+                        self._start_over()
                 self.running_state = RUNNING_STATES.PLAYING
 
     def pause(self):
@@ -241,6 +313,7 @@ class PlayalongController:
             self.input_track = list(input_track)
             self.current_frame = 0
             self._reset_attempt(attempt)
+            self.runs = []  # Runs belong to the track they were played against.
             self._fit_notes(notes or [])
             self._fit_key_inputs(key_inputs or [])
 
@@ -265,6 +338,7 @@ class PlayalongController:
             self.input_track = []
             self.current_frame = 0
             self._reset_attempt()
+            self.runs = []
             self.notes = []
             self.key_inputs = []
             self.running_state = RUNNING_STATES.RECORDING
@@ -296,5 +370,6 @@ class PlayalongController:
                     if self.input_track[i][button] == self.input_track[i - 1][button]:
                         cleaned[i][button] = 0
             self.input_track = cleaned
+            self._grades_version += 1
             self.current_frame = 0
             self._reset_attempt(self.attempt_track)  # Re-score the attempt against the cleaned track.
