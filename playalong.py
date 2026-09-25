@@ -5,7 +5,7 @@ from collections import namedtuple
 
 from controller import get_neutral_controller_state
 from input_list import match_runs, runs_in_range
-from key_inputs import HIT, normalized, result
+from key_inputs import HIT, best_hold, normalized, result
 
 PLAYALONG_FRAMELENGTH = 120
 
@@ -137,7 +137,9 @@ class PlayalongController:
                 match_runs(self.input_track, self.attempt_track, lo, hi),
                 [(i, note["start"], note["end"], note["text"]) for i, note in enumerate(self.notes)
                  if note["start"] < hi and note["end"] >= lo],
-                [(i, dict(k), result(k, self.attempt_track, self.input_track)) for i, k in enumerate(self.key_inputs)
+                [(i, dict(k), result(k, self.attempt_track, self.input_track),
+                  best_hold(k, self.attempt_track) if k["hold"] and not k["exact"] else None)
+                 for i, k in enumerate(self.key_inputs)
                  if k["start"] < hi and k["end"] >= lo],
             )
 
