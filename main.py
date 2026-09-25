@@ -31,7 +31,7 @@ from KivyOnTop import register_topmost, unregister_topmost
 from pynput import keyboard
 
 import dialogs
-from controller import find_controllers, get_cool_controller_pattern
+from controller import find_controllers
 from input_list import LIST_BUTTON_ORDER
 from key_inputs import derive, derive_hold, describe, normalized
 from layouts.input_list_layout import LANES, InputListLayout
@@ -44,8 +44,6 @@ from video_writer import nvenc_available, resolve_encoder, write_capture_and_ove
 
 logger = logging.getLogger(__name__)
 TITLE = "Wombo Combo"
-
-TEST_INPUTS = get_cool_controller_pattern()
 
 HOTKEYS = [
     ("F1", "Show hotkeys", "show_help"),
@@ -78,7 +76,7 @@ class WomboComboApp(App):
     def __init__(self):
         super().__init__()
         self.topmost = False
-        self.playalong_controller = PlayalongController(TEST_INPUTS)
+        self.playalong_controller = PlayalongController()
         self.sampler = InputSampler(self.playalong_controller.tick)
         self.screen_recorder = None
         self.capture_path = None  # Video that belongs to the current input track, if any.
@@ -106,7 +104,7 @@ class WomboComboApp(App):
             "loop": 1,
             "practice": 1,
             "list_frame_width": 0,  # Pixels per frame in the input list; 0 = one label wide.
-            "input_display": "ring",
+            "input_display": "list",  # The input list is where practice happens; the ring is optional.
             "show_notes": 1,
             "lanes": ",".join(LANES),  # Input list lanes shown.
             "recent_attempts": 5,  # Recent runs shown in the input list.
