@@ -35,10 +35,10 @@ from pynput import keyboard
 
 import dialogs
 from controller import find_controllers
-from input_list import LIST_BUTTON_ORDER
+from input_list import LIST_BUTTON_ORDER, full_map, inverse_map, map_key_input, map_state
 from key_inputs import demo_track, derive, derive_hold, describe, normalized
 from layouts.input_list_layout import LANES, InputListLayout
-from layouts.menu_layout import AttemptsPopup, HelpPopup, KeyInputPopup, Menu, MenuBar, NotePopup, SettingsPopup
+from layouts.menu_layout import AttemptsPopup, ButtonMapPopup, HelpPopup, KeyInputPopup, Menu, MenuBar, NotePopup, SettingsPopup
 from layouts.playalong_layout import PlayAlongLayout
 from playalong import PlayalongController
 from sampler import FPS, InputSampler
@@ -321,6 +321,8 @@ class WomboComboApp(App):
             elif controller.attempted_frames:
                 accuracy = controller.matched_frames / controller.attempted_frames
                 parts.append(f"Match {accuracy:.0%} of {controller.attempted_frames}f")
+            if controller.button_map:
+                parts.append("[color=8fb8ff]Buttons remapped[/color]")
             if self.unsaved_take or self.unsaved_edits:
                 parts.append("[color=ffb454]Unsaved[/color]")
         else:
@@ -433,7 +435,9 @@ class WomboComboApp(App):
                 return
         controller.pause()  # Also ends a demo already playing.
         countdown = self.config.getint("wombo", "demo_countdown")
-        controller.start_demo(track, self.virtual_pad.send, countdown, kind)
+        mapping, pad = controller.get_button_map(), self.virtual_pad
+        # The game reads the player's own layout, so the demo presses the player's buttons.
+        controller.start_demo(track, lambda state: pad.send(map_state(state, mapping)), countdown, kind)
         self.set_selection(None)
         self.flash(f"Demo of the {kind} in {countdown / FPS:g}s: switch to the game", "8fd18f", 5)
         self._countdown_second = None  # update_status ticks each second of the countdown audibly.
@@ -538,8 +542,12 @@ class WomboComboApp(App):
 
     def _open_key_input_popup(self, index, key_input):
         controller = self.playalong_controller
+        # The editor works in the player's buttons; key inputs are kept in the recording's.
+        mapping = controller.get_button_map()
+        to_recorded = inverse_map(mapping)
 
-        def save(edited):
+        def save(shown):
+            edited = map_key_input(shown, to_recorded)
             if not edited.get("exact") and not (edited["motion"] or edited["buttons"] or edited["direction"]):
                 self.flash("A key input needs a motion, a direction or a button (or to be an exact span)", "ffb454")
                 return
@@ -553,7 +561,7 @@ class WomboComboApp(App):
                     return
             controller.set_key_input(index, edited)
             self.unsaved_edits = True
-            self.flash(f"Key input {describe(edited)} on frames {edited['start']}-{edited['end']}")
+            self.flash(f"Key input {describe(shown)} on frames {edited['start']}-{edited['end']}")
 
         def delete():
             controller.remove_key_input(index)
@@ -562,8 +570,25 @@ class WomboComboApp(App):
         delete = delete if index is not None else None
         title = "Mark key input" if index is None else "Edit key input"
         track = controller.get_input_track()
-        KeyInputPopup(title, normalized(key_input), len(track) - 1, LIST_BUTTON_ORDER, describe,
-                      lambda edited: derive_hold(track, edited["start"], edited["end"]), save, delete).open()
+        KeyInputPopup(title, map_key_input(normalized(key_input), mapping), len(track) - 1, LIST_BUTTON_ORDER,
+                      describe, lambda edited: map_key_input(derive_hold(track, edited["start"], edited["end"]), mapping),
+                      save, delete).open()
+
+    def remap_buttons(self):
+        """Opens the button map for this recording: which of the player's buttons does what each
+        recorded button did."""
+        controller = self.playalong_controller
+        if controller.is_recording() or not controller.input_track:
+            self.flash("Open a recording to remap its buttons", "ffb454")
+            return
+        track = controller.get_input_track()
+        used = {button: sum(1 for i, frame in enumerate(track) if frame[button] and (i == 0 or not track[i - 1][button]))
+                for button in LIST_BUTTON_ORDER}
+        ButtonMapPopup(full_map(controller.get_button_map()), used, self.set_button_map).open()
+
+    def set_button_map(self, mapping):
+        self.playalong_controller.set_button_map(mapping)
+        self.unsaved_edits = True
 
     def toggle_practice(self):
         practice = not self.playalong_controller.practice
@@ -786,7 +811,8 @@ class WomboComboApp(App):
             self.stop_recording()
         if isinstance(data, dict):
             self.playalong_controller.set_input_track(data["inputs"], data.get("attempt"), data.get("notes"),
-                                                      data.get("key_inputs"), data.get("saved_attempts"))
+                                                      data.get("key_inputs"), data.get("saved_attempts"),
+                                                      data.get("button_map"))
         else:
             self.playalong_controller.set_input_track(data)  # Older saves are a bare list of frames.
         self.track_path = path
@@ -810,7 +836,7 @@ class WomboComboApp(App):
         if any(frame is not None for frame in attempt):
             data["attempt"] = attempt
         for key, value in (("notes", controller.get_notes()), ("key_inputs", controller.get_key_inputs()),
-                           ("saved_attempts", controller.get_saved())):
+                           ("saved_attempts", controller.get_saved()), ("button_map", controller.get_button_map())):
             if value:
                 data[key] = value
         return data

@@ -5,7 +5,7 @@ from enum import Enum
 from collections import namedtuple
 
 from controller import get_neutral_controller_state
-from input_list import match_runs, runs_in_range
+from input_list import full_map, inverse_map, map_key, map_key_input, map_state, match_runs, runs_in_range
 from key_inputs import HIT, best_hold, grade_all, normalized, result
 
 PLAYALONG_FRAMELENGTH = 120
@@ -50,6 +50,10 @@ class PlayalongController:
     controller, one frame per tick, so the combo can be watched in game. It takes over playback:
     nothing is scored, and it stops at the end of the track or when paused.
 
+    A button map ({recorded button: player's button}) lets the player use their own layout. The
+    track and everything made from it stay in the recording's buttons; the player's live input is
+    translated into them for scoring, and snapshots translate back, so the player sees their own.
+
     Saved attempts are ones the player chose to keep with the track (they're saved in its file):
     {"id", "name", "created", "attempt", "shown"}, where shown puts them in the input list.
     """
@@ -76,6 +80,8 @@ class PlayalongController:
         self.lead_in = 60  # Frames of run-up before practice playback starts, to get ready.
         self._lead = 0  # Run-up frames left before the playhead moves.
         self.demo = None  # {"track", "output", "kind"} while a demo plays.
+        self.button_map = {}  # Recorded button -> the player's; only buttons that differ.
+        self._from_player = {}
         self._grades_version = 0  # Bumped when key inputs or the target change, invalidating cached grades.
 
     def _fit_key_inputs(self, key_inputs):
@@ -143,7 +149,7 @@ class PlayalongController:
                     for offset in range(ticks):
                         frame = self.current_frame + offset
                         if frame < len(self.input_track):
-                            self._record_attempt(frame, controller_state)
+                            self._record_attempt(frame, map_state(controller_state, self._from_player))
                 if ticks:
                     self._advance(ticks)
             elif self.running_state == RUNNING_STATES.RECORDING:
@@ -224,7 +230,7 @@ class PlayalongController:
         with self._lock:
             if self.running_state == RUNNING_STATES.RECORDING:
                 return self.live_state, []
-            return self.live_state, self.get_playalong_frames()
+            return self.live_state, [map_state(frame, self.button_map) for frame in self.get_playalong_frames()]
 
     def list_snapshot(self, frames_before, frames_after):
         """Target runs, attempt runs and per-frame matches around the playhead, for the input list."""
@@ -238,14 +244,15 @@ class PlayalongController:
                                     [])
             # A demo shows what it's sending where the attempt would go.
             shown = self.demo["track"] if self.demo else self.attempt_track
+            as_player = lambda runs: [(start, length, map_key(key, self.button_map)) for start, length, key in runs]
             return ListSnapshot(
                 self.live_state, frame, False,
-                runs_in_range(self.input_track, lo, hi),
-                runs_in_range(shown, lo, hi),
+                as_player(runs_in_range(self.input_track, lo, hi)),
+                as_player(runs_in_range(shown, lo, hi)),
                 [] if self.demo else match_runs(self.input_track, self.attempt_track, lo, hi),
                 [(i, note["start"], note["end"], note["text"]) for i, note in enumerate(self.notes)
                  if note["start"] < hi and note["end"] >= lo],
-                [(i, dict(k), result(k, self.attempt_track, self.input_track),
+                [(i, map_key_input(k, self.button_map), result(k, self.attempt_track, self.input_track),
                   best_hold(k, self.attempt_track) if k["hold"] and not k["exact"] else None)
                  for i, k in enumerate(self.key_inputs)
                  if k["start"] < hi and k["end"] >= lo],
@@ -457,7 +464,22 @@ class PlayalongController:
         with self._lock:
             return list(self.input_track)
 
-    def set_input_track(self, input_track, attempt=None, notes=None, key_inputs=None, saved_attempts=None):
+    def get_button_map(self):
+        return dict(self.button_map)
+
+    def set_button_map(self, mapping):
+        """Sets {recorded button: player's button}; it must be one-to-one."""
+        table = full_map(mapping)
+        if len(set(table.values())) != len(table):
+            raise ValueError(f"Button map isn't one-to-one: {mapping}")
+        with self._lock:
+            self.button_map = {recorded: theirs for recorded, theirs in table.items() if recorded != theirs}
+            self._from_player = {theirs: recorded for theirs, recorded in inverse_map(self.button_map).items()
+                                 if theirs != recorded}
+
+    def set_input_track(self, input_track, attempt=None, notes=None, key_inputs=None, saved_attempts=None,
+                        button_map=None):
+        self.set_button_map(button_map or {})
         with self._lock:
             self.running_state = RUNNING_STATES.STOPPED
             self.input_track = list(input_track)
@@ -493,6 +515,7 @@ class PlayalongController:
             self.saved = []
             self.notes = []
             self.key_inputs = []
+            self.button_map, self._from_player = {}, {}  # A new take is in the player's own buttons.
             self.running_state = RUNNING_STATES.RECORDING
 
     def stop_recording(self):
