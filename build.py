@@ -22,7 +22,8 @@ controller) and press each input as it reaches the white line. No controller? WA
 U I O punch, J K L kick.
 
 The full user guide is User guide\\USER_GUIDE.md (F1 in the app opens it too).
-Settings are kept in %APPDATA%\\wombocombo. Logs, if something goes wrong, are in
+Unzip it somewhere with a short path (Downloads or the desktop are fine): Windows can't start it
+from very deeply nested folders. Settings are kept in %APPDATA%\\wombocombo. Logs, if something goes wrong, are in
 %USERPROFILE%\\.kivy\\logs.
 """
 

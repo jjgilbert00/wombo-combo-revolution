@@ -30,5 +30,8 @@ Notes:
   the user's PC anyway. Without it the app runs normally, and Demo explains what to install.
 - The exe isn't code-signed, so Windows SmartScreen warns about an unknown publisher on first run.
   Signing it would need a code-signing certificate.
+- Windows limits paths to 260 characters, and the build has some deep ones (Kivy's files). Unzipped
+  somewhere with a very long path, it fails to start with "The filename or extension is too
+  long" in its log. Anywhere ordinary, such as Downloads or the desktop, is fine.
 - Logs from the built app go to `%USERPROFILE%\.kivy\logs`, and settings to
   `%APPDATA%\wombocombo\wombocombo.ini`.
