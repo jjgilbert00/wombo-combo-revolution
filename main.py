@@ -468,8 +468,11 @@ class WomboComboApp(App):
             return f"[b]Get ready.[/b] The first input reaches the line in {controller.get_lead() / FPS:.1f}s."
         if controller.is_playing():
             if controller.practice:
-                return ("[b]Practising.[/b] Press each input as it reaches the line. "
-                        "[b]Home[/b] / [b]F5[/b] starts over, [b]Space[/b] / [b]F7[/b] pauses.")
+                reader = self.sampler.reader
+                keys = ("" if reader and reader.connected else
+                        " No controller: [b]WASD[/b] moves, [b]U I O[/b] punch, [b]J K L[/b] kick.")
+                return ("[b]Practising.[/b] Press each input as it reaches the line. [b]Start[/b] / [b]Space[/b] "
+                        "pauses, [b]Back[/b] / [b]Home[/b] starts over." + keys)
             return "[b]Reviewing[/b] your attempt against the recording. [b]F4[/b] goes back to practice."
         if controller.attempted_frames:
             return ("Scroll or drag to look back at your attempt. [b]S[/b] saves it, [b]A[/b] lists all "
@@ -1234,7 +1237,8 @@ class WomboComboApp(App):
         steps = [
             "Open a recording with [b]Ctrl+O[/b] (or drop its .json / .mp4 on the window), or record one with "
             "[b]F8[/b] and save it with [b]F12[/b].",
-            "Press [b]Space[/b] (or [b]F6[/b] in game) and play along: press each input as it reaches the line.",
+            "Press [b]Space[/b] or [b]Start[/b] and play along: press each input as it reaches the line. No "
+            "controller? [b]WASD[/b] + [b]U I O[/b] / [b]J K L[/b].",
             "Mark what matters: select frames (drag in the frame meter) and press [b]K[/b]. Runs are graded "
             "below your attempt.",
             "Look back: scroll or drag the list, [b]S[/b] saves an attempt, [b]A[/b] lists and replays attempts.",
@@ -1251,6 +1255,7 @@ class WomboComboApp(App):
             ("A", "Attempts: rename, show, replay, delete"),
             ("Esc", "Clear the selection"),
         ]
+        in_window = [("Start / Back", "On the controller: play or pause / start over")] + in_window
         mouse = [
             ("Wheel / drag", "Move through the list, a frame per notch"),
             ("Ctrl+Wheel", "Zoom in and out"),

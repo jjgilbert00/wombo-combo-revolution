@@ -31,11 +31,23 @@ pip install -r requirements.txt
 python main.py
 ```
 
+**The first time it starts,** the app opens a short warm-up (light, medium and heavy punch, then a
+Hadoken) with generous timing. Press **Space**, or **Start** on your controller, and press each
+input as it reaches the white line. That's all there is to it. A verdict pops up for each input
+("HIT", "LATE +2"...) and the pass ends with your score.
+
+![The first go at the warm-up](images/first-go.png)
+
+![A pass's result](images/pass-result.png)
+
+No controller? Play on the keyboard with SF6's PC layout: **WASD** or the arrow keys to move,
+**U I O** for light, medium and heavy punch, **J K L** for kicks.
+
 **To practise a combo someone recorded:**
 
 1. Press **Ctrl+O** and pick the recording. Either its `.mp4` or its `.json` works. You can also
    drag the file onto the window.
-2. Press **Space** in the app, or **F6** while the game has focus.
+2. Press **Space** or **Start** on your controller in the app, or **F6** while the game has focus.
 3. Press each input as it reaches the white line. The first inputs scroll in over a one-second
    lead-in, so you have time to get ready.
 
@@ -46,7 +58,7 @@ python main.py
 3. Press **F8** again to stop.
 4. Press **F12** to save it.
 
-With nothing loaded, the app shows these steps too:
+With nothing loaded, the app offers these as buttons:
 
 ![The start screen](images/start-screen.png)
 
@@ -125,8 +137,8 @@ Every lane can be hidden from the **View** menu, which says whether each one is 
 
 | To | Do this |
 |---|---|
-| Play / pause | **Space** (in the app) or **F6** / **F7** (in game), or the Play button |
-| Start over | **Home** (in the app) or **F5** (in game), or Restart |
+| Play / pause | **Start** on the controller or **Space** (in the app), **F6** / **F7** (in game), or the Play button |
+| Start over | **Back** (View) on the controller or **Home** (in the app), **F5** (in game), or Restart |
 | Practise one part | Right-click in the list and choose **Practise from here** |
 | Look back | Scroll the mouse wheel (one frame per notch) or drag the list sideways |
 | Zoom | **Ctrl+Wheel** |
@@ -138,6 +150,13 @@ Every lane can be hidden from the **View** menu, which says whether each one is 
 - **Lead-in.** When practice starts, and on every loop, the list scrolls in for a moment before
   the first frame (1 second by default). You can change or turn this off in
   [Settings](#settings).
+- **Verdicts.** Each key input is judged the moment it's settled, next to the line: **HIT**,
+  **EARLY -1** or **LATE +2** (frames outside the window), or **MISS**. When the pass ends, a
+  banner gives its score and what went wrong, or **PERFECT** and how many in a row, plus your
+  best for the recording.
+- **Keyboard.** Without a controller, **WASD** or the arrows move and **U I O / J K L** are the
+  punches and kicks. While a pass is playing the letters play; when paused they're the usual
+  shortcuts.
 - **Loop.** With **Loop on**, the recording repeats. Each pass starts fresh, and the pass you just
   finished is kept in [Recent attempts](#reviewing-your-attempts).
 
