@@ -10,6 +10,7 @@ from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.button import Button
 from kivy.uix.dropdown import DropDown
 from kivy.uix.gridlayout import GridLayout
+from kivy.uix.image import Image
 from kivy.uix.label import Label
 from kivy.uix.modalview import ModalView
 from kivy.uix.scrollview import ScrollView
@@ -210,6 +211,7 @@ class MenuBar(BoxLayout):
         # The selection, then attempts, then whole-track changes last so they're hard to hit by accident.
         edit_menu.add_item("Add note to selection", app.add_note, "N")
         edit_menu.add_item("Mark key input", app.mark_key_input, "K")
+        edit_menu.add_item("Remap buttons...", app.remap_buttons)
         edit_menu.add_separator()
         edit_menu.add_item("Save attempt", app.save_attempt, "S")
         edit_menu.add_item("Attempts...", app.open_attempts, "A")
@@ -787,3 +789,75 @@ class AttemptsPopup(ModalView):
         delete.bind(on_release=confirm)
         row.add_widget(delete)
         return row
+
+
+class ButtonMapPopup(ModalView):
+    """Maps each recorded button to one of the player's. Picking a button that another recorded
+    button already uses swaps the two, so the map stays one-to-one. Changes apply at once through
+    on_change(mapping); used is how many times each recorded button is pressed in the recording."""
+
+    ROW_HEIGHT = dp(36)
+
+    def __init__(self, mapping, used, on_change, icon=None, **kwargs):
+        from images import get_standard_button_icon
+        icon = icon or (lambda name: get_standard_button_icon("XGamepad", "Alt", name))
+        super().__init__(size_hint=(None, None), size=(dp(520), dp(150) + self.ROW_HEIGHT * len(mapping)),
+                         background="", background_color=(0, 0, 0, 0.5), **kwargs)
+        self.mapping = dict(mapping)
+        self.on_change = on_change
+        self.spinners = {}
+        self._updating = False
+        panel = BoxLayout(orientation="vertical", padding=dp(16), spacing=dp(6))
+        _paint_background(panel, PANEL_COLOR)
+        panel.add_widget(Label(text="Remap buttons for this recording", font_size=sp(16), bold=True, color=TEXT_COLOR,
+                               size_hint_y=None, height=dp(24), halign="left", text_size=(dp(488), None)))
+        panel.add_widget(Label(text="Pick the button you press for each recorded one. The list, scoring and demos "
+                                    "follow your buttons.", font_size=sp(12), color=DIM_TEXT_COLOR, size_hint_y=None,
+                               height=dp(32), halign="left", valign="middle", text_size=(dp(488), dp(32))))
+        for recorded in mapping:
+            row = BoxLayout(size_hint_y=None, height=self.ROW_HEIGHT, spacing=dp(10))
+            row.add_widget(Image(source=icon(recorded), size_hint_x=None, width=dp(28)))
+            count = used.get(recorded, 0)
+            row.add_widget(Label(text=f"Recorded {recorded}", font_size=FONT_SIZE, color=TEXT_COLOR if count else
+                                 DIM_TEXT_COLOR, halign="left", valign="middle", size_hint_x=None, width=dp(120),
+                                 text_size=(dp(120), self.ROW_HEIGHT)))
+            row.add_widget(Label(text=f"pressed {count}x" if count else "not used", font_size=sp(12),
+                                 color=DIM_TEXT_COLOR, halign="left", valign="middle", size_hint_x=None, width=dp(80),
+                                 text_size=(dp(80), self.ROW_HEIGHT)))
+            row.add_widget(Label(text="->", font_size=FONT_SIZE, color=DIM_TEXT_COLOR, size_hint_x=None,
+                                 width=dp(24)))
+            spinner = _spinner(list(mapping), self.mapping[recorded],
+                               lambda theirs, recorded=recorded: self._choose(recorded, theirs))
+            spinner.size_hint_y = 1
+            self.spinners[recorded] = spinner
+            row.add_widget(spinner)
+            panel.add_widget(row)
+        actions = BoxLayout(size_hint_y=None, height=dp(32), spacing=dp(8))
+        reset = BarButton(text="Reset to recorded", highlight=(1, 1, 1, 0.08))
+        reset.bind(on_release=lambda *_: self._reset())
+        actions.add_widget(reset)
+        actions.add_widget(Widget())
+        done = BarButton(text="Done", highlight=(1, 1, 1, 0.12))
+        done.bind(on_release=lambda *_: self.dismiss())
+        actions.add_widget(done)
+        panel.add_widget(actions)
+        self.add_widget(panel)
+
+    def _choose(self, recorded, theirs):
+        if self._updating or self.mapping[recorded] == theirs:
+            return
+        # Whichever recorded button had this one takes over the button being replaced.
+        other = next(button for button, mapped in self.mapping.items() if mapped == theirs)
+        self.mapping[other], self.mapping[recorded] = self.mapping[recorded], theirs
+        self._apply()
+
+    def _reset(self):
+        self.mapping = {button: button for button in self.mapping}
+        self._apply()
+
+    def _apply(self):
+        self._updating = True
+        for recorded, spinner in self.spinners.items():
+            spinner.text = self.mapping[recorded]
+        self._updating = False
+        self.on_change(dict(self.mapping))
