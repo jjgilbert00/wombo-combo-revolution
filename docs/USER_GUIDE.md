@@ -23,13 +23,15 @@ Frame by frame, and attempt after attempt.
 
 ## Quick start
 
-Wombo Combo runs on Windows with an Xbox-style (XInput) controller. Other controllers are read
-through SDL. To start the app:
+Wombo Combo runs on Windows. Any controller works (Xbox-style ones directly, others through SDL),
+or the keyboard.
 
-```
-pip install -r requirements.txt
-python main.py
-```
+1. Download **WomboCombo-windows.zip** and unzip it anywhere.
+2. Run **WomboCombo.exe**. Nothing else to install.
+
+(Windows may warn that the app is from an unknown publisher, since it isn't signed: choose
+*More info > Run anyway*. To run from source instead: `pip install -r requirements.txt`, then
+`python main.py`. To build the download yourself, see [BUILDING.md](BUILDING.md).)
 
 **The first time it starts,** the app opens a short warm-up (light, medium and heavy punch, then a
 Hadoken) with generous timing. Press **Space**, or **Start** on your controller, and press each
