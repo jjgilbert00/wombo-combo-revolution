@@ -29,6 +29,11 @@ class InputSampler:
         self.on_tick = on_tick  # Called on the sampler thread as on_tick(state, ticks).
         self.fps = fps
         self.reader = None  # Swapped by the UI thread; any object with poll() -> dict | None.
+        # Optional: extra() -> dict | None of more input to merge in (e.g. the keyboard), and
+        # on_menu(name) called when Start or Back is pressed (from the sampler thread).
+        self.extra = None
+        self.on_menu = None
+        self._menu = (False, False)
         self.stats = SamplerStats()
         self._stop = threading.Event()
         self._thread = None
@@ -45,8 +50,22 @@ class InputSampler:
 
     def _poll(self):
         reader = self.reader
-        state = reader.poll() if reader else None
-        return state or get_neutral_controller_state()
+        state = (reader.poll() if reader else None) or get_neutral_controller_state()
+        menu = getattr(reader, "menu", (False, False)) if reader else (False, False)
+        for name, now, before in zip(("start", "back"), menu, self._menu):
+            if now and not before and self.on_menu:
+                self.on_menu(name)
+        self._menu = menu
+        extra = self.extra() if self.extra else None
+        if extra:
+            state = dict(state)
+            for key, value in extra.items():
+                if key == "direction":
+                    if value != 5:
+                        state["direction"] = value
+                elif value:
+                    state[key] = 1
+        return state
 
     def _run(self):
         sleeper = PreciseSleeper()

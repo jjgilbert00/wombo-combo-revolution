@@ -29,12 +29,13 @@ from kivy.metrics import dp
 from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.modalview import ModalView
 from kivy.uix.widget import Widget
+import win32api
 import win32con
 import win32gui
 from pynput import keyboard
 
 import dialogs
-from controller import find_controllers
+from controller import direction_from_axes, find_controllers
 from input_list import LIST_BUTTON_ORDER, full_map, inverse_map, map_key_input, map_state
 from key_inputs import demo_track, derive, derive_hold, describe, normalized
 from layouts.input_list_layout import LANES, InputListLayout
@@ -80,6 +81,15 @@ COACH = (
     "{controller}"
 )
 
+# Playing without a controller: SF6's PC keyboard layout. Key codes are Kivy's.
+KEYBOARD_KEYS = {
+    273: "up", 274: "down", 275: "right", 276: "left",
+    ord("w"): "up", ord("s"): "down", ord("d"): "right", ord("a"): "left",
+    ord("u"): "u", ord("i"): "i", ord("o"): "o", ord("j"): "j", ord("k"): "k", ord("l"): "l",
+}
+ARROW_KEYS = (273, 274, 275, 276)
+KEYBOARD_ACTIONS = {"u": "LP", "i": "MP", "o": "HP", "j": "LK", "k": "MK", "l": "HK"}
+
 VIDEO_HEIGHTS = [("Native", 0), ("1080p", 1080), ("720p", 720)]
 ENCODERS = [("Auto", "auto"), ("CPU (x264)", "x264"), ("NVIDIA (NVENC)", "nvenc")]
 
@@ -102,6 +112,7 @@ class WomboComboApp(App):
         self.track_path = None  # The current track's .json file, once it's been opened or saved.
         self.virtual_pad = None  # Plugged in the first time a demo plays.
         self.coaching = False  # Showing the "press Space" card until the player first plays.
+        self.keys_down = set()  # Game keys held on the keyboard, for playing without a controller.
         self.unsaved_take = False  # A new take that hasn't been saved anywhere yet.
         self.unsaved_edits = False  # Notes, key inputs or cleaning not yet saved.
         self.temp_dir = tempfile.mkdtemp(prefix="wombo_")
@@ -147,7 +158,9 @@ class WomboComboApp(App):
 
     def build(self):
         Window.clearcolor = (0.2, 0.2, 0.2, 0.5)
-        Window.size = (1920, 1080)
+        # Up to 1920x1080, but never bigger than the screen (with room for the taskbar).
+        screen_width, screen_height = win32api.GetSystemMetrics(0), win32api.GetSystemMetrics(1)
+        Window.size = (min(1920, int(screen_width * 0.9)), min(1080, int(screen_height * 0.85)))
         Window.borderless = False
         Window.fullscreen = False
 
@@ -180,6 +193,9 @@ class WomboComboApp(App):
 
     def on_start(self):
         self.select_controller()
+        self.sampler.extra = self.keyboard_state
+        self.sampler.on_menu = lambda name: Clock.schedule_once(lambda dt: self.on_menu_button(name))
+        Window.bind(on_key_up=self.on_key_up, focus=lambda window, focused: focused or self.keys_down.clear())
         self.sampler.start()
         if self.config.getboolean("wombo", "first_run"):
             # Straight into something to try: nothing to find, open or set up first.
@@ -222,10 +238,57 @@ class WomboComboApp(App):
         Window.bind(on_request_close=lambda *args: not self._keep_unsaved_work("quitting"))
         Window.bind(on_drop_file=lambda window, filename, *args: self.open_track(filename.decode("utf-8")))
 
+    def on_menu_button(self, name):
+        """Start plays or pauses and Back restarts, so practice never needs the keyboard. Only while
+        the app is in front: in game, those buttons belong to the game."""
+        if not self.app_focused() or any(isinstance(child, ModalView) for child in Window.children):
+            return
+        if name == "start":
+            self.toggle_playback()
+        else:
+            self.restart_playback()
+
+    @staticmethod
+    def app_focused():
+        return Window.focus
+
+    def _playing_by_keyboard(self):
+        controller = self.playalong_controller
+        return controller.is_playing() and controller.practice and not controller.demo_kind()
+
+    def keyboard_state(self):
+        """The keyboard as a controller (from the sampler thread), in the player's buttons: SF6's PC
+        layout of WASD or arrows to move, U I O punches, J K L kicks."""
+        keys = set(self.keys_down)
+        if not keys:
+            return None
+        x = (keys & {"right"} and 1 or 0) - (keys & {"left"} and 1 or 0)
+        y = (keys & {"up"} and 1 or 0) - (keys & {"down"} and 1 or 0)
+        state = {"direction": direction_from_axes(x, y)}
+        controller = self.playalong_controller
+        layout = controller.action_layout or GAMES["sf6"]["default_layout"]
+        by_action = {action: recorded for recorded, action in layout.items()}
+        mapping = full_map(controller.get_button_map())
+        for key, action in KEYBOARD_ACTIONS.items():
+            if key in keys and action in by_action:
+                state[mapping[by_action[action]]] = 1  # The recorded button, then the player's for it.
+        return state
+
+    def on_key_up(self, window, key, scancode):
+        name = KEYBOARD_KEYS.get(key)
+        if name:
+            self.keys_down.discard(name)
+
     def on_key_down(self, window, key, scancode, codepoint, modifiers):
         """Shortcuts that only apply while the app window is focused."""
         if any(isinstance(child, ModalView) for child in Window.children):
             return False  # A popup is open; let it have the keys.
+        name = KEYBOARD_KEYS.get(key)
+        if name and not modifiers:
+            self.keys_down.add(name)
+            # The arrows always play. While practising the letters do too; when paused, they're shortcuts.
+            if key in ARROW_KEYS or self._playing_by_keyboard():
+                return True
         if key == 27:  # Esc
             self.set_selection(None)
             return True
@@ -378,7 +441,8 @@ class WomboComboApp(App):
             if reader and reader.connected:
                 note = f"Using [b]{reader.name}[/b]: press a button and it shows up under the line."
             else:
-                note = ("[color=ffb454][b]No controller found.[/b][/color] Plug one in, it's picked up by itself.")
+                note = ("[color=ffb454][b]No controller found.[/b][/color] Plug one in (it's picked up by itself), "
+                        "or play on the keyboard: [b]WASD[/b] to move, [b]U I O[/b] punches, [b]J K L[/b] kicks.")
             return COACH.format(controller=note), (("Start", self.play, True),)
         return "", ()
 
