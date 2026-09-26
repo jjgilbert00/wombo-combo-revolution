@@ -8,6 +8,8 @@ from kivy.graphics import Color, InstructionGroup, Line, Rectangle
 from kivy.graphics.texture import Texture
 from kivy.metrics import dp, sp
 from kivy.resources import resource_find
+from kivy.uix.boxlayout import BoxLayout
+from kivy.uix.button import Button
 from kivy.uix.label import Label
 from kivy.uix.stencilview import StencilView
 from PIL import Image
@@ -425,6 +427,9 @@ class InputListLayout(StencilView):
                           size=lambda w, size: setattr(self._welcome_bg, "size", size),
                           texture_size=lambda w, size: setattr(w, "size", size))
         self.add_widget(self.welcome)
+        self.card_buttons = BoxLayout(size_hint=(None, None), height=dp(40), spacing=dp(8), opacity=0)
+        self._card_button_specs = None
+        self.add_widget(self.card_buttons)
         self.history_cells = _Pool(self.history_layer, self._make_strip)
         self.history_texts = _Pool(self.history_text_layer, self._make_strip)
         self.labels = _Pool(self.label_layer, self._make_strip)
@@ -503,14 +508,26 @@ class InputListLayout(StencilView):
         self._select_bands = [(y - LANE_GAP / 2, y + height + (MARGIN if name == "meter" else LANE_GAP / 2))
                               for name, (y, height) in lanes.items() if name in ("meter", "keys")]
 
-    def set_guidance(self, hint, welcome=""):
-        """The hint line's text, and the getting-started card's (empty hides it)."""
+    def set_guidance(self, hint, welcome="", buttons=()):
+        """The hint line's text, and the card's (empty hides it) with its buttons: (text, callback,
+        primary) each, under the card."""
         if self.hint.text != hint:
             self.hint.text = hint
         if self.welcome.text != welcome:
             self.welcome.text = welcome
             self.welcome.text_size = (dp(620), None)
         self.welcome.opacity = 1 if welcome else 0
+        specs = tuple((text, primary) for text, _, primary in buttons) if welcome else ()
+        if specs != self._card_button_specs:
+            self._card_button_specs = specs
+            self.card_buttons.clear_widgets()
+            for text, callback, primary in (buttons if welcome else ()):
+                button = Button(text=text, font_size=sp(15), bold=primary, background_normal="", background_down="",
+                                background_color=(0.25, 0.55, 0.95, 1) if primary else (1, 1, 1, 0.12))
+                button.bind(on_release=lambda *_, callback=callback: callback())
+                self.card_buttons.add_widget(button)
+        self.card_buttons.opacity = 1 if specs else 0
+        self.card_buttons.disabled = not specs
 
     def _place_guidance(self, notes_bottom):
         left, right = self._track_left(), self._track_right()
@@ -518,7 +535,9 @@ class InputListLayout(StencilView):
         self.hint.texture_update()
         self.hint.size = (right - left, self.hint.texture_size[1])
         self.hint.pos = (left, max(self.y + dp(12), notes_bottom - self.hint.height))
-        self.welcome.pos = (self.center_x - self.welcome.width / 2, self.center_y - self.welcome.height / 2)
+        self.welcome.pos = (self.center_x - self.welcome.width / 2, self.center_y - self.welcome.height / 2 + dp(24))
+        self.card_buttons.width = self.welcome.width
+        self.card_buttons.pos = (self.welcome.x, self.welcome.y - self.card_buttons.height - dp(6))
 
     def content_height(self, note_rows):
         """How tall the list needs to be to show everything it draws: the shown lanes, the live input
@@ -549,6 +568,8 @@ class InputListLayout(StencilView):
     def on_touch_down(self, touch):
         if not self.collide_point(*touch.pos):
             return super().on_touch_down(touch)
+        if self.card_buttons.opacity and self.card_buttons.collide_point(*touch.pos):
+            return super().on_touch_down(touch)  # The card's buttons.
         if touch.button == "right":
             if self.on_context_menu:
                 self.on_context_menu(self.frame_at(touch.x), touch.pos)
