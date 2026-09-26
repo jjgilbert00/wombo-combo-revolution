@@ -11,6 +11,7 @@ Frame by frame, and attempt after attempt.
 - [Practising](#practising)
 - [Recording your own combos](#recording-your-own-combos)
 - [Marking what matters: key inputs](#marking-what-matters-key-inputs)
+- [Game actions](#game-actions)
 - [Notes](#notes)
 - [Reviewing your attempts](#reviewing-your-attempts)
 - [Demoing a combo in game](#demoing-a-combo-in-game)
@@ -221,6 +222,40 @@ frames", include the neutral frame on each side of the walk in the selection.
 These assume your character is facing right: `236` is down, down-forward, forward (a
 quarter-circle forward), and `[2]` means hold down.
 
+## Game actions
+
+The input list can show what inputs **do** in the game instead of which buttons were pressed. Use
+**View > Show game actions** (and **Show controller buttons** to go back).
+
+For Street Fighter 6:
+
+| Shown as | Is | Buttons (Xbox Classic layout) |
+|---|---|---|
+| Fist, light blue / yellow / red | Light / Medium / Heavy Punch | X / Y / RB |
+| Shoe, light blue / yellow / red | Light / Medium / Heavy Kick | A / B / RT |
+| **DI** badge | Drive Impact | Heavy Punch + Heavy Kick |
+| **DP** badge | Drive Parry | Medium Punch + Medium Kick |
+| **DRC** badge | Drive Rush Cancel | Medium Punch + Medium Kick within 20 frames of a normal |
+| **THROW** badge | Throw | Light Punch + Light Kick |
+
+Key input tags follow along too, e.g. `2MP` or `DI`. MP+MK is shown as a Drive Rush Cancel when it
+comes straight after a normal attack (it cancels the normal) and as a Drive Parry otherwise.
+That's worked out from the recording, so treat it as a close guide rather than the game's own
+verdict.
+
+**Which button is which action** depends on the layout the recording was made with. By default
+that's SF6's Xbox Classic layout. If the recording used another layout, set it once in
+**Edit > Game actions...**: pick the game, then the action for each recorded button (unused
+buttons are greyed). Giving an action to a button takes it off the one that had it. **Default
+layout** puts the usual one back. It's saved with the recording.
+
+This is about the recording's layout. If *you* play with a different layout, that's what
+[Remapping buttons](#remapping-buttons) is for, and the two work together.
+
+New recordings, and older ones that don't say, use *Settings > Game for new recordings*
+(Street Fighter 6 unless you change it). The icons are drawn by Wombo Combo, not taken from the
+game.
+
 ## Notes
 
 Select some frames and press **N** (or right-click > Add note) to attach a note, for example
@@ -371,6 +406,7 @@ opacity* in the View menu. **F3** switches to the older ring display, if you pre
 | Export overlay on save | Also write `name_overlay.mp4` when saving a recording. |
 | Lead-in before practice | The run-up before practice playback: off, 0.5 s, 1 s or 2 s. |
 | Recent attempts shown | How many recent runs appear as rows. |
+| Game for new recordings | Which game's actions new recordings (and older ones that don't say) use. |
 | Demo countdown | How long a demo waits before playing, to switch to the game: 1, 2, 3 or 5 s. |
 
 Settings are saved automatically.

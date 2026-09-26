@@ -38,7 +38,8 @@ from controller import find_controllers
 from input_list import LIST_BUTTON_ORDER, full_map, inverse_map, map_key_input, map_state
 from key_inputs import demo_track, derive, derive_hold, describe, normalized
 from layouts.input_list_layout import LANES, InputListLayout
-from layouts.menu_layout import AttemptsPopup, ButtonMapPopup, HelpPopup, KeyInputPopup, Menu, MenuBar, NotePopup, SettingsPopup
+from games import GAMES
+from layouts.menu_layout import AttemptsPopup, ButtonMapPopup, GameActionsPopup, HelpPopup, KeyInputPopup, Menu, MenuBar, NotePopup, SettingsPopup
 from layouts.playalong_layout import PlayAlongLayout
 from playalong import PlayalongController
 from sampler import FPS, InputSampler
@@ -122,6 +123,8 @@ class WomboComboApp(App):
             "list_frame_width": 0,  # Pixels per frame in the input list; 0 = one label wide.
             "input_display": "list",  # The input list is where practice happens; the ring is optional.
             "show_notes": 1,
+            "show_actions": 1,  # Show a game's actions (a medium punch, a Drive Impact) instead of buttons.
+            "default_game": "sf6",  # Game for new recordings, and old ones that don't say.
             "lanes": ",".join(LANES),  # Input list lanes shown.
             "recent": "",  # Recently opened recordings (.json paths), newest first, separated by "|".
             "recent_attempts": 5,  # Recent runs shown in the input list.
@@ -162,6 +165,8 @@ class WomboComboApp(App):
         self.display = None
         self.show_display(self.config.get("wombo", "input_display"))
         self.set_notes_visible(self.config.getboolean("wombo", "show_notes"))
+        self.set_game(self.default_game(), None, mark_edited=False)
+        self.set_actions_visible(self.config.getboolean("wombo", "show_actions"))
         self.set_lanes_shown(set(filter(None, self.config.get("wombo", "lanes").split(","))))
         self.menu_bar.set_recent(self.recent_recordings())
         return self.root_layout
@@ -707,6 +712,7 @@ class WomboComboApp(App):
             return
         self.track_path = None
         self.unsaved_take = self.unsaved_edits = False
+        self.set_game(self.default_game(), None, mark_edited=False)
         self.playalong_controller.pause()
         self.capture_path = None
         frame_sink = None
@@ -813,8 +819,10 @@ class WomboComboApp(App):
             self.playalong_controller.set_input_track(data["inputs"], data.get("attempt"), data.get("notes"),
                                                       data.get("key_inputs"), data.get("saved_attempts"),
                                                       data.get("button_map"))
+            self.set_game(data.get("game", self.default_game()), data.get("action_layout"), mark_edited=False)
         else:
             self.playalong_controller.set_input_track(data)  # Older saves are a bare list of frames.
+            self.set_game(self.default_game(), None, mark_edited=False)
         self.track_path = path
         video = os.path.splitext(path)[0] + ".mp4"
         self.capture_path = video if os.path.exists(video) else None
@@ -836,7 +844,8 @@ class WomboComboApp(App):
         if any(frame is not None for frame in attempt):
             data["attempt"] = attempt
         for key, value in (("notes", controller.get_notes()), ("key_inputs", controller.get_key_inputs()),
-                           ("saved_attempts", controller.get_saved()), ("button_map", controller.get_button_map())):
+                           ("saved_attempts", controller.get_saved()), ("button_map", controller.get_button_map()),
+                           ("game", controller.game), ("action_layout", controller.action_layout if controller.game else None)):
             if value:
                 data[key] = value
         return data
@@ -1059,6 +1068,40 @@ class WomboComboApp(App):
         self.config.set("wombo", "input_display", mode)
         self.menu_bar.set_display_mode(mode)
 
+    def default_game(self):
+        game = self.config.get("wombo", "default_game")
+        return game if game in GAMES else None
+
+    def set_game(self, game, action_layout=None, mark_edited=True):
+        """The recording's game and action layout (None for the game's usual one)."""
+        self.playalong_controller.set_game(game, action_layout)
+        self.input_list_layout.textures.buttons.game = game
+        if mark_edited:
+            self.unsaved_edits = True
+
+    def set_actions_visible(self, visible):
+        self.playalong_controller.show_actions = visible
+        self.config.set("wombo", "show_actions", int(visible))
+        self.menu_bar.set_actions_visible(visible)
+
+    def toggle_actions(self):
+        self.set_actions_visible(not self.playalong_controller.show_actions)
+        if self.playalong_controller.show_actions and not self.playalong_controller.game:
+            self.flash("This recording has no game: choose one in Edit > Game actions...", "ffb454", 6)
+
+    def edit_game_actions(self):
+        controller = self.playalong_controller
+        if controller.is_recording() or not controller.input_track:
+            self.flash("Open a recording to set its game actions", "ffb454")
+            return
+        track = controller.get_input_track()
+        used = {button: sum(1 for i, frame in enumerate(track) if frame[button] and (i == 0 or not track[i - 1][button]))
+                for button in LIST_BUTTON_ORDER}
+        GameActionsPopup({key: game["name"] for key, game in GAMES.items()}, controller.game, controller.action_layout,
+                         {key: list(game["actions"]) for key, game in GAMES.items()},
+                         {key: game["default_layout"] for key, game in GAMES.items()}, used,
+                         lambda game, layout: self.set_game(game, layout)).open()
+
     def set_notes_visible(self, visible):
         self.input_list_layout.show_notes = visible
         self.config.set("wombo", "show_notes", int(visible))
@@ -1157,6 +1200,8 @@ class WomboComboApp(App):
                                                self.config.getint("wombo", "lead_in")))),
             ("Demo countdown", [("1 s", "60"), ("2 s", "120"), ("3 s", "180"), ("5 s", "300")],
              self.config.get("wombo", "demo_countdown"), setter("demo_countdown")),
+            ("Game for new recordings", [("None", "")] + [(game["name"], key) for key, game in GAMES.items()],
+             self.config.get("wombo", "default_game"), setter("default_game")),
             ("Recent attempts shown", [(str(n), str(n)) for n in (0, 1, 2, 3, 5, 8, 10, 15, 20)],
              self.config.get("wombo", "recent_attempts"),
              setter("recent_attempts", lambda: self.playalong_controller.set_history_count(

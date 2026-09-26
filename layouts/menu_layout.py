@@ -212,6 +212,7 @@ class MenuBar(BoxLayout):
         edit_menu.add_item("Add note to selection", app.add_note, "N")
         edit_menu.add_item("Mark key input", app.mark_key_input, "K")
         edit_menu.add_item("Remap buttons...", app.remap_buttons)
+        edit_menu.add_item("Game actions...", app.edit_game_actions)
         edit_menu.add_separator()
         edit_menu.add_item("Save attempt", app.save_attempt, "S")
         edit_menu.add_item("Attempts...", app.open_attempts, "A")
@@ -224,6 +225,7 @@ class MenuBar(BoxLayout):
         view_menu.add_item("Overlay mode", app.toggle_overlay, "F2")
         self.display_item = view_menu.add_item("Show input list", app.toggle_display, "F3")
         self.notes_item = view_menu.add_item("Hide notes", app.toggle_notes, "Shift+F3")
+        self.actions_item = view_menu.add_item("Show game actions", app.toggle_actions)
         view_menu.add_item("Help and keys", app.show_help, "F1")
         view_menu.add_separator()
         # Input list lanes, each shown or hidden; the right column says which.
@@ -322,6 +324,9 @@ class MenuBar(BoxLayout):
 
     def set_notes_visible(self, visible):
         self.notes_item.label.text = "Hide notes" if visible else "Show notes"
+
+    def set_actions_visible(self, visible):
+        self.actions_item.label.text = "Show controller buttons" if visible else "Show game actions"
 
     def set_display_mode(self, mode):
         self.display_item.label.text = "Show ring display" if mode == "list" else "Show input list"
@@ -861,3 +866,104 @@ class ButtonMapPopup(ModalView):
             spinner.text = self.mapping[recorded]
         self._updating = False
         self.on_change(dict(self.mapping))
+
+
+NO_ACTION = "None"
+
+
+class GameActionsPopup(ModalView):
+    """Picks the recording's game and which recorded button is which of its actions, so the input
+    list can show actions (a medium punch, a Drive Impact) instead of buttons. Changes apply at once
+    through on_change(game, layout)."""
+
+    ROW_HEIGHT = dp(34)
+
+    def __init__(self, game_names, game, layout, actions, default_layouts, used, on_change, **kwargs):
+        from images import get_standard_button_icon
+        super().__init__(size_hint=(None, None), size=(dp(520), dp(200) + self.ROW_HEIGHT * 8),
+                         background="", background_color=(0, 0, 0, 0.5), **kwargs)
+        self.game_names, self.actions, self.default_layouts = game_names, actions, default_layouts
+        self.game, self.layout = game, dict(layout)
+        self.on_change = on_change
+        self.spinners = {}
+        self._updating = False
+        panel = BoxLayout(orientation="vertical", padding=dp(16), spacing=dp(6))
+        _paint_background(panel, PANEL_COLOR)
+        panel.add_widget(Label(text="Game actions for this recording", font_size=sp(16), bold=True, color=TEXT_COLOR,
+                               size_hint_y=None, height=dp(24), halign="left", text_size=(dp(488), None)))
+        panel.add_widget(Label(text="Which action each recorded button is, in the layout it was recorded with. "
+                                    "View > Show game actions switches the list to them.", font_size=sp(12),
+                               color=DIM_TEXT_COLOR, size_hint_y=None, height=dp(32), halign="left", valign="middle",
+                               text_size=(dp(488), dp(32))))
+        names = [NO_ACTION] + list(game_names.values())
+        row = BoxLayout(size_hint_y=None, height=self.ROW_HEIGHT, spacing=dp(10))
+        row.add_widget(Label(text="Game", font_size=FONT_SIZE, color=TEXT_COLOR, halign="left", valign="middle",
+                             size_hint_x=None, width=dp(120), text_size=(dp(120), self.ROW_HEIGHT)))
+        self.game_spinner = _spinner(names, game_names.get(game, NO_ACTION), self._choose_game)
+        self.game_spinner.size_hint_y = 1
+        row.add_widget(self.game_spinner)
+        panel.add_widget(row)
+        for recorded in ("X", "Y", "A", "B", "LB", "RB", "LT", "RT"):
+            row = BoxLayout(size_hint_y=None, height=self.ROW_HEIGHT, spacing=dp(10))
+            row.add_widget(Image(source=get_standard_button_icon("XGamepad", "Alt", recorded), size_hint_x=None,
+                                 width=dp(26)))
+            count = used.get(recorded, 0)
+            row.add_widget(Label(text=f"Recorded {recorded}", font_size=FONT_SIZE,
+                                 color=TEXT_COLOR if count else DIM_TEXT_COLOR, halign="left", valign="middle",
+                                 size_hint_x=None, width=dp(120), text_size=(dp(120), self.ROW_HEIGHT)))
+            row.add_widget(Label(text=f"pressed {count}x" if count else "not used", font_size=sp(12),
+                                 color=DIM_TEXT_COLOR, halign="left", valign="middle", size_hint_x=None, width=dp(80),
+                                 text_size=(dp(80), self.ROW_HEIGHT)))
+            spinner = _spinner([NO_ACTION], NO_ACTION, lambda action, recorded=recorded: self._choose(recorded, action))
+            spinner.size_hint_y = 1
+            self.spinners[recorded] = spinner
+            row.add_widget(spinner)
+            panel.add_widget(row)
+        actions_row = BoxLayout(size_hint_y=None, height=dp(32), spacing=dp(8))
+        reset = BarButton(text="Default layout", highlight=(1, 1, 1, 0.08))
+        reset.bind(on_release=lambda *_: self._reset())
+        actions_row.add_widget(reset)
+        actions_row.add_widget(Widget())
+        done = BarButton(text="Done", highlight=(1, 1, 1, 0.12))
+        done.bind(on_release=lambda *_: self.dismiss())
+        actions_row.add_widget(done)
+        panel.add_widget(actions_row)
+        self.add_widget(panel)
+        self._refresh()
+
+    def _refresh(self):
+        self._updating = True
+        choices = [NO_ACTION] + (self.actions[self.game] if self.game else [])
+        for recorded, spinner in self.spinners.items():
+            spinner.values = choices
+            spinner.text = self.layout.get(recorded, NO_ACTION)
+            spinner.disabled = not self.game
+        self._updating = False
+
+    def _choose_game(self, name):
+        if self._updating:
+            return
+        game = next((key for key, value in self.game_names.items() if value == name), None)
+        if game != self.game:
+            self.game = game
+            self.layout = dict(self.default_layouts.get(game, {}))
+            self._changed()
+
+    def _choose(self, recorded, action):
+        if self._updating:
+            return
+        self.layout.pop(recorded, None)
+        if action != NO_ACTION:
+            # An action belongs to one button; the button that had it is left without one.
+            for button in [b for b, a in self.layout.items() if a == action]:
+                del self.layout[button]
+            self.layout[recorded] = action
+        self._changed()
+
+    def _reset(self):
+        self.layout = dict(self.default_layouts.get(self.game, {}))
+        self._changed()
+
+    def _changed(self):
+        self._refresh()
+        self.on_change(self.game, dict(self.layout))
