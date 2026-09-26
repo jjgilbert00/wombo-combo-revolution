@@ -29,12 +29,13 @@ from kivy.metrics import dp
 from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.modalview import ModalView
 from kivy.uix.widget import Widget
+import win32api
 import win32con
 import win32gui
 from pynput import keyboard
 
 import dialogs
-from controller import find_controllers
+from controller import direction_from_axes, find_controllers
 from input_list import LIST_BUTTON_ORDER, full_map, inverse_map, map_key_input, map_state
 from key_inputs import demo_track, derive, derive_hold, describe, normalized
 from layouts.input_list_layout import LANES, InputListLayout
@@ -67,13 +68,27 @@ HOTKEYS = [
 ]
 
 WELCOME = (
-    "[size=22sp][b]No recording loaded[/b][/size]\n\n"
-    "[b]Practise a combo:[/b] File > Open recording ([b]Ctrl+O[/b]), or drop a recording's .json or .mp4 "
-    "file onto this window. New here? The File menu has sample Street Fighter 6 combos to try.\n\n"
-    "[b]Record your own:[/b] press Record ([b]F8[/b], also works while the game has focus), perform the combo, "
-    "press F8 again, then save it with [b]F12[/b].\n\n"
-    "Hover over any button for help, or press [b]F1[/b] for all keys."
+    "[size=22sp][b]Wombo Combo[/b][/size]\n\n"
+    "Practise fighting game combos frame by frame. The inputs scroll toward a line, you press them as they "
+    "arrive, and it shows exactly how early or late you were.\n\n"
+    "New here? The warm-up takes ten seconds."
 )
+
+COACH = (
+    "[size=20sp][b]Ready when you are[/b][/size]\n\n"
+    "Press [b]Space[/b] (or [b]Start[/b] on your controller). After a second to get ready, press each input "
+    "as it reaches the white line.\n\n"
+    "{controller}"
+)
+
+# Playing without a controller: SF6's PC keyboard layout. Key codes are Kivy's.
+KEYBOARD_KEYS = {
+    273: "up", 274: "down", 275: "right", 276: "left",
+    ord("w"): "up", ord("s"): "down", ord("d"): "right", ord("a"): "left",
+    ord("u"): "u", ord("i"): "i", ord("o"): "o", ord("j"): "j", ord("k"): "k", ord("l"): "l",
+}
+ARROW_KEYS = (273, 274, 275, 276)
+KEYBOARD_ACTIONS = {"u": "LP", "i": "MP", "o": "HP", "j": "LK", "k": "MK", "l": "HK"}
 
 VIDEO_HEIGHTS = [("Native", 0), ("1080p", 1080), ("720p", 720)]
 ENCODERS = [("Auto", "auto"), ("CPU (x264)", "x264"), ("NVIDIA (NVENC)", "nvenc")]
@@ -96,6 +111,8 @@ class WomboComboApp(App):
         self.capture_path = None  # Video that belongs to the current input track, if any.
         self.track_path = None  # The current track's .json file, once it's been opened or saved.
         self.virtual_pad = None  # Plugged in the first time a demo plays.
+        self.coaching = False  # Showing the "press Space" card until the player first plays.
+        self.keys_down = set()  # Game keys held on the keyboard, for playing without a controller.
         self.unsaved_take = False  # A new take that hasn't been saved anywhere yet.
         self.unsaved_edits = False  # Notes, key inputs or cleaning not yet saved.
         self.temp_dir = tempfile.mkdtemp(prefix="wombo_")
@@ -125,6 +142,7 @@ class WomboComboApp(App):
             "show_notes": 1,
             "show_actions": 1,  # Show a game's actions (a medium punch, a Drive Impact) instead of buttons.
             "default_game": "sf6",  # Game for new recordings, and old ones that don't say.
+            "first_run": 1,  # Opens the warm-up the first time the app starts.
             "lanes": ",".join(LANES),  # Input list lanes shown.
             "recent": "",  # Recently opened recordings (.json paths), newest first, separated by "|".
             "recent_attempts": 5,  # Recent runs shown in the input list.
@@ -140,7 +158,9 @@ class WomboComboApp(App):
 
     def build(self):
         Window.clearcolor = (0.2, 0.2, 0.2, 0.5)
-        Window.size = (1920, 1080)
+        # Up to 1920x1080, but never bigger than the screen (with room for the taskbar).
+        screen_width, screen_height = win32api.GetSystemMetrics(0), win32api.GetSystemMetrics(1)
+        Window.size = (min(1920, int(screen_width * 0.9)), min(1080, int(screen_height * 0.85)))
         Window.borderless = False
         Window.fullscreen = False
 
@@ -173,7 +193,15 @@ class WomboComboApp(App):
 
     def on_start(self):
         self.select_controller()
+        self.sampler.extra = self.keyboard_state
+        self.sampler.on_menu = lambda name: Clock.schedule_once(lambda dt: self.on_menu_button(name))
+        Window.bind(on_key_up=self.on_key_up, focus=lambda window, focused: focused or self.keys_down.clear())
         self.sampler.start()
+        if self.config.getboolean("wombo", "first_run"):
+            # Straight into something to try: nothing to find, open or set up first.
+            self.config.set("wombo", "first_run", 0)
+            self.config.write()
+            Clock.schedule_once(lambda dt: self.try_warm_up())
         Clock.schedule_interval(self.refresh, 0)  # Every rendered frame.
         Clock.schedule_interval(self.update_status, 0.1)
         Clock.schedule_interval(self.check_controller, 1.0)
@@ -210,10 +238,59 @@ class WomboComboApp(App):
         Window.bind(on_request_close=lambda *args: not self._keep_unsaved_work("quitting"))
         Window.bind(on_drop_file=lambda window, filename, *args: self.open_track(filename.decode("utf-8")))
 
+    def on_menu_button(self, name):
+        """Start plays or pauses and Back restarts, so practice never needs the keyboard. Only while
+        the app is in front: in game, those buttons belong to the game."""
+        if not self.app_focused() or any(isinstance(child, ModalView) for child in Window.children):
+            return
+        if name == "start":
+            self.toggle_playback()
+        else:
+            self.restart_playback()
+
+    @staticmethod
+    def app_focused():
+        return Window.focus
+
+    def _playing_by_keyboard(self):
+        controller = self.playalong_controller
+        return controller.is_playing() and controller.practice and not controller.demo_kind()
+
+    def keyboard_state(self):
+        """The keyboard as a controller (from the sampler thread), in the player's buttons: SF6's PC
+        layout of WASD or arrows to move, U I O punches, J K L kicks."""
+        keys = set(self.keys_down)
+        if not keys:
+            return None
+        x = (keys & {"right"} and 1 or 0) - (keys & {"left"} and 1 or 0)
+        y = (keys & {"up"} and 1 or 0) - (keys & {"down"} and 1 or 0)
+        state = {"direction": direction_from_axes(x, y)}
+        controller = self.playalong_controller
+        layout = controller.action_layout or GAMES["sf6"]["default_layout"]
+        by_action = {action: recorded for recorded, action in layout.items()}
+        mapping = full_map(controller.get_button_map())
+        for key, action in KEYBOARD_ACTIONS.items():
+            if key in keys and action in by_action:
+                state[mapping[by_action[action]]] = 1  # The recorded button, then the player's for it.
+        return state
+
+    def on_key_up(self, window, key, scancode):
+        name = KEYBOARD_KEYS.get(key)
+        if name:
+            self.keys_down.discard(name)
+
     def on_key_down(self, window, key, scancode, codepoint, modifiers):
         """Shortcuts that only apply while the app window is focused."""
         if any(isinstance(child, ModalView) for child in Window.children):
             return False  # A popup is open; let it have the keys.
+        # Num Lock (usually on) and the other locks come through as modifiers; they aren't keys held down.
+        modifiers = [modifier for modifier in modifiers if modifier not in ("numlock", "capslock", "scrolllock")]
+        name = KEYBOARD_KEYS.get(key)
+        if name and not modifiers:
+            self.keys_down.add(name)
+            # The arrows always play. While practising the letters do too; when paused, they're shortcuts.
+            if key in ARROW_KEYS or self._playing_by_keyboard():
+                return True
         if key == 27:  # Esc
             self.set_selection(None)
             return True
@@ -346,9 +423,30 @@ class WomboComboApp(App):
         parts.append(f"{stats.rate:.1f} Hz")
         self.menu_bar.update(controller.is_recording(), controller.is_playing(), controller.loop, controller.practice,
                              "   |   ".join(parts), demoing=bool(controller.demo_kind()))
-        welcome = WELCOME if not frames and not controller.is_recording() else ""
+        card, buttons = self._card(frames)
         # Over the game, the overlay shows the list only; the hints are for the app window.
-        self.input_list_layout.set_guidance("" if self.topmost else self._next_step_hint(), welcome)
+        hint = "" if self.topmost or card else self._next_step_hint()  # The card says it all when shown.
+        self.input_list_layout.set_guidance(hint, card, buttons)
+
+    def _card(self, frames):
+        """The card in the middle of the list: getting started with nothing loaded, or a first go at
+        the warm-up until the player starts playing. Returns (text, buttons)."""
+        controller = self.playalong_controller
+        if controller.is_recording():
+            return "", ()
+        if not frames:
+            return WELCOME, (("Try the warm-up", self.try_warm_up, True),
+                             ("Open a recording...", self.open_track, False),
+                             ("Record your own (F8)", self.toggle_recording, False))
+        if self.coaching and not controller.is_playing():
+            reader = self.sampler.reader
+            if reader and reader.connected:
+                note = f"Using [b]{reader.name}[/b]: press a button and it shows up under the line."
+            else:
+                note = ("[color=ffb454][b]No controller found.[/b][/color] Plug one in (it's picked up by itself), "
+                        "or play on the keyboard: [b]WASD[/b] to move, [b]U I O[/b] punches, [b]J K L[/b] kicks.")
+            return COACH.format(controller=note), (("Start", self.play, True),)
+        return "", ()
 
     def _next_step_hint(self):
         """One line on what to do next, for where the player is right now."""
@@ -372,8 +470,11 @@ class WomboComboApp(App):
             return f"[b]Get ready.[/b] The first input reaches the line in {controller.get_lead() / FPS:.1f}s."
         if controller.is_playing():
             if controller.practice:
-                return ("[b]Practising.[/b] Press each input as it reaches the line. "
-                        "[b]Home[/b] / [b]F5[/b] starts over, [b]Space[/b] / [b]F7[/b] pauses.")
+                reader = self.sampler.reader
+                keys = ("" if reader and reader.connected else
+                        " No controller: [b]WASD[/b] moves, [b]U I O[/b] punch, [b]J K L[/b] kick.")
+                return ("[b]Practising.[/b] Press each input as it reaches the line. [b]Start[/b] / [b]Space[/b] "
+                        "pauses, [b]Back[/b] / [b]Home[/b] starts over." + keys)
             return "[b]Reviewing[/b] your attempt against the recording. [b]F4[/b] goes back to practice."
         if controller.attempted_frames:
             return ("Scroll or drag to look back at your attempt. [b]S[/b] saves it, [b]A[/b] lists all "
@@ -388,6 +489,7 @@ class WomboComboApp(App):
 
     def play(self):
         if not self.playalong_controller.is_recording():
+            self.coaching = False
             self.playalong_controller.play()
 
     def pause(self):
@@ -777,12 +879,22 @@ class WomboComboApp(App):
         return [path for path in self.config.get("wombo", "recent").split("|") if path and os.path.exists(path)]
 
     def sample_recordings(self):
-        """The sample recordings that come with the app (samples/*.json)."""
+        """The sample recordings that come with the app (samples/*.json), the warm-up first."""
         folder = os.path.join(os.path.dirname(os.path.abspath(__file__)), "samples")
         try:
-            return sorted(os.path.join(folder, name) for name in os.listdir(folder) if name.endswith(".json"))
+            names = [name for name in os.listdir(folder) if name.endswith(".json")]
         except OSError:
             return []
+        return [os.path.join(folder, name) for name in sorted(names, key=lambda n: (not n.startswith("Warm-up"), n))]
+
+    def try_warm_up(self):
+        """Opens the warm-up sample and coaches the player through a first go."""
+        warm_up = next((path for path in self.sample_recordings() if "Warm-up" in os.path.basename(path)), None)
+        if not warm_up:
+            self.flash("The warm-up sample is missing from the samples folder", "ff6b6b", 6)
+            return
+        self.open_track(warm_up)
+        self.coaching = bool(self.playalong_controller.input_track)
 
     def _remember_recent(self, path):
         recent = [path] + [p for p in self.recent_recordings() if os.path.normcase(p) != os.path.normcase(path)]
@@ -1127,7 +1239,8 @@ class WomboComboApp(App):
         steps = [
             "Open a recording with [b]Ctrl+O[/b] (or drop its .json / .mp4 on the window), or record one with "
             "[b]F8[/b] and save it with [b]F12[/b].",
-            "Press [b]Space[/b] (or [b]F6[/b] in game) and play along: press each input as it reaches the line.",
+            "Press [b]Space[/b] or [b]Start[/b] and play along: press each input as it reaches the line. No "
+            "controller? [b]WASD[/b] + [b]U I O[/b] / [b]J K L[/b].",
             "Mark what matters: select frames (drag in the frame meter) and press [b]K[/b]. Runs are graded "
             "below your attempt.",
             "Look back: scroll or drag the list, [b]S[/b] saves an attempt, [b]A[/b] lists and replays attempts.",
@@ -1144,6 +1257,7 @@ class WomboComboApp(App):
             ("A", "Attempts: rename, show, replay, delete"),
             ("Esc", "Clear the selection"),
         ]
+        in_window = [("Start / Back", "On the controller: play or pause / start over")] + in_window
         mouse = [
             ("Wheel / drag", "Move through the list, a frame per notch"),
             ("Ctrl+Wheel", "Zoom in and out"),

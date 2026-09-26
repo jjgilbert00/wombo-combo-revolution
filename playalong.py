@@ -7,14 +7,16 @@ from collections import namedtuple
 from controller import get_neutral_controller_state
 from games import GAMES, normal_window, to_actions
 from input_list import LIST_BUTTON_ORDER, input_key, full_map, inverse_map, map_key, map_key_input, map_state, match_runs, runs_in_range
-from key_inputs import HIT, best_hold, grade_all, normalized, result
+from key_inputs import GRADE_REACH, HIT, PENDING, best_hold, describe, grade_all, normalized, result
 
 PLAYALONG_FRAMELENGTH = 120
 MAX_RUNS = 50  # Recent attempts kept in memory.
 
 
 ListSnapshot = namedtuple(
-    "ListSnapshot", "live_state frame recording target_runs attempt_runs match_runs notes key_inputs history live_key"
+    "ListSnapshot",
+    "live_state frame recording target_runs attempt_runs match_runs notes key_inputs history live_key judgements "
+    "last_pass",
 )
 # One earlier attempt in the input list: its label, its key input grades as (start, end, grade, offset),
 # when the track has no key inputs its per-frame match runs instead, and whether it's a saved attempt.
@@ -59,6 +61,11 @@ class PlayalongController:
     button is which of the game's actions. With show_actions on, snapshots show actions (a medium
     punch, a Drive Impact) instead of buttons.
 
+    While practising, each key input is judged as soon as it's settled (hit straight away; early,
+    late or missed once the window and the frames after it have gone by), for instant feedback,
+    and each finished pass leaves a summary: its score, what went wrong, the best score and the
+    streak of perfect passes.
+
     Saved attempts are ones the player chose to keep with the track (they're saved in its file):
     {"id", "name", "created", "attempt", "shown"}, where shown puts them in the input list.
     """
@@ -85,6 +92,10 @@ class PlayalongController:
         self.lead_in = 60  # Frames of run-up before practice playback starts, to get ready.
         self._lead = 0  # Run-up frames left before the playhead moves.
         self.demo = None  # {"track", "output", "kind"} while a demo plays.
+        self.judgements = []  # (time, key input index, grade, offset), newest last.
+        self.last_pass = None  # Summary of the last finished pass (see _summarise).
+        self.best = 0  # Most key inputs hit in one pass of this track.
+        self.streak = 0  # Perfect passes in a row.
         self.button_map = {}  # Recorded button -> the player's; only buttons that differ.
         self._from_player = {}
         self.game = None  # A key of games.GAMES, or None.
@@ -114,11 +125,52 @@ class PlayalongController:
             attempt is not None and attempt == target for attempt, target in zip(self.attempt_track, self.input_track)
         )
         self._attempt_archived = True  # Nothing new to archive until the player plays a frame.
+        self._judged = set()  # Key inputs already judged in this pass.
+
+    def _judge(self, frame, final=False):
+        """Judges the key inputs settled by this frame (all of them if final)."""
+        grades = None
+        for i, key_input in enumerate(self.key_inputs):
+            if i in self._judged:
+                continue
+            if result(key_input, self.attempt_track, self.input_track) == HIT:
+                verdict = (HIT, 0)
+            elif final or frame > key_input["end"] + GRADE_REACH:
+                grades = grades or grade_all(self.key_inputs, self.attempt_track, self.input_track)
+                verdict = grades[i]
+                if verdict[0] == PENDING:
+                    continue  # Never reached this pass.
+            else:
+                continue
+            self._judged.add(i)
+            self.judgements.append((time.monotonic(), i) + tuple(verdict))
+        del self.judgements[:-20]
+
+    def _summarise(self, run_id):
+        """The finished pass: {"run", "hits", "total", "problems": [(notation, grade, offset)],
+        "best", "streak", "match", "time"}. Without key inputs, "match" is the share of frames matched."""
+        summary = {"run": run_id, "time": time.monotonic(), "hits": 0, "total": 0, "problems": [], "match": None}
+        if self.key_inputs:
+            grades = grade_all(self.key_inputs, self.attempt_track, self.input_track)
+            played = [(k, g) for k, g in zip(self.key_inputs, grades) if g[0] != PENDING]
+            summary["hits"] = sum(grade == HIT for _, (grade, _) in played)
+            summary["total"] = len(self.key_inputs)
+            summary["problems"] = [(describe(self._shown_key_input(k)), grade, offset)
+                                   for k, (grade, offset) in played if grade != HIT]
+            perfect = summary["hits"] == summary["total"]
+            self.streak = self.streak + 1 if perfect else 0
+            self.best = max(self.best, summary["hits"])
+        elif self.attempted_frames:
+            summary["match"] = self.matched_frames / self.attempted_frames
+        summary.update(best=self.best, streak=self.streak)
+        return summary
 
     def _archive_attempt(self):
-        """Keeps the attempt as a recent run, unless it's empty or already kept."""
+        """Keeps the attempt as a recent run, unless it's empty or already kept, and sums it up."""
         if self._attempt_archived or not self.attempted_frames:
             return
+        self._judge(len(self.input_track), final=True)
+        self.last_pass = self._summarise(self._next_run_id)
         self.runs.append({"id": self._next_run_id, "created": time.time(), "attempt": list(self.attempt_track)})
         self._next_run_id += 1
         del self.runs[:-MAX_RUNS]
@@ -158,6 +210,8 @@ class PlayalongController:
                         frame = self.current_frame + offset
                         if frame < len(self.input_track):
                             self._record_attempt(frame, map_state(controller_state, self._from_player))
+                    if self.key_inputs:
+                        self._judge(self.current_frame + ticks - 1)
                 if ticks:
                     self._advance(ticks)
             elif self.running_state == RUNNING_STATES.RECORDING:
@@ -249,7 +303,7 @@ class PlayalongController:
             lo, hi = frame - frames_before, frame + frames_after + 1
             if recording:
                 return ListSnapshot(self.live_state, frame, True, self._shown_runs(self.input_track, lo, hi, False),
-                                    [], [], [], [], [], self._live_key())
+                                    [], [], [], [], [], self._live_key(), [], None)
             # A demo shows what it's sending where the attempt would go.
             shown = self.demo["track"] if self.demo else self.attempt_track
             return ListSnapshot(
@@ -265,7 +319,15 @@ class PlayalongController:
                  if k["start"] < hi and k["end"] >= lo],
                 self._history_rows(lo, hi),
                 self._live_key(),
+                self._recent_judgements(),
+                dict(self.last_pass) if self.last_pass else None,
             )
+
+    def _recent_judgements(self, seconds=1.2):
+        """(grade, offset, notation, age from 0 to 1) for judgements made in the last moment."""
+        now = time.monotonic()
+        return [(grade, offset, describe(self._shown_key_input(self.key_inputs[i])), (now - at) / seconds)
+                for at, i, grade, offset in self.judgements if now - at < seconds and i < len(self.key_inputs)]
 
     def _actions_on(self):
         return self.show_actions and self.game in GAMES
@@ -543,6 +605,7 @@ class PlayalongController:
             self.current_frame = 0
             self._reset_attempt(attempt)
             self.runs = []  # Runs belong to the track they were played against.
+            self.judgements, self.last_pass, self.best, self.streak = [], None, 0, 0
             self._set_saved(saved_attempts or [])
             self._fit_notes(notes or [])
             self._fit_key_inputs(key_inputs or [])
