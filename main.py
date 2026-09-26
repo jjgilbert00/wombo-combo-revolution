@@ -283,6 +283,8 @@ class WomboComboApp(App):
         """Shortcuts that only apply while the app window is focused."""
         if any(isinstance(child, ModalView) for child in Window.children):
             return False  # A popup is open; let it have the keys.
+        # Num Lock (usually on) and the other locks come through as modifiers; they aren't keys held down.
+        modifiers = [modifier for modifier in modifiers if modifier not in ("numlock", "capslock", "scrolllock")]
         name = KEYBOARD_KEYS.get(key)
         if name and not modifiers:
             self.keys_down.add(name)
