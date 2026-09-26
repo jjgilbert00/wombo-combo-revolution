@@ -5,7 +5,8 @@ from enum import Enum
 from collections import namedtuple
 
 from controller import get_neutral_controller_state
-from input_list import full_map, inverse_map, map_key, map_key_input, map_state, match_runs, runs_in_range
+from games import GAMES, normal_window, to_actions
+from input_list import LIST_BUTTON_ORDER, input_key, full_map, inverse_map, map_key, map_key_input, map_state, match_runs, runs_in_range
 from key_inputs import HIT, best_hold, grade_all, normalized, result
 
 PLAYALONG_FRAMELENGTH = 120
@@ -13,7 +14,7 @@ MAX_RUNS = 50  # Recent attempts kept in memory.
 
 
 ListSnapshot = namedtuple(
-    "ListSnapshot", "live_state frame recording target_runs attempt_runs match_runs notes key_inputs history"
+    "ListSnapshot", "live_state frame recording target_runs attempt_runs match_runs notes key_inputs history live_key"
 )
 # One earlier attempt in the input list: its label, its key input grades as (start, end, grade, offset),
 # when the track has no key inputs its per-frame match runs instead, and whether it's a saved attempt.
@@ -54,6 +55,10 @@ class PlayalongController:
     track and everything made from it stay in the recording's buttons; the player's live input is
     translated into them for scoring, and snapshots translate back, so the player sees their own.
 
+    A recording can belong to a game (see games.py), with an action layout saying which recorded
+    button is which of the game's actions. With show_actions on, snapshots show actions (a medium
+    punch, a Drive Impact) instead of buttons.
+
     Saved attempts are ones the player chose to keep with the track (they're saved in its file):
     {"id", "name", "created", "attempt", "shown"}, where shown puts them in the input list.
     """
@@ -82,6 +87,9 @@ class PlayalongController:
         self.demo = None  # {"track", "output", "kind"} while a demo plays.
         self.button_map = {}  # Recorded button -> the player's; only buttons that differ.
         self._from_player = {}
+        self.game = None  # A key of games.GAMES, or None.
+        self.action_layout = {}  # Recorded button -> the game's action.
+        self.show_actions = False  # Set by the app: show actions instead of buttons.
         self._grades_version = 0  # Bumped when key inputs or the target change, invalidating cached grades.
 
     def _fit_key_inputs(self, key_inputs):
@@ -240,24 +248,73 @@ class PlayalongController:
             frame = len(self.input_track) if recording else self.current_frame - self._lead
             lo, hi = frame - frames_before, frame + frames_after + 1
             if recording:
-                return ListSnapshot(self.live_state, frame, True, runs_in_range(self.input_track, lo, hi), [], [], [], [],
-                                    [])
+                return ListSnapshot(self.live_state, frame, True, self._shown_runs(self.input_track, lo, hi, False),
+                                    [], [], [], [], [], self._live_key())
             # A demo shows what it's sending where the attempt would go.
             shown = self.demo["track"] if self.demo else self.attempt_track
-            as_player = lambda runs: [(start, length, map_key(key, self.button_map)) for start, length, key in runs]
             return ListSnapshot(
                 self.live_state, frame, False,
-                as_player(runs_in_range(self.input_track, lo, hi)),
-                as_player(runs_in_range(shown, lo, hi)),
+                self._shown_runs(self.input_track, lo, hi),
+                self._shown_runs(shown, lo, hi),
                 [] if self.demo else match_runs(self.input_track, self.attempt_track, lo, hi),
                 [(i, note["start"], note["end"], note["text"]) for i, note in enumerate(self.notes)
                  if note["start"] < hi and note["end"] >= lo],
-                [(i, map_key_input(k, self.button_map), result(k, self.attempt_track, self.input_track),
+                [(i, self._shown_key_input(k), result(k, self.attempt_track, self.input_track),
                   best_hold(k, self.attempt_track) if k["hold"] and not k["exact"] else None)
                  for i, k in enumerate(self.key_inputs)
                  if k["start"] < hi and k["end"] >= lo],
                 self._history_rows(lo, hi),
+                self._live_key(),
             )
+
+    def _actions_on(self):
+        return self.show_actions and self.game in GAMES
+
+    def _shown_key(self, key, track=None, start=0):
+        """A run's (direction, buttons) as shown: the game's actions, or the player's buttons."""
+        if not self._actions_on():
+            return map_key(key, self.button_map)
+        direction, pressed = key
+        actions = to_actions(self.game, self.action_layout, pressed)
+        window = normal_window(self.game)
+        if window and track is not None and actions != to_actions(self.game, self.action_layout, pressed, True):
+            actions = to_actions(self.game, self.action_layout, pressed, self._normal_before(track, start, window))
+        return direction, tuple(actions)
+
+    def _normal_before(self, track, frame, window):
+        """Whether a normal attack (one of the game's single actions) was newly pressed in the frames
+        just before this one. The last two frames don't count: pressing two buttons a frame apart is
+        still pressing them together."""
+        for f in range(max(1, frame - window), min(frame - 2, len(track))):
+            now, before = track[f], track[f - 1]
+            if now is not None and any(now[b] and not (before and before[b]) and b in self.action_layout
+                                       for b in LIST_BUTTON_ORDER):
+                return True
+        return False
+
+    def _shown_runs(self, track, lo, hi, with_context=True):
+        return [(start, length, self._shown_key(key, track if with_context else None, start))
+                for start, length, key in runs_in_range(track, lo, hi)]
+
+    def _shown_key_input(self, key_input):
+        if self._actions_on():
+            return dict(key_input, buttons=to_actions(self.game, self.action_layout, key_input.get("buttons", [])))
+        return map_key_input(key_input, self.button_map)
+
+    def _live_key(self):
+        """The player's live input as shown: their own buttons, or as the game's actions."""
+        if not self._actions_on():
+            return input_key(self.live_state)
+        return self._shown_key(input_key(map_state(self.live_state, self._from_player)))
+
+    def set_game(self, game, action_layout=None):
+        """The recording's game (or None) and which recorded button is which action (default: the
+        game's usual layout)."""
+        with self._lock:
+            self.game = game if game in GAMES else None
+            layout = action_layout if action_layout is not None else (GAMES[game]["default_layout"] if self.game else {})
+            self.action_layout = {button: action for button, action in layout.items()
+                                  if self.game and action in GAMES[self.game]["actions"]}
 
     def _grades(self, run):
         """The run's key input grades, cached until the key inputs or target change."""
