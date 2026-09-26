@@ -14,6 +14,7 @@ from PIL import Image
 
 from images import get_standard_button_icon
 from input_list import LIST_BUTTON_ORDER, draw_direction_glyph, input_key
+from games import GAMES, draw_action_icon
 from key_inputs import EARLY, LATE, PENDING, describe
 
 ICON_SIZE = dp(26)
@@ -273,15 +274,30 @@ class _Pool:
         self.used = 0
 
 
+class _ButtonTextures(dict):
+    """Controller button icons, plus game action icons drawn the first time each is needed."""
+
+    def __init__(self, icons, font):
+        super().__init__(icons)
+        self.font = font
+        self.game = "sf6"  # Whose actions to draw; set by the layout's owner.
+
+    def __missing__(self, name):
+        game = self.game if self.game in GAMES else next(iter(GAMES))
+        texture = _texture_from_pil(draw_action_icon(game, name, int(ICON_SIZE * 2), self.font))
+        self[name] = texture
+        return texture
+
+
 class _Textures:
     def __init__(self, controller_type, button_icon_style):
         font = resource_find("data/fonts/Roboto-Bold.ttf")
         glyph_pixels = int(ICON_SIZE * 2)  # Render larger than shown so scaling stays crisp.
         self.directions = {d: _texture_from_pil(draw_direction_glyph(d, glyph_pixels, font)) for d in range(1, 10)}
-        self.buttons = {
+        self.buttons = _ButtonTextures({
             name: CoreImage(get_standard_button_icon(controller_type, button_icon_style, name)).texture
             for name in LIST_BUTTON_ORDER
-        }
+        }, font)
         self.counts = {}
         self.notes = {}
         self.key_tags = {}
@@ -866,7 +882,7 @@ class InputListLayout(StencilView):
         self._draw_selection(snapshot, lanes_top, bottom + LANE_GAP)
 
         # The player's live input sits under the line, which turns green when it matches.
-        live_key = input_key(snapshot.live_state)
+        live_key = snapshot.live_key
         target_key = next((key for start, length, key in snapshot.target_runs
                            if start <= snapshot.frame < start + length), None)
         matched = not snapshot.recording and live_key == target_key
