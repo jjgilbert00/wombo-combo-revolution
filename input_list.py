@@ -3,6 +3,8 @@
 This is the fighting-game training-mode style of showing inputs. A new run starts whenever the
 direction or any button changes.
 """
+import math
+
 from PIL import Image, ImageDraw, ImageFont
 
 # Order buttons appear in within a run.
@@ -73,15 +75,22 @@ def draw_direction_glyph(direction, size, font_path):
         font = ImageFont.truetype(font_path, int(s * 0.55))
         draw.text((s / 2, s / 2), "N", font=font, fill=(235, 235, 235, 255), anchor="mm")
     else:
-        # Right-pointing arrow, rotated into place.
+        # A right-pointing arrow (as offsets from the centre), turned to point its way. The outline is
+        # a stroke around the shape with rounded joins, so it stays even where the head meets the
+        # shaft, and the shape is a little smaller than the square to leave room for it.
         m = s / 2
-        shaft, head = s * 0.15, s * 0.34
-        points = [
-            (s * 0.08, m - shaft), (s * 0.5, m - shaft), (s * 0.5, m - head), (s * 0.94, m),
-            (s * 0.5, m + head), (s * 0.5, m + shaft), (s * 0.08, m + shaft),
-        ]
-        draw.polygon(points, fill=(245, 245, 245, 255), outline=(30, 30, 34, 255), width=outline)
-        image = image.rotate(DIRECTION_ANGLES[direction], resample=Image.BICUBIC)
+        shaft, head, k = 0.15, 0.34, 0.93
+        shape = [(-0.42, -shaft), (0.0, -shaft), (0.0, -head), (0.44, 0.0), (0.0, head), (0.0, shaft), (-0.42, shaft)]
+        angle = math.radians(DIRECTION_ANGLES[direction])
+        cos, sin = math.cos(angle), math.sin(angle)
+        # Counter-clockwise on screen, where y runs down.
+        points = [(m + s * k * (x * cos + y * sin), m + s * k * (y * cos - x * sin)) for x, y in shape]
+        dark = (30, 30, 34, 255)
+        draw.polygon(points, fill=dark)
+        draw.line(points + [points[0]], fill=dark, width=outline * 2, joint="curve")
+        for x, y in points:  # Round the outer corners too.
+            draw.ellipse([x - outline, y - outline, x + outline, y + outline], fill=dark)
+        draw.polygon(points, fill=(245, 245, 245, 255))
     return image.resize((size, size), Image.LANCZOS)
 
 
