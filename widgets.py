@@ -5,6 +5,7 @@ from kivy.graphics import Ellipse, Rectangle, Color, Line, InstructionGroup
 from kivy.graphics.texture import Texture
 from PIL import Image as PILImage
 import math
+import numpy
 
 from images import IMAGE_SOURCE_DIRECTION
 
@@ -154,7 +155,7 @@ class DirectionalPromptWidget(Widget):
         self.draw_dots(input_frames)
 
 
-HOLD_TAIL_COLOR = (1, 1, 1, 0.32)
+HOLD_TAIL_COLOR = (0.46, 0.46, 0.46, 1)  # Solid, as the trail's pieces overlap.
 
 
 def texture_of(image):
@@ -172,6 +173,33 @@ def silhouette_of(image):
     solid = PILImage.new("RGBA", image.size, (255, 255, 255, 0))
     solid.putalpha(image.getchannel("A"))
     return texture_of(solid)
+
+
+def _alpha_texture(alpha):
+    """A white texture with this alpha (a 2D uint8 array, top row first)."""
+    image = PILImage.new("RGBA", (alpha.shape[1], alpha.shape[0]), (255, 255, 255, 0))
+    image.putalpha(PILImage.fromarray(alpha))
+    return texture_of(image)
+
+
+class Prompt:
+    """A falling prompt's art, from a PIL image: its texture, its silhouette (see Knockout) and the
+    pieces of its hold trail.
+
+    The trail is what the shape leaves if it's dragged down the column like a sponge dipped in
+    paint, from where the hold ends down to where it starts: under the icon, every column of the
+    shape filled up from its lowest point (cap); then each column the shape covers, stretched to
+    any length (body); then, where the hold ends, every column filled up to the shape's highest
+    point there (end)."""
+
+    def __init__(self, image):
+        image = image.convert("RGBA")
+        self.texture = texture_of(image)
+        self.silhouette = silhouette_of(image)
+        alpha = numpy.asarray(image.getchannel("A"))  # Top row first.
+        self.cap = _alpha_texture(numpy.maximum.accumulate(alpha[::-1], axis=0)[::-1].copy())
+        self.end = _alpha_texture(numpy.maximum.accumulate(alpha, axis=0))
+        self.body = _alpha_texture(alpha.max(axis=0, keepdims=True))
 
 
 class Knockout:
@@ -203,44 +231,48 @@ def runs_of(values):
 
 class FallingRuns:
     """Prompts falling toward the bottom of a column, one per held input: an icon where the input
-    starts and a tail behind it as long as it's held, like a dance game's hold notes. (Drawing every
-    frame of a hold instead piles up a stack of icons.)"""
+    starts and its trail behind it as long as it's held (see Prompt), like a dance game's hold
+    notes. (Drawing every frame of a hold instead piles up a stack of icons.)"""
 
-    def __init__(self, knockout, tail_from=1.0):
-        # Where on the icon the tail starts, as a share of its height: the top for a solid icon such
-        # as a button, the middle for an arrow drawn from the middle out.
-        self.tail_from = tail_from
-        self.knockout = knockout  # Hides the tails under the icons.
+    def __init__(self, knockout):
+        self.knockout = knockout  # Hides the trails under the icons.
         self.tail_group, self.head_group = InstructionGroup(), InstructionGroup()
-        self.tails, self.heads, self.knocks = [], [], []
+        self.pieces, self.heads, self.knocks = [], [], []  # pieces: (cap, body, end) for each run.
         self.used = 0
 
-    def _pair(self, index):
+    def _run(self, index):
         if index == len(self.heads):
-            self.tails.append(Rectangle())
+            self.pieces.append((Rectangle(), Rectangle(), Rectangle()))
             self.heads.append(Rectangle())
             self.knocks.append(self.knockout.add(None))
-            self.tail_group.add(self.tails[-1])
+            for piece in self.pieces[-1]:
+                self.tail_group.add(piece)
             self.head_group.add(self.heads[-1])
-        return self.tails[index], self.heads[index], self.knocks[index]
+        return self.pieces[index], self.heads[index], self.knocks[index]
 
-    def draw(self, runs, x, y, icon, travel, count, offset, texture_for, silhouette_for):
-        """runs from runs_of(); icon is the (width, height) of a prompt; travel the height it falls."""
+    def draw(self, runs, x, y, icon, travel, count, offset, prompt_for):
+        """runs from runs_of(); icon is the (width, height) of a prompt; travel the height it falls;
+        prompt_for(value) the Prompt for a run's value."""
         width, height = icon
         place = lambda index: y + travel * max(0.0, index - offset) / count
         for n, (first, last, value) in enumerate(runs):
-            tail, head, knock = self._pair(n)
-            head.texture = texture_for(value)
-            knock.texture = silhouette_for(value)
-            head.pos = knock.pos = (x, place(first))
+            (cap, body, end), head, knock = self._run(n)
+            prompt = prompt_for(value)
+            head.texture, knock.texture = prompt.texture, prompt.silhouette
+            start, finish = place(first), place(last)
+            head.pos = knock.pos = (x, start)
             head.size = knock.size = icon
-            # Up to the middle of where the hold ends; none if that's inside the icon.
-            top = place(last) + height / 2
-            bottom = place(first) + height * self.tail_from
-            tail.pos = (x + width * 0.32, bottom)
-            tail.size = (width * 0.36, max(0.0, top - bottom))
+            if finish > start:
+                cap.texture, body.texture, end.texture = prompt.cap, prompt.body, prompt.end
+                cap.pos, cap.size = (x, start), icon
+                end.pos, end.size = (x, finish), icon
+                body.pos, body.size = (x, start + height), (width, max(0.0, finish - start - height))
+            else:
+                cap.pos = body.pos = end.pos = OFFSCREEN
         for n in range(len(runs), self.used):
-            self.tails[n].pos = self.heads[n].pos = self.knocks[n].pos = OFFSCREEN
+            for piece in self.pieces[n]:
+                piece.pos = OFFSCREEN
+            self.heads[n].pos = self.knocks[n].pos = OFFSCREEN
         self.used = len(runs)
 
 
@@ -252,14 +284,14 @@ class ButtonColumn(Widget):
 
     def __init__(self, button_source, **kwargs):
         super().__init__(**kwargs)
-        self.texture = CoreImage(button_source).texture
-        self.silhouette = silhouette_of(PILImage.open(button_source))
+        self.prompt = Prompt(PILImage.open(button_source))
+        self.texture = self.prompt.texture
         knockout = Knockout()
         self.falling = FallingRuns(knockout)
         # Tails first, then everything else over them with the tails knocked out underneath.
         self.canvas.add(Color(*HOLD_TAIL_COLOR))
         self.canvas.add(self.falling.tail_group)
-        self.button_knock = knockout.add(self.silhouette)
+        self.button_knock = knockout.add(self.prompt.silhouette)
         self.canvas.add(knockout.group)
         with self.canvas:
             self.button_color = Color(1, 1, 1, BUTTON_RELEASED_OPACITY)
@@ -279,8 +311,7 @@ class ButtonColumn(Widget):
         self.button_color.a = 1 if pressed else BUTTON_RELEASED_OPACITY
         icon_size = self._icon_size()
         if not input_frames:
-            self.falling.draw([], self.x, self.y, icon_size, 0, 1, offset, None, None)
+            self.falling.draw([], self.x, self.y, icon_size, 0, 1, offset, None)
             return
         self.falling.draw(runs_of([bool(state) for state in input_frames]), self.x, self.y, icon_size,
-                          self.height - icon_size[1], len(input_frames), offset, lambda value: self.texture,
-                          lambda value: self.silhouette)
+                          self.height - icon_size[1], len(input_frames), offset, lambda value: self.prompt)
