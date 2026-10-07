@@ -174,7 +174,7 @@ class Feedback:
 
 class FeedbackDisplay:
     """For the falling displays (arrow lanes, ring): the shared feedback, laid out around their
-    prompts: the hint top left, the banner top centre, the card in the middle and verdicts at
+    prompts: the hint top left, the banner centred under it, the card in the middle and verdicts at
     verdict_spot(), which each display defines in its own coordinates."""
 
     def _init_feedback(self):
@@ -185,8 +185,11 @@ class FeedbackDisplay:
 
     def show_feedback(self, judgements, last_pass):
         width, height = self.size
-        self.feedback.place(hint=(dp(16), height - dp(12), width * 0.45), card_center=(width / 2, height / 2),
-                            verdicts=self.verdict_spot(), banner=(width / 2, height - dp(16), True))
+        hint_top = height - dp(12)
+        hint = self.feedback.hint
+        hint_bottom = hint_top - (hint.height + dp(8) if hint.text else 0)
+        self.feedback.place(hint=(dp(16), hint_top, width * 0.45), card_center=(width / 2, height / 2),
+                            verdicts=self.verdict_spot(), banner=(width / 2, hint_bottom - dp(4), True))
         self.feedback.draw(judgements, last_pass)
 
     def verdict_spot(self):
