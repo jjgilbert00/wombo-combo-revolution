@@ -351,6 +351,8 @@ class WomboComboApp(App):
             controller_state, upcoming_frames, offset = self.playalong_controller.snapshot(count)
             self.display.update_state(controller_state, upcoming_frames, offset)
             self.display.show_feedback(*self.playalong_controller.feedback())
+            if self.topmost:
+                self._fit_overlay()
 
     def select_controller(self):
         readers = find_controllers()
@@ -1118,6 +1120,7 @@ class WomboComboApp(App):
             # frame) trims its height and puts it back there if the style change nudged it. Set before
             # anything below, which can run frames from inside Windows' message handling.
             self._overlay_origin = (left, top, width)
+            self._overlay_full_height = height  # For the displays that use the whole window.
             self._overlay_note_rows = 0
             if self._normal_placement[1] == win32con.SW_SHOWMAXIMIZED:
                 win32gui.ShowWindow(hwnd, win32con.SW_RESTORE)  # A maximized window can't be resized.
@@ -1149,7 +1152,13 @@ class WomboComboApp(App):
         It keeps its top edge and grows again when more is shown (e.g. another attempt row)."""
         if not getattr(self, "_overlay_origin", None):
             return  # Overlay mode is still being set up (or torn down).
+        left, top, width = self._overlay_origin
         layout = self.input_list_layout
+        # The arrow lanes and ring fill their space, falling from the top, and the getting-started
+        # card needs room too: those keep the full height.
+        if self.display is not layout or layout.content_height(0) is None:
+            self._keep_window(left, top, width, self._overlay_full_height)
+            return
         # Room for as many rows of notes as have been needed so far: one to start with if there are
         # notes, more only if overlapping notes stack up. It doesn't shrink back, so the window
         # doesn't jump as notes scroll by.
@@ -1157,10 +1166,13 @@ class WomboComboApp(App):
         self._overlay_note_rows = max(getattr(self, "_overlay_note_rows", 0), wanted, layout.note_rows_used)
         if not layout.show_notes:
             self._overlay_note_rows = 0
-        left, top, width = self._overlay_origin
         # Kivy measures in its own units; scale to pixels by the width, which doesn't change.
         pixels = width / Window.width if Window.width else 1
         height = round((layout.content_height(self._overlay_note_rows) + Window.height - layout.height) * pixels)
+        self._keep_window(left, top, width, height)
+
+    def _keep_window(self, left, top, width, height):
+        """Moves the window there unless it's already (near enough) there."""
         actual = win32gui.GetWindowRect(Window.get_window_info().window)
         if max(abs(a - b) for a, b in zip(actual, (left, top, left + width, top + height))) > 2:
             self._place_window(left, top, width, height)

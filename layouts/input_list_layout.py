@@ -395,6 +395,7 @@ class InputListLayout(StencilView):
         self.lanes_shown = set(LANES)  # Set by the app; the key inputs lane also needs key inputs.
         self._history = []  # History rows from the last snapshot, one lane each.
         self.note_rows_used = 0  # Rows of note toasts in the last frame drawn.
+        self.toast_row_height = dp(40)  # The tallest row of toasts drawn so far.
         self.on_scrub = None  # Called with a frame delta when the user scrolls or drags.
         self.on_zoom = None  # Called with the new lookahead, in seconds.
         self.on_select = None  # Called with (start, end) frames, inclusive, when the user selects frames.
@@ -533,13 +534,13 @@ class InputListLayout(StencilView):
     def content_height(self, note_rows):
         """How tall the list needs to be to show everything it draws: the shown lanes, the live input
         under them, and note_rows rows of note toasts. For fitting the overlay window. While the
-        getting-started card shows, that's the whole height."""
+        getting-started card shows, it needs the whole window: None."""
         if self.welcome.opacity:
-            return self.height
+            return None
         _, bottom = self._lanes()
         lowest = bottom - ICON_SIZE - dp(4)  # The live input row.
         if note_rows:
-            lowest -= dp(14) + BRACE_HEIGHT + min(note_rows, TOAST_ROWS) * dp(40)
+            lowest -= dp(14) + BRACE_HEIGHT + min(note_rows, TOAST_ROWS) * self.toast_row_height
         return self.top - lowest + dp(8)
 
     def _apply_speed(self):
@@ -744,6 +745,7 @@ class InputListLayout(StencilView):
             if row >= TOAST_ROWS:
                 continue
             row_ends[row:row + 1] = [toast_x + width]
+            self.toast_row_height = max(self.toast_row_height, height + dp(6))  # Two-line notes are taller.
             toast_top = notes_top - BRACE_HEIGHT - dp(2) - row * (height + dp(6))
             active = start <= snapshot.frame <= end
             alpha = 1 if active else 0.75
