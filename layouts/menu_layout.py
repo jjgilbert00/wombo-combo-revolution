@@ -48,6 +48,7 @@ MENU_TIPS = {
     "Practice": "Practice: playing scores your controller against the recording.\n"
                 "Review: playing replays your last attempt instead. F4 switches",
 }
+DISPLAY_NAMES = {"list": "Input list", "lanes": "Arrow lanes", "ring": "Ring"}
 LANE_MENU_ITEMS = [("meter", "Frame meter"), ("target", "Recording"), ("keys", "Key inputs"),
                    ("attempt", "Your attempt"), ("saved", "Saved attempts"), ("recent", "Recent attempts")]
 
@@ -222,8 +223,12 @@ class MenuBar(BoxLayout):
         edit_menu.add_item("Clear track", app.clear_track)
 
         view_menu = Menu()
+        # The three displays, the current one marked; F3 moves to the next from anywhere.
+        self.display_items = {mode: view_menu.add_item(name, lambda mode=mode: app.show_display(mode))
+                              for mode, name in DISPLAY_NAMES.items()}
+        view_menu.add_item("Next display", app.toggle_display, "F3")
+        view_menu.add_separator()
         view_menu.add_item("Overlay mode", app.toggle_overlay, "F2")
-        self.display_item = view_menu.add_item("Display: input list", app.toggle_display, "F3")
         self.notes_item = view_menu.add_item("Hide notes", app.toggle_notes, "Shift+F3")
         self.actions_item = view_menu.add_item("Show game actions", app.toggle_actions)
         self.next_item = view_menu.add_item("Hide up-next panel", app.toggle_up_next)
@@ -333,8 +338,9 @@ class MenuBar(BoxLayout):
         self.actions_item.label.text = "Show controller buttons" if visible else "Show game actions"
 
     def set_display_mode(self, mode):
-        names = {"list": "input list", "lanes": "arrow lanes", "ring": "ring"}
-        self.display_item.label.text = f"Display: {names.get(mode, mode)}"  # F3 moves to the next.
+        for item_mode, item in self.display_items.items():
+            item.shortcut.text = "showing" if item_mode == mode else ""
+            item.label.color = TEXT_COLOR if item_mode == mode else DIM_TEXT_COLOR
 
     def update(self, recording, playing, looping, practicing, status, demoing=False):
         self.record_button.text = "Stop" if recording else "Record"
