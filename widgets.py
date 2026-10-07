@@ -151,23 +151,77 @@ class DirectionalPromptWidget(Widget):
         self.draw_dots(input_frames)
 
 
+HOLD_TAIL_COLOR = (1, 1, 1, 0.32)
+
+
+def runs_of(values):
+    """[(first index, last index, value)] for each stretch of equal, truthy values."""
+    runs, start = [], None
+    for i, value in enumerate(values + [None]):
+        if start is not None and value != values[start]:
+            runs.append((start, i - 1, values[start]))
+            start = None
+        if start is None and value:
+            start = i
+    return runs
+
+
+class FallingRuns:
+    """Prompts falling toward the bottom of a column, one per held input: an icon where the input
+    starts and a tail behind it as long as it's held, like a dance game's hold notes. (Drawing every
+    frame of a hold instead piles up a stack of icons.)"""
+
+    def __init__(self, tail_from=1.0):
+        # Where on the icon the tail starts, as a share of its height: the top for a solid icon such
+        # as a button, the middle for an arrow drawn from the middle out.
+        self.tail_from = tail_from
+        self.tail_group, self.head_group = InstructionGroup(), InstructionGroup()
+        self.tails, self.heads = [], []
+        self.used = 0
+
+    def _pair(self, index):
+        if index == len(self.heads):
+            self.tails.append(Rectangle())
+            self.heads.append(Rectangle())
+            self.tail_group.add(self.tails[-1])
+            self.head_group.add(self.heads[-1])
+        return self.tails[index], self.heads[index]
+
+    def draw(self, runs, x, y, icon, travel, count, offset, texture_for):
+        """runs from runs_of(); icon is the (width, height) of a prompt; travel the height it falls."""
+        width, height = icon
+        place = lambda index: y + travel * max(0.0, index - offset) / count
+        for n, (first, last, value) in enumerate(runs):
+            tail, head = self._pair(n)
+            head.texture = texture_for(value)
+            head.pos, head.size = (x, place(first)), icon
+            # Up to the middle of where the hold ends; none if that's inside the icon.
+            top = place(last) + height / 2
+            bottom = place(first) + height * self.tail_from
+            tail.pos = (x + width * 0.32, bottom)
+            tail.size = (width * 0.36, max(0.0, top - bottom))
+        for tail, head in zip(self.tails[len(runs):self.used], self.heads[len(runs):self.used]):
+            tail.pos = head.pos = OFFSCREEN
+        self.used = len(runs)
+
+
 class ButtonColumn(Widget):
     """A button at the bottom of a column, with upcoming presses falling down toward it.
 
-    Prompts are pooled Rectangle instructions sharing the button's texture, which is far cheaper
-    than moving up to 120 Image widgets per column every frame.
+    A press falls as the button's icon with a tail as long as it's held (see FallingRuns).
     """
 
     def __init__(self, button_source, **kwargs):
         super().__init__(**kwargs)
         self.texture = CoreImage(button_source).texture
-        self.prompts = []
-        self.visible_prompts = 0
+        self.falling = FallingRuns()
         with self.canvas:
             self.button_color = Color(1, 1, 1, BUTTON_RELEASED_OPACITY)
             self.button = Rectangle(texture=self.texture)
-            Color(1, 1, 1, BUTTON_PROMPT_OPACITY)
-            self.prompt_group = InstructionGroup()
+            Color(*HOLD_TAIL_COLOR)
+        self.canvas.add(self.falling.tail_group)
+        self.canvas.add(Color(1, 1, 1, BUTTON_PROMPT_OPACITY))
+        self.canvas.add(self.falling.head_group)
         self.bind(pos=self._layout_button, size=self._layout_button)
 
     def _icon_size(self):
@@ -180,20 +234,8 @@ class ButtonColumn(Widget):
     def update_state(self, pressed, input_frames, offset=0.0):
         self.button_color.a = 1 if pressed else BUTTON_RELEASED_OPACITY
         icon_size = self._icon_size()
-        travel = self.height - icon_size[1]
-        count = len(input_frames)
-        shown = 0
-        for i, frame_state in enumerate(input_frames):
-            if not frame_state:
-                continue
-            if shown == len(self.prompts):
-                prompt = Rectangle(texture=self.texture)
-                self.prompts.append(prompt)
-                self.prompt_group.add(prompt)
-            prompt = self.prompts[shown]
-            prompt.pos = (self.x, self.y + travel * max(0.0, i - offset) / count)
-            prompt.size = icon_size
-            shown += 1
-        for prompt in self.prompts[shown : self.visible_prompts]:
-            prompt.pos = OFFSCREEN
-        self.visible_prompts = shown
+        if not input_frames:
+            self.falling.draw([], self.x, self.y, icon_size, 0, 1, offset, None)
+            return
+        self.falling.draw(runs_of([bool(state) for state in input_frames]), self.x, self.y, icon_size,
+                          self.height - icon_size[1], len(input_frames), offset, lambda value: self.texture)

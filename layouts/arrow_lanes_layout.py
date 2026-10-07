@@ -8,7 +8,7 @@ receptor: the outline of every arrow the lane holds, merged into one frame (a do
 for down/up), which lights up with the arrow the player is holding.
 """
 from kivy.core.image import Image as CoreImage
-from kivy.graphics import Color, InstructionGroup, Rectangle
+from kivy.graphics import Color, Rectangle
 from kivy.graphics.texture import Texture
 from kivy.resources import resource_find
 from kivy.uix.relativelayout import RelativeLayout
@@ -17,7 +17,7 @@ from PIL import Image, ImageDraw, ImageFilter
 
 from images import get_standard_button_icon
 from input_list import draw_direction_glyph
-from widgets import BUTTON_PROMPT_OPACITY, BUTTON_RELEASED_OPACITY, OFFSCREEN, ButtonColumn
+from widgets import BUTTON_PROMPT_OPACITY, HOLD_TAIL_COLOR, ButtonColumn, FallingRuns, runs_of
 
 DEFAULT_LANES = ((4,), (1, 7), (2, 8), (3, 9), (6,))  # Left to right.
 GLYPH_PIXELS = 128
@@ -93,21 +93,23 @@ def draw_receptor(directions, size, font_path):
 
 
 class ArrowLane(Widget):
-    """One lane: its receptor at the bottom and upcoming arrows falling toward it."""
+    """One lane: its receptor at the bottom and upcoming arrows falling toward it, a held direction
+    as one arrow with a tail as long as it's held."""
 
     def __init__(self, directions, arrows, receptor, **kwargs):
         super().__init__(**kwargs)
         self.directions = directions
         self.arrows = arrows  # Direction -> arrow texture.
-        self.prompts = []
-        self.visible_prompts = 0
+        self.falling = FallingRuns(tail_from=0.5)
         with self.canvas:
             Color(1, 1, 1, 0.55)
             self.receptor = Rectangle(texture=receptor)
             self.held_color = Color(1, 1, 1, 0)
             self.held = Rectangle()
-            Color(1, 1, 1, BUTTON_PROMPT_OPACITY)
-            self.prompt_group = InstructionGroup()
+            Color(*HOLD_TAIL_COLOR)
+        self.canvas.add(self.falling.tail_group)
+        self.canvas.add(Color(1, 1, 1, BUTTON_PROMPT_OPACITY))
+        self.canvas.add(self.falling.head_group)
         self.bind(pos=self._layout, size=self._layout)
 
     def _icon(self):
@@ -126,24 +128,9 @@ class ArrowLane(Widget):
         else:
             self.held_color.a = 0
         icon = self._icon()
-        travel = self.height - icon[1]
-        count = len(input_frames)
-        shown = 0
-        for i, frame_direction in enumerate(input_frames):
-            if frame_direction not in self.directions:
-                continue
-            if shown == len(self.prompts):
-                prompt = Rectangle()
-                self.prompts.append(prompt)
-                self.prompt_group.add(prompt)
-            prompt = self.prompts[shown]
-            prompt.texture = self.arrows[frame_direction]
-            prompt.pos = (self.x, self.y + travel * max(0.0, i - offset) / count)
-            prompt.size = icon
-            shown += 1
-        for prompt in self.prompts[shown:self.visible_prompts]:
-            prompt.pos = OFFSCREEN
-        self.visible_prompts = shown
+        mine = [d if d in self.directions else None for d in input_frames]
+        self.falling.draw(runs_of(mine), self.x, self.y, icon, self.height - icon[1], max(1, len(input_frames)),
+                          offset, lambda d: self.arrows[d])
 
 
 class ArrowLanesLayout(RelativeLayout):
