@@ -2,6 +2,8 @@ from kivy.core.image import Image as CoreImage
 from kivy.uix.image import Image
 from kivy.uix.widget import Widget
 from kivy.graphics import Ellipse, Rectangle, Color, Line, InstructionGroup
+from kivy.graphics.texture import Texture
+from PIL import Image as PILImage
 import math
 
 from images import IMAGE_SOURCE_DIRECTION
@@ -10,6 +12,7 @@ PROMPT_COLOR = (1, 1, 1, 0.9)
 GUIDE_COLOR = (1, 1, 1, 0.25)
 BUTTON_RELEASED_OPACITY = 0.4
 BUTTON_PROMPT_OPACITY = 0.6
+BACKGROUND = (0.2, 0.2, 0.2)  # The window's.
 # Kivy keeps the old geometry when an Ellipse is resized to zero, so unused graphics are parked here.
 OFFSCREEN = (-10000, -10000)
 
@@ -154,6 +157,38 @@ class DirectionalPromptWidget(Widget):
 HOLD_TAIL_COLOR = (1, 1, 1, 0.32)
 
 
+def texture_of(image):
+    """A Kivy texture of a PIL image, the right way up."""
+    image = image.convert("RGBA")
+    texture = Texture.create(size=image.size, colorfmt="rgba")
+    texture.blit_buffer(image.transpose(PILImage.FLIP_TOP_BOTTOM).tobytes(), colorfmt="rgba", bufferfmt="ubyte")
+    return texture
+
+
+def silhouette_of(image):
+    """A texture of an image's shape in solid white. Drawn in the background colour under the image,
+    it hides hold tails wherever the image is, even where the image is see-through."""
+    image = image.convert("RGBA")
+    solid = PILImage.new("RGBA", image.size, (255, 255, 255, 0))
+    solid.putalpha(image.getchannel("A"))
+    return texture_of(solid)
+
+
+class Knockout:
+    """Keeps hold tails behind everything: each thing drawn over the tails gets a rectangle of its
+    silhouette in the background colour, in group, which goes between the tails and the things."""
+
+    def __init__(self):
+        self.group = InstructionGroup()
+        self.group.add(Color(*BACKGROUND, 1))
+
+    def add(self, silhouette):
+        """A rectangle for one covering thing; keep its pos and size in step with the thing's."""
+        rect = Rectangle(texture=silhouette)
+        self.group.add(rect)
+        return rect
+
+
 def runs_of(values):
     """[(first index, last index, value)] for each stretch of equal, truthy values."""
     runs, start = [], None
@@ -171,37 +206,41 @@ class FallingRuns:
     starts and a tail behind it as long as it's held, like a dance game's hold notes. (Drawing every
     frame of a hold instead piles up a stack of icons.)"""
 
-    def __init__(self, tail_from=1.0):
+    def __init__(self, knockout, tail_from=1.0):
         # Where on the icon the tail starts, as a share of its height: the top for a solid icon such
         # as a button, the middle for an arrow drawn from the middle out.
         self.tail_from = tail_from
+        self.knockout = knockout  # Hides the tails under the icons.
         self.tail_group, self.head_group = InstructionGroup(), InstructionGroup()
-        self.tails, self.heads = [], []
+        self.tails, self.heads, self.knocks = [], [], []
         self.used = 0
 
     def _pair(self, index):
         if index == len(self.heads):
             self.tails.append(Rectangle())
             self.heads.append(Rectangle())
+            self.knocks.append(self.knockout.add(None))
             self.tail_group.add(self.tails[-1])
             self.head_group.add(self.heads[-1])
-        return self.tails[index], self.heads[index]
+        return self.tails[index], self.heads[index], self.knocks[index]
 
-    def draw(self, runs, x, y, icon, travel, count, offset, texture_for):
+    def draw(self, runs, x, y, icon, travel, count, offset, texture_for, silhouette_for):
         """runs from runs_of(); icon is the (width, height) of a prompt; travel the height it falls."""
         width, height = icon
         place = lambda index: y + travel * max(0.0, index - offset) / count
         for n, (first, last, value) in enumerate(runs):
-            tail, head = self._pair(n)
+            tail, head, knock = self._pair(n)
             head.texture = texture_for(value)
-            head.pos, head.size = (x, place(first)), icon
+            knock.texture = silhouette_for(value)
+            head.pos = knock.pos = (x, place(first))
+            head.size = knock.size = icon
             # Up to the middle of where the hold ends; none if that's inside the icon.
             top = place(last) + height / 2
             bottom = place(first) + height * self.tail_from
             tail.pos = (x + width * 0.32, bottom)
             tail.size = (width * 0.36, max(0.0, top - bottom))
-        for tail, head in zip(self.tails[len(runs):self.used], self.heads[len(runs):self.used]):
-            tail.pos = head.pos = OFFSCREEN
+        for n in range(len(runs), self.used):
+            self.tails[n].pos = self.heads[n].pos = self.knocks[n].pos = OFFSCREEN
         self.used = len(runs)
 
 
@@ -214,12 +253,17 @@ class ButtonColumn(Widget):
     def __init__(self, button_source, **kwargs):
         super().__init__(**kwargs)
         self.texture = CoreImage(button_source).texture
-        self.falling = FallingRuns()
+        self.silhouette = silhouette_of(PILImage.open(button_source))
+        knockout = Knockout()
+        self.falling = FallingRuns(knockout)
+        # Tails first, then everything else over them with the tails knocked out underneath.
+        self.canvas.add(Color(*HOLD_TAIL_COLOR))
+        self.canvas.add(self.falling.tail_group)
+        self.button_knock = knockout.add(self.silhouette)
+        self.canvas.add(knockout.group)
         with self.canvas:
             self.button_color = Color(1, 1, 1, BUTTON_RELEASED_OPACITY)
             self.button = Rectangle(texture=self.texture)
-            Color(*HOLD_TAIL_COLOR)
-        self.canvas.add(self.falling.tail_group)
         self.canvas.add(Color(1, 1, 1, BUTTON_PROMPT_OPACITY))
         self.canvas.add(self.falling.head_group)
         self.bind(pos=self._layout_button, size=self._layout_button)
@@ -228,14 +272,15 @@ class ButtonColumn(Widget):
         return self.width, self.width * self.texture.height / self.texture.width
 
     def _layout_button(self, *args):
-        self.button.pos = self.pos
-        self.button.size = self._icon_size()
+        self.button.pos = self.button_knock.pos = self.pos
+        self.button.size = self.button_knock.size = self._icon_size()
 
     def update_state(self, pressed, input_frames, offset=0.0):
         self.button_color.a = 1 if pressed else BUTTON_RELEASED_OPACITY
         icon_size = self._icon_size()
         if not input_frames:
-            self.falling.draw([], self.x, self.y, icon_size, 0, 1, offset, None)
+            self.falling.draw([], self.x, self.y, icon_size, 0, 1, offset, None, None)
             return
         self.falling.draw(runs_of([bool(state) for state in input_frames]), self.x, self.y, icon_size,
-                          self.height - icon_size[1], len(input_frames), offset, lambda value: self.texture)
+                          self.height - icon_size[1], len(input_frames), offset, lambda value: self.texture,
+                          lambda value: self.silhouette)

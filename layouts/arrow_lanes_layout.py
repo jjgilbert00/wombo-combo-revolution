@@ -8,9 +8,7 @@ receptor: the outline of every arrow the lane holds, centred on each other, whic
 the arrow the player is holding. In a shared lane one arrow is drawn in front, crisp, over a faint
 one behind: the down one (the lane's first) unless an up one is the next to arrive.
 """
-from kivy.core.image import Image as CoreImage
 from kivy.graphics import Color, Rectangle
-from kivy.graphics.texture import Texture
 from kivy.resources import resource_find
 from kivy.uix.relativelayout import RelativeLayout
 from kivy.metrics import dp
@@ -20,16 +18,16 @@ from PIL import Image, ImageChops, ImageFilter
 from images import get_standard_button_icon
 from layouts.feedback import FeedbackDisplay
 from input_list import draw_direction_glyph
-from widgets import BUTTON_PROMPT_OPACITY, HOLD_TAIL_COLOR, ButtonColumn, FallingRuns, runs_of
+from widgets import (BUTTON_PROMPT_OPACITY, HOLD_TAIL_COLOR, OFFSCREEN, ButtonColumn, FallingRuns, Knockout,
+                     runs_of, silhouette_of, texture_of)
 
 DEFAULT_LANES = ((4,), (1, 7), (2, 8), (3, 9), (6,))  # Left to right.
 GLYPH_PIXELS = 128
 
 
-def _texture(image):
-    texture = Texture.create(size=image.size, colorfmt="rgba")
-    texture.blit_buffer(image.transpose(Image.FLIP_TOP_BOTTOM).tobytes(), colorfmt="rgba", bufferfmt="ubyte")
-    return texture
+def _both(image):
+    """(texture, silhouette) of an image."""
+    return texture_of(image), silhouette_of(image)
 
 
 def draw_arrow(direction, size, font_path):
@@ -76,20 +74,26 @@ class ArrowLane(Widget):
     as one arrow with a tail as long as it's held."""
 
     def __init__(self, directions, arrows, receptors, **kwargs):
-        """receptors: direction in front -> receptor texture. The first direction is in front
-        unless another is the next one coming (so down/up shows down until an up is next)."""
+        """arrows: direction -> (texture, silhouette); receptors: direction in front -> (texture,
+        silhouette). The first direction is in front unless another is the next one coming (so
+        down/up shows down until an up is next)."""
         super().__init__(**kwargs)
         self.directions = directions
-        self.arrows = arrows  # Direction -> arrow texture.
+        self.arrows = arrows
         self.receptors = receptors
-        self.falling = FallingRuns(tail_from=0.5)
+        knockout = Knockout()
+        self.falling = FallingRuns(knockout, tail_from=0.5)
+        # Tails first, then everything else over them with the tails knocked out underneath.
+        self.canvas.add(Color(*HOLD_TAIL_COLOR))
+        self.canvas.add(self.falling.tail_group)
+        self.receptor_knock = knockout.add(receptors[directions[0]][1])
+        self.held_knock = knockout.add(None)
+        self.canvas.add(knockout.group)
         with self.canvas:
             Color(1, 1, 1, RECEPTOR_OPACITY if len(directions) == 1 else SHARED_RECEPTOR_OPACITY)
-            self.receptor = Rectangle(texture=receptors[directions[0]])
+            self.receptor = Rectangle(texture=receptors[directions[0]][0])
             self.held_color = Color(1, 1, 1, 0)
             self.held = Rectangle()
-            Color(*HOLD_TAIL_COLOR)
-        self.canvas.add(self.falling.tail_group)
         self.canvas.add(Color(1, 1, 1, BUTTON_PROMPT_OPACITY))
         self.canvas.add(self.falling.head_group)
         self.bind(pos=self._layout, size=self._layout)
@@ -98,17 +102,19 @@ class ArrowLane(Widget):
         return self.width, self.width
 
     def _layout(self, *args):
-        self.receptor.pos = self.held.pos = self.pos
-        self.receptor.size = self.held.size = self._icon()
+        self.receptor.pos = self.held.pos = self.receptor_knock.pos = self.pos
+        self.receptor.size = self.held.size = self.receptor_knock.size = self._icon()
 
     def update_state(self, direction, input_frames, offset=0.0):
         """direction is the one held now; input_frames the upcoming frames' directions; offset how
         far through the current frame the clock is."""
         if direction in self.directions:
-            self.held.texture = self.arrows[direction]
+            self.held.texture, self.held_knock.texture = self.arrows[direction]
             self.held_color.a = 1
+            self.held_knock.pos, self.held_knock.size = self.pos, self._icon()
         else:
             self.held_color.a = 0
+            self.held_knock.pos = OFFSCREEN
         icon = self._icon()
         mine = [d if d in self.directions else None for d in input_frames]
         runs = runs_of(mine)
@@ -116,9 +122,9 @@ class ArrowLane(Widget):
         # up shows while a down charge is held), else the one held, else the lane's first.
         front = next((d for first, _, d in runs if first > 0),
                      direction if direction in self.directions else self.directions[0])
-        self.receptor.texture = self.receptors[front]
+        self.receptor.texture, self.receptor_knock.texture = self.receptors[front]
         self.falling.draw(runs, self.x, self.y, icon, self.height - icon[1], max(1, len(input_frames)),
-                          offset, lambda d: self.arrows[d])
+                          offset, lambda d: self.arrows[d][0], lambda d: self.arrows[d][1])
 
 
 class ArrowLanesLayout(FeedbackDisplay, RelativeLayout):
@@ -134,10 +140,8 @@ class ArrowLanesLayout(FeedbackDisplay, RelativeLayout):
         self.lanes = []
         width = 0.44 / len(lanes)
         for i, directions in enumerate(lanes):
-            arrows = {direction: _texture(draw_arrow(direction, GLYPH_PIXELS, font))
-                      for direction in directions}
-            receptors = {front: _texture(draw_receptor(directions, GLYPH_PIXELS, font, front))
-                         for front in directions}
+            arrows = {direction: _both(draw_arrow(direction, GLYPH_PIXELS, font)) for direction in directions}
+            receptors = {front: _both(draw_receptor(directions, GLYPH_PIXELS, font, front)) for front in directions}
             lane = ArrowLane(directions, arrows, receptors,
                              size_hint=(width * 0.82, 1), pos_hint={"x": 0.03 + i * width, "y": 0})
             self.lanes.append(lane)

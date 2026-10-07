@@ -47,6 +47,7 @@ from playalong import PlayalongController
 from sampler import FPS, InputSampler
 from screen_capture import ScreenRecorder, list_displays, prepare_capture
 from virtual_pad import VirtualPad, VirtualPadError
+from widgets import BACKGROUND
 from video_writer import nvenc_available, resolve_encoder, write_capture_and_overlay, write_input_video
 
 logger = logging.getLogger(__name__)
@@ -159,7 +160,7 @@ class WomboComboApp(App):
         return False  # Disable Kivy's built-in F1 settings panel; F1 shows hotkeys instead.
 
     def build(self):
-        Window.clearcolor = (0.2, 0.2, 0.2, 0.5)
+        Window.clearcolor = (*BACKGROUND, 0.5)
         # Up to 1920x1080, but never bigger than the screen (with room for the taskbar).
         screen_width, screen_height = win32api.GetSystemMetrics(0), win32api.GetSystemMetrics(1)
         Window.size = (min(1920, int(screen_width * 0.9)), min(1080, int(screen_height * 0.85)))
