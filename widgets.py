@@ -5,7 +5,6 @@ from kivy.graphics import Ellipse, Rectangle, Color, Line, InstructionGroup
 from kivy.graphics.texture import Texture
 from PIL import Image as PILImage
 import math
-import numpy
 
 from images import IMAGE_SOURCE_DIRECTION
 
@@ -155,7 +154,8 @@ class DirectionalPromptWidget(Widget):
         self.draw_dots(input_frames)
 
 
-HOLD_TAIL_COLOR = (0.46, 0.46, 0.46, 1)  # Solid, as the trail's pieces overlap.
+HOLD_TAIL_COLOR = (0.62, 0.62, 0.65, 1)
+HOLD_TAIL_WIDTH = 0.12  # Of the icon's width: a thin line, like a guitar game's sustain.
 
 
 def texture_of(image):
@@ -175,31 +175,13 @@ def silhouette_of(image):
     return texture_of(solid)
 
 
-def _alpha_texture(alpha):
-    """A white texture with this alpha (a 2D uint8 array, top row first)."""
-    image = PILImage.new("RGBA", (alpha.shape[1], alpha.shape[0]), (255, 255, 255, 0))
-    image.putalpha(PILImage.fromarray(alpha))
-    return texture_of(image)
-
-
 class Prompt:
-    """A falling prompt's art, from a PIL image: its texture, its silhouette (see Knockout) and the
-    pieces of its hold trail.
-
-    The trail is what the shape leaves if it's dragged down the column like a sponge dipped in
-    paint, from where the hold ends down to where it starts: under the icon, every column of the
-    shape filled up from its lowest point (cap); then each column the shape covers, stretched to
-    any length (body); then, where the hold ends, every column filled up to the shape's highest
-    point there (end)."""
+    """A falling prompt's art, from a PIL image: its texture and its silhouette (see Knockout)."""
 
     def __init__(self, image):
         image = image.convert("RGBA")
         self.texture = texture_of(image)
         self.silhouette = silhouette_of(image)
-        alpha = numpy.asarray(image.getchannel("A"))  # Top row first.
-        self.cap = _alpha_texture(numpy.maximum.accumulate(alpha[::-1], axis=0)[::-1].copy())
-        self.end = _alpha_texture(numpy.maximum.accumulate(alpha, axis=0))
-        self.body = _alpha_texture(alpha.max(axis=0, keepdims=True))
 
 
 class Knockout:
@@ -231,48 +213,43 @@ def runs_of(values):
 
 class FallingRuns:
     """Prompts falling toward the bottom of a column, one per held input: an icon where the input
-    starts and its trail behind it as long as it's held (see Prompt), like a dance game's hold
-    notes. (Drawing every frame of a hold instead piles up a stack of icons.)"""
+    starts and a thin line behind it as long as it's held, like a guitar game's sustained notes.
+    (Drawing every frame of a hold instead piles up a stack of icons.)"""
 
     def __init__(self, knockout):
-        self.knockout = knockout  # Hides the trails under the icons.
+        self.knockout = knockout  # Hides the lines under the icons.
         self.tail_group, self.head_group = InstructionGroup(), InstructionGroup()
-        self.pieces, self.heads, self.knocks = [], [], []  # pieces: (cap, body, end) for each run.
+        self.tails, self.heads, self.knocks = [], [], []
         self.used = 0
 
     def _run(self, index):
         if index == len(self.heads):
-            self.pieces.append((Rectangle(), Rectangle(), Rectangle()))
+            self.tails.append(Rectangle())
             self.heads.append(Rectangle())
             self.knocks.append(self.knockout.add(None))
-            for piece in self.pieces[-1]:
-                self.tail_group.add(piece)
+            self.tail_group.add(self.tails[-1])
             self.head_group.add(self.heads[-1])
-        return self.pieces[index], self.heads[index], self.knocks[index]
+        return self.tails[index], self.heads[index], self.knocks[index]
 
     def draw(self, runs, x, y, icon, travel, count, offset, prompt_for):
         """runs from runs_of(); icon is the (width, height) of a prompt; travel the height it falls;
         prompt_for(value) the Prompt for a run's value."""
         width, height = icon
         place = lambda index: y + travel * max(0.0, index - offset) / count
+        line = width * HOLD_TAIL_WIDTH
         for n, (first, last, value) in enumerate(runs):
-            (cap, body, end), head, knock = self._run(n)
+            tail, head, knock = self._run(n)
             prompt = prompt_for(value)
             head.texture, knock.texture = prompt.texture, prompt.silhouette
             start, finish = place(first), place(last)
             head.pos = knock.pos = (x, start)
             head.size = knock.size = icon
-            if finish > start:
-                cap.texture, body.texture, end.texture = prompt.cap, prompt.body, prompt.end
-                cap.pos, cap.size = (x, start), icon
-                end.pos, end.size = (x, finish), icon
-                body.pos, body.size = (x, start + height), (width, max(0.0, finish - start - height))
-            else:
-                cap.pos = body.pos = end.pos = OFFSCREEN
+            # From the icon's middle (it covers the start, so the line joins it) to the middle of
+            # where the hold ends.
+            tail.pos = (x + (width - line) / 2, start + height / 2)
+            tail.size = (line, max(0.0, finish - start))
         for n in range(len(runs), self.used):
-            for piece in self.pieces[n]:
-                piece.pos = OFFSCREEN
-            self.heads[n].pos = self.knocks[n].pos = OFFSCREEN
+            self.tails[n].pos = self.heads[n].pos = self.knocks[n].pos = OFFSCREEN
         self.used = len(runs)
 
 
