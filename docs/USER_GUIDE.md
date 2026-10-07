@@ -149,6 +149,12 @@ Every lane can be hidden from the **View** menu, which says whether each one is 
   recording and scores it. In **Review** mode, playing replays your last attempt next to the
   recording, so you can watch where it went wrong. The button on the menu bar names the mode
   you're in. **F4** switches.
+- **Up next.** The panel left of the line shows the next inputs to make, still and large, so you
+  don't have to read them on the move. The bar under the first fills as it approaches, then turns
+  gold while its window is open. *View > Hide up-next panel* turns it off.
+- **Scroll speed.** Inputs appear 1.5 seconds before they reach the line. If that's too fast or too
+  slow, change *Settings > Scroll speed* (0.75 to 3 seconds), or zoom with **Ctrl+Wheel**. While
+  playing, frame counts are hidden and inputs that aren't key inputs fade back.
 - **Lead-in.** When practice starts, and on every loop, the list scrolls in for a moment before
   the first frame (1 second by default). You can change or turn this off in
   [Settings](#settings).
@@ -425,6 +431,7 @@ opacity* in the View menu. **F3** switches to the older ring display, if you pre
 | Encoder | Video encoder: Auto, CPU (x264) or NVIDIA (NVENC). |
 | Overlay input delay | Frames to delay drawn inputs in overlay videos. |
 | Export overlay on save | Also write `name_overlay.mp4` when saving a recording. |
+| Scroll speed | How far ahead of the line inputs appear: 0.75 s (fast) to 3 s (slow), 1.5 s by default. |
 | Lead-in before practice | The run-up before practice playback: off, 0.5 s, 1 s or 2 s. |
 | Recent attempts shown | How many recent runs appear as rows. |
 | Game for new recordings | Which game's actions new recordings (and older ones that don't say) use. |
