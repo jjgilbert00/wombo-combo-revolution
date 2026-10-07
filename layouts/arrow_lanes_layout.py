@@ -4,8 +4,9 @@ of arrows instead of a spiral, like a dance game.
 Each lane holds one or two directions (numpad notation). By default there are five, left to right:
 left, down-left/up-left, down/up, down-right/up-right, right. An arrow falls in its lane pointing its
 own way, so an up arrow comes down the down/up lane pointing up. At the bottom of each lane is its
-receptor: the outlines of every arrow the lane holds, laid over each other so they cross at their
-centres, which lights up with the arrow the player is holding.
+receptor: the outline of every arrow the lane holds, centred on each other, which lights up with
+the arrow the player is holding. In a shared lane one arrow is drawn in front, crisp, over a faint
+one behind: the down one (the lane's first) unless an up one is the next to arrive.
 """
 from kivy.core.image import Image as CoreImage
 from kivy.graphics import Color, Rectangle
@@ -37,19 +38,34 @@ def draw_arrow(direction, size, font_path):
     return draw_direction_glyph(direction, size, font_path)
 
 
-def _outline(direction, size, font_path):
-    """The edge of an arrow's shape, as a mask."""
-    shape = draw_arrow(direction, size, font_path).getchannel("A").point(lambda value: 255 if value > 96 else 0)
-    inside = shape.filter(ImageFilter.MinFilter(max(3, size // 28) * 2 + 1))
-    return ImageChops.subtract(shape, inside)
+BACK_ARROW_STRENGTH = 0.3  # How faint the arrow behind is in a shared lane's receptor.
+RECEPTOR_OPACITY = 0.55
+SHARED_RECEPTOR_OPACITY = 0.75  # Brighter, so the arrow in front stands out from the one behind.
 
 
-def draw_receptor(directions, size, font_path):
-    """The outline of every arrow the lane holds, laid over each other so they cross at their
-    centres, as an RGBA image."""
-    edge = Image.new("L", (size, size), 0)
+def _shape(direction, size, font_path):
+    """An arrow's whole shape, outline included, as a mask."""
+    return draw_arrow(direction, size, font_path).getchannel("A").point(lambda value: 255 if value > 96 else 0)
+
+
+def _outline(shape, size):
+    """The edge of a shape, as a mask."""
+    return ImageChops.subtract(shape, shape.filter(ImageFilter.MinFilter(max(3, size // 28) * 2 + 1)))
+
+
+def draw_receptor(directions, size, font_path, front=None):
+    """A lane's receptor as an RGBA image: the outline of its arrow, or with two, both centred on
+    each other with front drawn over the other: front's lines at full strength, the one behind
+    faint and hidden where it passes under front."""
+    front = front or directions[0]
+    front_shape = _shape(front, size, font_path)
+    edge = _outline(front_shape, size)
+    cover = front_shape.filter(ImageFilter.MaxFilter(3))  # A hair wider, for a clean gap.
     for direction in directions:
-        edge = ImageChops.lighter(edge, _outline(direction, size, font_path))
+        if direction != front:
+            back = _outline(_shape(direction, size, font_path), size)
+            back = ImageChops.subtract(back, cover).point(lambda v: round(v * BACK_ARROW_STRENGTH))
+            edge = ImageChops.lighter(edge, back)
     frame = Image.new("RGBA", (size, size), (235, 235, 240, 0))
     frame.putalpha(edge)
     return frame
@@ -59,14 +75,17 @@ class ArrowLane(Widget):
     """One lane: its receptor at the bottom and upcoming arrows falling toward it, a held direction
     as one arrow with a tail as long as it's held."""
 
-    def __init__(self, directions, arrows, receptor, **kwargs):
+    def __init__(self, directions, arrows, receptors, **kwargs):
+        """receptors: direction in front -> receptor texture. The first direction is in front
+        unless another is the next one coming (so down/up shows down until an up is next)."""
         super().__init__(**kwargs)
         self.directions = directions
         self.arrows = arrows  # Direction -> arrow texture.
+        self.receptors = receptors
         self.falling = FallingRuns(tail_from=0.5)
         with self.canvas:
-            Color(1, 1, 1, 0.55)
-            self.receptor = Rectangle(texture=receptor)
+            Color(1, 1, 1, RECEPTOR_OPACITY if len(directions) == 1 else SHARED_RECEPTOR_OPACITY)
+            self.receptor = Rectangle(texture=receptors[directions[0]])
             self.held_color = Color(1, 1, 1, 0)
             self.held = Rectangle()
             Color(*HOLD_TAIL_COLOR)
@@ -92,7 +111,13 @@ class ArrowLane(Widget):
             self.held_color.a = 0
         icon = self._icon()
         mine = [d if d in self.directions else None for d in input_frames]
-        self.falling.draw(runs_of(mine), self.x, self.y, icon, self.height - icon[1], max(1, len(input_frames)),
+        runs = runs_of(mine)
+        # The arrow in front is the next one still to arrive (not one already at the receptor, so an
+        # up shows while a down charge is held), else the one held, else the lane's first.
+        front = next((d for first, _, d in runs if first > 0),
+                     direction if direction in self.directions else self.directions[0])
+        self.receptor.texture = self.receptors[front]
+        self.falling.draw(runs, self.x, self.y, icon, self.height - icon[1], max(1, len(input_frames)),
                           offset, lambda d: self.arrows[d])
 
 
@@ -111,7 +136,9 @@ class ArrowLanesLayout(FeedbackDisplay, RelativeLayout):
         for i, directions in enumerate(lanes):
             arrows = {direction: _texture(draw_arrow(direction, GLYPH_PIXELS, font))
                       for direction in directions}
-            lane = ArrowLane(directions, arrows, _texture(draw_receptor(directions, GLYPH_PIXELS, font)),
+            receptors = {front: _texture(draw_receptor(directions, GLYPH_PIXELS, font, front))
+                         for front in directions}
+            lane = ArrowLane(directions, arrows, receptors,
                              size_hint=(width * 0.82, 1), pos_hint={"x": 0.03 + i * width, "y": 0})
             self.lanes.append(lane)
             self.add_widget(lane)
