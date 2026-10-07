@@ -4,8 +4,8 @@ of arrows instead of a spiral, like a dance game.
 Each lane holds one or two directions (numpad notation). By default there are five, left to right:
 left, down-left/up-left, down/up, down-right/up-right, right. An arrow falls in its lane pointing its
 own way, so an up arrow comes down the down/up lane pointing up. At the bottom of each lane is its
-receptor: the outline of every arrow the lane holds, merged into one frame (a double-headed arrow
-for down/up), which lights up with the arrow the player is holding.
+receptor: the outlines of every arrow the lane holds, laid over each other so they cross at their
+centres, which lights up with the arrow the player is holding.
 """
 from kivy.core.image import Image as CoreImage
 from kivy.graphics import Color, Rectangle
@@ -14,7 +14,7 @@ from kivy.resources import resource_find
 from kivy.uix.relativelayout import RelativeLayout
 from kivy.metrics import dp
 from kivy.uix.widget import Widget
-from PIL import Image, ImageDraw, ImageFilter
+from PIL import Image, ImageChops, ImageFilter
 
 from images import get_standard_button_icon
 from layouts.feedback import FeedbackDisplay
@@ -31,64 +31,25 @@ def _texture(image):
     return texture
 
 
-VECTORS = {1: (-1, -1), 2: (0, -1), 3: (1, -1), 4: (-1, 0), 6: (1, 0), 7: (-1, 1), 8: (0, 1), 9: (1, 1)}
+def draw_arrow(direction, size, font_path):
+    """A lane's arrow: the input list's glyph, white with a dark outline, centred in the square.
+    Arrows sharing a lane overlap at their centres."""
+    return draw_direction_glyph(direction, size, font_path)
 
 
-def _half_arrow_mask(direction, size):
-    """An arrow from the middle of the square out toward direction, as a mask: a thick shaft with a
-    round joint at the middle and a triangular head at the tip. Two of these share the joint, so
-    together they read as one shape (a double-headed arrow for down and up)."""
-    scale = 4
-    s = size * scale
-    mask = Image.new("L", (s, s), 0)
-    draw = ImageDraw.Draw(mask)
-    dx, dy = VECTORS[direction]
-    length = (dx * dx + dy * dy) ** 0.5
-    ux, uy = dx / length, -dy / length  # Image y runs down.
-    px, py = -uy, ux  # Perpendicular.
-    c = s / 2
-    reach = s * (0.44 if dx and dy else 0.46)  # Diagonals reach toward the corners a little less.
-    tip = (c + ux * reach, c + uy * reach)
-    base = (c + ux * reach * 0.52, c + uy * reach * 0.52)
-    head, shaft = s * 0.19, s * 0.085
-    draw.polygon([(c + px * shaft, c + py * shaft), (base[0] + px * shaft, base[1] + py * shaft),
-                  (base[0] - px * shaft, base[1] - py * shaft), (c - px * shaft, c - py * shaft)], fill=255)
-    draw.polygon([tip, (base[0] + px * head, base[1] + py * head), (base[0] - px * head, base[1] - py * head)],
-                 fill=255)
-    draw.ellipse([c - shaft, c - shaft, c + shaft, c + shaft], fill=255)  # The joint.
-    return mask.resize((size, size), Image.LANCZOS)
-
-
-def arrow_mask(directions, direction, size, font_path):
-    """The shape an arrow takes in a lane: the whole arrow if the lane has one direction, or the half
-    from the middle out if it shares the lane."""
-    if len(directions) == 1:
-        return draw_direction_glyph(direction, size, font_path).getchannel("A")
-    return _half_arrow_mask(direction, size)
-
-
-def draw_arrow(directions, direction, size, font_path):
-    """A lane's arrow for direction: white with a dark outline, like the input list's glyphs."""
-    if len(directions) == 1:
-        return draw_direction_glyph(direction, size, font_path)
-    mask = arrow_mask(directions, direction, size, font_path).point(lambda v: 255 if v > 96 else 0)
-    border = mask.filter(ImageFilter.MaxFilter(max(3, size // 32) * 2 + 1))
-    image = Image.new("RGBA", (size, size), (30, 30, 34, 0))
-    image.putalpha(border)
-    image.paste((245, 245, 245, 255), mask=mask)
-    return image
+def _outline(direction, size, font_path):
+    """The edge of an arrow's shape, as a mask."""
+    shape = draw_arrow(direction, size, font_path).getchannel("A").point(lambda value: 255 if value > 96 else 0)
+    inside = shape.filter(ImageFilter.MinFilter(max(3, size // 28) * 2 + 1))
+    return ImageChops.subtract(shape, inside)
 
 
 def draw_receptor(directions, size, font_path):
-    """The outline of every arrow the lane holds, merged into one frame, as an RGBA image."""
-    shape = Image.new("L", (size, size), 0)
-    for direction in directions:
-        shape = Image.composite(Image.new("L", (size, size), 255), shape,
-                                arrow_mask(directions, direction, size, font_path))
-    shape = shape.point(lambda value: 255 if value > 96 else 0)
-    inside = shape.filter(ImageFilter.MinFilter(max(3, size // 28) * 2 + 1))
+    """The outline of every arrow the lane holds, laid over each other so they cross at their
+    centres, as an RGBA image."""
     edge = Image.new("L", (size, size), 0)
-    edge.paste(shape, mask=Image.eval(inside, lambda v: 255 - v))
+    for direction in directions:
+        edge = ImageChops.lighter(edge, _outline(direction, size, font_path))
     frame = Image.new("RGBA", (size, size), (235, 235, 240, 0))
     frame.putalpha(edge)
     return frame
@@ -148,7 +109,7 @@ class ArrowLanesLayout(FeedbackDisplay, RelativeLayout):
         self.lanes = []
         width = 0.44 / len(lanes)
         for i, directions in enumerate(lanes):
-            arrows = {direction: _texture(draw_arrow(directions, direction, GLYPH_PIXELS, font))
+            arrows = {direction: _texture(draw_arrow(direction, GLYPH_PIXELS, font))
                       for direction in directions}
             lane = ArrowLane(directions, arrows, _texture(draw_receptor(directions, GLYPH_PIXELS, font)),
                              size_hint=(width * 0.82, 1), pos_hint={"x": 0.03 + i * width, "y": 0})
