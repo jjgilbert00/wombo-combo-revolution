@@ -1,5 +1,7 @@
 import threading
 import time
+
+from sampler import FPS
 from enum import Enum
 
 from collections import namedtuple
@@ -16,7 +18,8 @@ MAX_RUNS = 50  # Recent attempts kept in memory.
 ListSnapshot = namedtuple(
     "ListSnapshot",
     "live_state frame recording target_runs attempt_runs match_runs notes key_inputs history live_key judgements "
-    "last_pass",
+    "last_pass position playing",
+    defaults=(0.0, False),
 )
 # One earlier attempt in the input list: its label, its key input grades as (start, end, grade, offset),
 # when the track has no key inputs its per-frame match runs instead, and whether it's a saved attempt.
@@ -92,6 +95,7 @@ class PlayalongController:
         self.lead_in = 60  # Frames of run-up before practice playback starts, to get ready.
         self._lead = 0  # Run-up frames left before the playhead moves.
         self.demo = None  # {"track", "output", "kind"} while a demo plays.
+        self._last_tick = time.perf_counter()  # When the last frame was sampled.
         self.judgements = []  # (time, key input index, grade, offset), newest last.
         self.last_pass = None  # Summary of the last finished pass (see _summarise).
         self.best = 0  # Most key inputs hit in one pass of this track.
@@ -196,6 +200,7 @@ class PlayalongController:
         demo_output = demo_state = None
         with self._lock:
             self.live_state = controller_state
+            self._last_tick = time.perf_counter()
             if self.running_state == RUNNING_STATES.PLAYING and self.demo:
                 demo_output = self.demo["output"]
                 demo_state = self._demo_frame(ticks)
@@ -295,7 +300,16 @@ class PlayalongController:
             return self.live_state, [map_state(frame, self.button_map) for frame in self.get_playalong_frames()]
 
     def list_snapshot(self, frames_before, frames_after):
-        """Target runs, attempt runs and per-frame matches around the playhead, for the input list."""
+        """Target runs, attempt runs and per-frame matches around the playhead, for the input list.
+        Besides the frame at the line, it gives the exact position in time, part way to the next
+        frame, so moving lists can be drawn smoothly between ticks."""
+        snapshot = self._list_snapshot(frames_before, frames_after)
+        moving = self.running_state != RUNNING_STATES.STOPPED
+        progress = min(1.0, max(0.0, (time.perf_counter() - self._last_tick) * FPS)) if moving else 0.0
+        return snapshot._replace(position=snapshot.frame + progress,
+                                 playing=self.running_state == RUNNING_STATES.PLAYING)
+
+    def _list_snapshot(self, frames_before, frames_after):
         with self._lock:
             recording = self.running_state == RUNNING_STATES.RECORDING
             # During the run-up the view starts before frame 0, so the first inputs scroll in.

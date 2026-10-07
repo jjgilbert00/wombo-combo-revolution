@@ -357,7 +357,8 @@ class _Textures:
 class InputListLayout(StencilView):
     """Training-mode style input list that scrolls right to left onto a hit line at a constant speed.
 
-    Time runs left to right, so the player reads upcoming inputs like text. Each run of input is a
+    Time runs left to right, so the player reads upcoming inputs like text. While playing, the list
+    is drawn at the exact time between frames, so it glides rather than stepping a frame at a time. Each run of input is a
     box as wide as it's held: its left edge reaches the line on the frame it should be pressed and
     its right edge when it should be released. Lanes from the top, each of which can be hidden: a
     frame meter (one block per target frame), the target track, the key inputs on their own (the
@@ -585,7 +586,7 @@ class InputListLayout(StencilView):
                 int((self._track_right() - line_x) / self.px_per_frame) + 2)
 
     def frame_at(self, x):
-        return self._frame + int((x - self._line_x()) // self.px_per_frame)
+        return int(self._frame + (x - self._line_x()) // self.px_per_frame)
 
     def set_zoom(self, px_per_frame):
         self.px_per_frame = max(MIN_PX_PER_FRAME, min(MAX_PX_PER_FRAME, px_per_frame))
@@ -667,7 +668,7 @@ class InputListLayout(StencilView):
         line_x = self._line_x()
         track_left, track_right = self._track_left(), self._track_right()
         for start, length, key in runs:
-            x0 = self._frame_x(start, snapshot.frame)
+            x0 = self._frame_x(start, snapshot.position)
             x1 = x0 + length * self.px_per_frame
             if x1 < track_left or x0 > track_right:
                 continue
@@ -706,7 +707,7 @@ class InputListLayout(StencilView):
         for start, length, matched in runs:
             color, rect = self.strips.next()
             color.rgba = (*(MATCH_COLOR if matched else MISS_COLOR), alpha)
-            rect.pos = (self._frame_x(start, snapshot.frame), strip_y)
+            rect.pos = (self._frame_x(start, snapshot.position), strip_y)
             rect.size = (length * self.px_per_frame, STRIP_HEIGHT)
         self.strips.finish(lambda strip: setattr(strip[0], "a", 0))
 
@@ -724,12 +725,12 @@ class InputListLayout(StencilView):
                 past = frame < snapshot.frame and not snapshot.recording
                 block_color, block = self.meter_blocks.next()
                 block_color.rgba = (*color, HISTORY_ALPHA if past else 0.95)
-                block.pos = (self._frame_x(frame, snapshot.frame) + gap, meter_y)
+                block.pos = (self._frame_x(frame, snapshot.position) + gap, meter_y)
                 block.size = (ppf - gap, METER_HEIGHT)
             if first_visible <= start <= last_visible:
                 divider_color, divider = self.meter_dividers.next()
                 divider_color.rgba = (1, 1, 1, 0.9)
-                divider.pos = (self._frame_x(start, snapshot.frame) - dp(1), meter_y - dp(3))
+                divider.pos = (self._frame_x(start, snapshot.position) - dp(1), meter_y - dp(3))
                 divider.size = (dp(2), METER_HEIGHT + dp(6))
         hide = lambda item: setattr(item[0], "a", 0)
         self.meter_blocks.finish(hide)
@@ -740,8 +741,8 @@ class InputListLayout(StencilView):
         row_ends = []  # Right edge of the last toast placed in each row.
         self._toast_hits = []
         for index, start, end, text in notes:
-            x0 = self._frame_x(start, snapshot.frame)
-            x1 = self._frame_x(end + 1, snapshot.frame)
+            x0 = self._frame_x(start, snapshot.position)
+            x1 = self._frame_x(end + 1, snapshot.position)
             if x1 < track_left or x0 > track_right:
                 continue
             texture = self.textures.note(text)
@@ -787,8 +788,8 @@ class InputListLayout(StencilView):
         self._key_tag_hits = []
         target, strip, keys = lanes.get("target"), lanes.get("strip"), lanes.get("keys")
         for index, key_input, outcome, hold_run in key_inputs:
-            x0 = self._frame_x(key_input["start"], snapshot.frame)
-            x1 = self._frame_x(key_input["end"] + 1, snapshot.frame)
+            x0 = self._frame_x(key_input["start"], snapshot.position)
+            x1 = self._frame_x(key_input["end"] + 1, snapshot.position)
             if x1 < track_left or x0 > track_right:
                 continue
             graphic = self.key_graphics.next()
@@ -828,8 +829,8 @@ class InputListLayout(StencilView):
             graphic.tag_text.size = texture.size
             self._key_tag_hits.append((x0, y0, tag_width, tag_height, index))
             if is_hold:
-                ideal_end = self._frame_x(key_input["start"] + key_input["hold"], snapshot.frame)
-                deadline = self._frame_x(key_input["end"] - key_input["hold"] + 1, snapshot.frame)
+                ideal_end = self._frame_x(key_input["start"] + key_input["hold"], snapshot.position)
+                deadline = self._frame_x(key_input["end"] - key_input["hold"] + 1, snapshot.position)
                 graphic.hold_color.a = 0.8
                 graphic.ideal.pos = (x0, y0 + border)
                 graphic.ideal.size = (ideal_end - x0, dp(4))
@@ -848,14 +849,14 @@ class InputListLayout(StencilView):
         graphic.result.size = (x1 - x0, STRIP_HEIGHT + dp(4))
         if is_hold and hold_run:
             run_start, run_length = hold_run
-            run_x = self._frame_x(run_start, snapshot.frame)
+            run_x = self._frame_x(run_start, snapshot.position)
             graphic.run_color.rgba = (*KEY_RESULT_COLORS[outcome], 1)
             graphic.run.pos = (run_x, strip_y - dp(2))
-            graphic.run.size = (self._frame_x(run_start + run_length, snapshot.frame) - run_x, STRIP_HEIGHT + dp(4))
+            graphic.run.size = (self._frame_x(run_start + run_length, snapshot.position) - run_x, STRIP_HEIGHT + dp(4))
 
     def _draw_history(self, snapshot, lanes):
         track_left, track_right = self._track_left(), self._track_right()
-        frame_x = lambda frame: self._frame_x(frame, snapshot.frame)
+        frame_x = lambda frame: self._frame_x(frame, snapshot.position)
         for i, row in enumerate(self._history):
             y, height = lanes[("run", i)]
             for start, length, matched in row.match_runs:
@@ -937,8 +938,8 @@ class InputListLayout(StencilView):
             self.selection_color.a = self.selection_edge_color.a = 0
             return
         start, end = self.selection
-        x0 = self._frame_x(start, snapshot.frame)
-        x1 = self._frame_x(end + 1, snapshot.frame)
+        x0 = self._frame_x(start, snapshot.position)
+        x1 = self._frame_x(end + 1, snapshot.position)
         self.selection_color.a = 0.16
         self.selection_fill.pos = (x0, bottom)
         self.selection_fill.size = (x1 - x0, top - bottom)
@@ -948,7 +949,7 @@ class InputListLayout(StencilView):
             edge.size = (dp(2), top - bottom)
 
     def update_state(self, snapshot):
-        self._frame = snapshot.frame
+        self._frame = snapshot.position
         self._history = [row for row in snapshot.history if ("saved" if row.saved else "recent") in self.lanes_shown]
         lanes, bottom = self._lanes()
         self._arrange(lanes, bottom)
