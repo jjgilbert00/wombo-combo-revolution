@@ -72,7 +72,8 @@ HOLD_KEY_COLOR = (0.72, 0.55, 1.0)  # And holds from both.
 KEY_RESULT_COLORS = {"hit": MATCH_COLOR, "miss": MISS_COLOR, "pending": (0.55, 0.55, 0.6)}
 GRADE_COLORS = {"hit": MATCH_COLOR, "early": (0.45, 0.62, 1.0), "late": (1.0, 0.62, 0.2), "miss": MISS_COLOR,
                 "pending": (0.45, 0.45, 0.5)}
-NON_KEY_ALPHA = 0.35  # Target inputs outside every key input fade back once key inputs exist.
+NON_KEY_ALPHA = 0.35
+NON_KEY_ALPHA_PLAYING = 0.18  # Fainter still while playing, when only the key inputs matter.  # Target inputs outside every key input fade back once key inputs exist.
 BANNER_SECONDS = 3.5  # How long a pass's score stays up.
 CLICK_SLOP = dp(4)  # A press that moves less than this is a click, not a drag.
 
@@ -709,7 +710,7 @@ class InputListLayout(StencilView):
             active = x0 <= line_x < x1
             alpha = HISTORY_ALPHA if past and dim_history else 1
             if key_windows is not None and not any(s <= start + length - 1 and start <= e for s, e in key_windows):
-                alpha *= NON_KEY_ALPHA
+                alpha *= NON_KEY_ALPHA_PLAYING if snapshot.playing else NON_KEY_ALPHA
             box.fill_color.rgba = (*color, (0.05 if neutral else 0.16 if not active else 0.28) * alpha)
             box.fill.pos = (x0, lane_y)
             box.fill.size = (x1 - x0, LANE_HEIGHT)
@@ -741,6 +742,8 @@ class InputListLayout(StencilView):
             last_label = (box, priority)
             box.label.set_stacked(label_x, lane_y + LANE_HEIGHT - dp(4), key, self.textures,
                                   self.textures.count(length))
+            if snapshot.playing:
+                box.label.count.size = (0, 0)  # Frame counts are for studying, not for reading on the move.
         pool.finish(_Box.hide)
 
     def _draw_matches(self, runs, snapshot, strip_y):
