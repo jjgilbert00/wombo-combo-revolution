@@ -366,6 +366,11 @@ class PlayalongController:
                 dict(self.last_pass) if self.last_pass else None,
             )
 
+    def feedback(self):
+        """(recent verdicts, the last pass) for displays that don't take a list snapshot."""
+        with self._lock:
+            return self._recent_judgements(), dict(self.last_pass) if self.last_pass else None
+
     def _recent_judgements(self, seconds=1.2):
         """(grade, offset, notation, age from 0 to 1) for judgements made in the last moment."""
         now = time.monotonic()

@@ -20,6 +20,7 @@ from images import get_standard_button_icon
 from input_list import LIST_BUTTON_ORDER, draw_direction_glyph, input_key
 from games import GAMES, draw_action_icon
 from key_inputs import EARLY, LATE, PENDING, describe
+from layouts.feedback import Feedback
 from sampler import FPS
 
 ICON_SIZE = dp(26)
@@ -74,7 +75,6 @@ GRADE_COLORS = {"hit": MATCH_COLOR, "early": (0.45, 0.62, 1.0), "late": (1.0, 0.
                 "pending": (0.45, 0.45, 0.5)}
 NON_KEY_ALPHA = 0.35
 NON_KEY_ALPHA_PLAYING = 0.18  # Fainter still while playing, when only the key inputs matter.  # Target inputs outside every key input fade back once key inputs exist.
-BANNER_SECONDS = 3.5  # How long a pass's score stays up.
 CLICK_SLOP = dp(4)  # A press that moves less than this is a click, not a drag.
 
 # Lanes that can be shown or hidden, top to bottom, with their names in the gutter.
@@ -91,10 +91,6 @@ def _modifier_held(name):
     if sys.platform == "win32":
         return bool(ctypes.windll.user32.GetKeyState(_VIRTUAL_KEYS[name]) & 0x8000)
     return name in Window.modifiers
-
-
-def _hex(rgb):
-    return "".join(f"{round(c * 255):02x}" for c in rgb)
 
 
 def _texture_from_pil(image):
@@ -444,37 +440,14 @@ class InputListLayout(StencilView):
         self.note_graphics = _Pool(self.note_layer, _NoteGraphic)
         self.key_graphics = _Pool(self.key_layer, _KeyGraphic)
         self.panels = _Pool(self.panel_layer, self._make_strip)
-        self.hint = Label(markup=True, font_size=sp(14), color=(0.78, 0.78, 0.82, 1), halign="left", valign="top",
-                          size_hint=(None, None))
-        self.add_widget(self.hint)
-        self.welcome = Label(markup=True, font_size=sp(15), color=(0.9, 0.9, 0.92, 1), halign="left",
-                             valign="middle", size_hint=(None, None), padding=(dp(28), dp(22)), opacity=0)
-        with self.welcome.canvas.before:
-            Color(0.1, 0.1, 0.13, 0.97)
-            self._welcome_bg = Rectangle()
-        self.welcome.bind(pos=lambda w, pos: setattr(self._welcome_bg, "pos", pos),
-                          size=lambda w, size: setattr(self._welcome_bg, "size", size),
-                          texture_size=lambda w, size: setattr(w, "size", size))
-        self.add_widget(self.welcome)
-        self.banner = Label(markup=True, font_size=sp(18), color=(0.95, 0.95, 0.97, 1), size_hint=(None, None),
-                            padding=(dp(18), dp(10)), opacity=0)
-        with self.banner.canvas.before:
-            Color(0.08, 0.08, 0.1, 0.94)
-            self._banner_bg = Rectangle()
-        self.banner.bind(pos=lambda w, pos: setattr(self._banner_bg, "pos", pos),
-                         size=lambda w, size: setattr(self._banner_bg, "size", size),
-                         texture_size=lambda w, size: setattr(w, "size", size))
-        self.add_widget(self.banner)
         self.next_layer = InstructionGroup()
         self.canvas.after.add(self.next_layer)
         self.next_pool = _Pool(self.next_layer, self._make_strip)
         self.show_next = True  # The up-next panel, set by the app.
-        self.judgement_layer = InstructionGroup()
-        self.canvas.after.add(self.judgement_layer)
-        self.judgement_pool = _Pool(self.judgement_layer, self._make_strip)
-        self.card_buttons = BoxLayout(size_hint=(None, None), height=dp(40), spacing=dp(8), opacity=0)
-        self._card_button_specs = None
-        self.add_widget(self.card_buttons)
+        # The hint line, cards, verdicts and pass banner, shared with the other displays.
+        self.feedback = Feedback(self)
+        self.hint, self.welcome = self.feedback.hint, self.feedback.card
+        self.banner, self.card_buttons = self.feedback.banner, self.feedback.card_buttons
         self.history_cells = _Pool(self.history_layer, self._make_strip)
         self.history_texts = _Pool(self.history_text_layer, self._make_strip)
         self.labels = _Pool(self.label_layer, self._make_strip)
@@ -554,35 +527,8 @@ class InputListLayout(StencilView):
                               for name, (y, height) in lanes.items() if name in ("meter", "keys")]
 
     def set_guidance(self, hint, welcome="", buttons=()):
-        """The hint line's text, and the card's (empty hides it) with its buttons: (text, callback,
-        primary) each, under the card."""
-        if self.hint.text != hint:
-            self.hint.text = hint
-        if self.welcome.text != welcome:
-            self.welcome.text = welcome
-            self.welcome.text_size = (dp(620), None)
-        self.welcome.opacity = 1 if welcome else 0
-        specs = tuple((text, primary) for text, _, primary in buttons) if welcome else ()
-        if specs != self._card_button_specs:
-            self._card_button_specs = specs
-            self.card_buttons.clear_widgets()
-            for text, callback, primary in (buttons if welcome else ()):
-                button = Button(text=text, font_size=sp(15), bold=primary, background_normal="", background_down="",
-                                background_color=(0.25, 0.55, 0.95, 1) if primary else (1, 1, 1, 0.12))
-                button.bind(on_release=lambda *_, callback=callback: callback())
-                self.card_buttons.add_widget(button)
-        self.card_buttons.opacity = 1 if specs else 0
-        self.card_buttons.disabled = not specs
-
-    def _place_guidance(self, notes_bottom):
-        left, right = self._track_left(), self._track_right()
-        self.hint.text_size = (right - left, None)
-        self.hint.texture_update()
-        self.hint.size = (right - left, self.hint.texture_size[1])
-        self.hint.pos = (left, max(self.y + dp(12), notes_bottom - self.hint.height))
-        self.welcome.pos = (self.center_x - self.welcome.width / 2, self.center_y - self.welcome.height / 2 + dp(24))
-        self.card_buttons.width = self.welcome.width
-        self.card_buttons.pos = (self.welcome.x, self.welcome.y - self.card_buttons.height - dp(6))
+        """The hint line's text, and the card's (empty hides it) with its buttons."""
+        self.feedback.set_guidance(hint, welcome, buttons)
 
     def content_height(self, note_rows):
         """How tall the list needs to be to show everything it draws: the shown lanes, the live input
@@ -983,48 +929,6 @@ class InputListLayout(StencilView):
             y -= dp(6)
         pool.finish(lambda item: setattr(item[0], "a", 0))
 
-    def _draw_judgements(self, judgements, top):
-        """Verdicts popping up by the hit line as each key input is settled, rising as they fade."""
-        line_x = self._line_x()
-        for row, (grade, offset, notation, age) in enumerate(reversed(judgements[-3:])):
-            text = {EARLY: f"EARLY {offset:+d}", LATE: f"LATE {offset:+d}"}.get(grade, grade.upper())
-            texture = self.textures.judgement(f"{text}  [size=14sp]{notation}[/size]")
-            color, rect = self.judgement_pool.next()
-            color.rgba = (*GRADE_COLORS[grade], max(0.0, 1 - age * age))
-            rect.texture, rect.size = texture, texture.size
-            # Newest at the top, older ones below it, each drifting up as it fades.
-            rect.pos = (line_x + dp(10), top - dp(70) - row * dp(36) + age * dp(14))
-        self.judgement_pool.finish(lambda item: setattr(item[0], "a", 0))
-
-    def _show_banner(self, last_pass, top):
-        """The last pass's score for a few seconds after it ends."""
-        if not last_pass or time.monotonic() - last_pass["time"] > BANNER_SECONDS:
-            self.banner.opacity = 0
-            return
-        if last_pass["total"]:
-            perfect = last_pass["hits"] == last_pass["total"]
-            parts = [f"[b]Run {last_pass['run']}[/b]", f"[b]{last_pass['hits']}/{last_pass['total']}[/b]"]
-            if perfect:
-                parts.append("[color=5ce176][b]PERFECT[/b][/color]")
-                if last_pass["streak"] > 1:
-                    parts.append(f"{last_pass['streak']} in a row")
-            else:
-                for notation, grade, offset in last_pass["problems"][:2]:
-                    detail = {EARLY: f"{-offset}f early", LATE: f"{offset}f late"}.get(grade, "missed")
-                    parts.append(f"{notation} [color={_hex(GRADE_COLORS[grade])}]{detail}[/color]")
-                parts.append(f"best {last_pass['best']}/{last_pass['total']}")
-        elif last_pass["match"] is not None:
-            parts = [f"[b]Run {last_pass['run']}[/b]", f"matched {last_pass['match']:.0%} of frames"]
-        else:
-            self.banner.opacity = 0
-            return
-        text = "   \u00b7   ".join(parts)
-        if self.banner.text != text:
-            self.banner.text = text
-        self.banner.opacity = 1
-        # Under the lanes, clear of the live input by the line.
-        self.banner.pos = (self._line_x() + ICON_SIZE * 5, top - self.banner.height + dp(2))
-
     def _draw_selection(self, snapshot, top, bottom):
         if not self.selection or top <= bottom:
             self.selection_color.a = self.selection_edge_color.a = 0
@@ -1061,11 +965,15 @@ class InputListLayout(StencilView):
         live_y = bottom - ICON_SIZE
         self._draw_notes(snapshot.notes, snapshot, lanes_top, live_y - dp(14))
         # The hint sits under the live input, below any notes (which take up to three toast rows).
-        self._place_guidance(live_y - dp(24) - (TOAST_ROWS * dp(40) if snapshot.notes and self.show_notes else 0))
+        notes_bottom = live_y - dp(24) - (TOAST_ROWS * dp(40) if snapshot.notes and self.show_notes else 0)
+        left, right = self._track_left(), self._track_right()
+        self.feedback.place(hint=(left, max(notes_bottom, self.y + dp(60)), right - left),
+                            card_center=(self.center_x, self.center_y),
+                            verdicts=(self._line_x() + dp(10), lanes_top - dp(40)),
+                            banner=(self._line_x() + ICON_SIZE * 5, bottom + dp(2), False))
+        self.feedback.draw(snapshot.judgements, snapshot.last_pass)
         self._draw_selection(snapshot, lanes_top, bottom + LANE_GAP)
         self._draw_up_next(snapshot, lanes, lanes_top)
-        self._draw_judgements(snapshot.judgements, lanes_top)
-        self._show_banner(snapshot.last_pass, bottom)
 
         # The player's live input sits under the line, which turns green when it matches.
         live_key = snapshot.live_key

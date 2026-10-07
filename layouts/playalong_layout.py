@@ -1,6 +1,8 @@
 from kivy.uix.relativelayout import RelativeLayout
 from widgets import ButtonColumn, StickImage, DirectionalPromptWidget
 from images import get_standard_button_icon
+from kivy.metrics import dp
+from layouts.feedback import FeedbackDisplay
 
 
 # Draws the user-controlled joystick as well as the input prompts.
@@ -17,7 +19,9 @@ class JoystickLayout(RelativeLayout):
         self.directional_prompt_widget.update_state(input_frames, offset)
 
 
-class PlayAlongLayout(RelativeLayout):
+class PlayAlongLayout(FeedbackDisplay, RelativeLayout):
+    """The ring display: the stick as a spiral of upcoming directions around a circle, and the
+    buttons falling down columns, with the same practice feedback as every display."""
 
     button_names = ["A", "X", "B", "Y", "RT", "RB", "LT", "LB"]
 
@@ -36,6 +40,11 @@ class PlayAlongLayout(RelativeLayout):
             )
         for display in self.button_displays.values():
             self.add_widget(display)
+        self._init_feedback()
+
+    def verdict_spot(self):
+        # Up and to the right of the stick's middle, where inputs arrive.
+        return self.width * 0.25 + dp(110), self.height * 0.62
         self.bind(size=self.update_joystick_layout_size)
 
     def update_joystick_layout_size(self, *args):

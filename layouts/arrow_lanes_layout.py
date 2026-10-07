@@ -12,10 +12,12 @@ from kivy.graphics import Color, Rectangle
 from kivy.graphics.texture import Texture
 from kivy.resources import resource_find
 from kivy.uix.relativelayout import RelativeLayout
+from kivy.metrics import dp
 from kivy.uix.widget import Widget
 from PIL import Image, ImageDraw, ImageFilter
 
 from images import get_standard_button_icon
+from layouts.feedback import FeedbackDisplay
 from input_list import draw_direction_glyph
 from widgets import BUTTON_PROMPT_OPACITY, HOLD_TAIL_COLOR, ButtonColumn, FallingRuns, runs_of
 
@@ -133,9 +135,10 @@ class ArrowLane(Widget):
                           offset, lambda d: self.arrows[d])
 
 
-class ArrowLanesLayout(RelativeLayout):
+class ArrowLanesLayout(FeedbackDisplay, RelativeLayout):
     """Direction lanes on the left half, the button columns on the right, all falling toward the
-    bottom. Same update_state as the ring display, so it's driven the same way."""
+    bottom. Same update_state as the ring display, so it's driven the same way, and the same practice
+    feedback as every display (verdicts pop up just above the receptors)."""
 
     button_names = ["A", "X", "B", "Y", "RT", "RB", "LT", "LB"]
 
@@ -157,6 +160,11 @@ class ArrowLanesLayout(RelativeLayout):
                                   size_hint=(0.07, 1), pos_hint={"x": 0.5 + i * (0.48 / 8), "y": 0})
             self.button_columns[name] = column
             self.add_widget(column)
+        self._init_feedback()
+
+    def verdict_spot(self):
+        receptor_top = self.lanes[0].width if self.lanes else 0
+        return self.width * 0.04, receptor_top + dp(150)
 
     def update_state(self, controller_state, input_track, offset=0.0):
         directions = [frame["direction"] for frame in input_track]

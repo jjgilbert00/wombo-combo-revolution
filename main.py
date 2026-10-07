@@ -350,6 +350,7 @@ class WomboComboApp(App):
             count = max(10, round(self.input_list_layout.lookahead * FPS))
             controller_state, upcoming_frames, offset = self.playalong_controller.snapshot(count)
             self.display.update_state(controller_state, upcoming_frames, offset)
+            self.display.show_feedback(*self.playalong_controller.feedback())
 
     def select_controller(self):
         readers = find_controllers()
@@ -431,7 +432,8 @@ class WomboComboApp(App):
         card, buttons = self._card(frames)
         # Over the game, the overlay shows the list only; the hints are for the app window.
         hint = "" if self.topmost or card else self._next_step_hint()  # The card says it all when shown.
-        self.input_list_layout.set_guidance(hint, card, buttons)
+        for display in self.displays.values():  # Every display, so switching keeps the card and hint.
+            display.set_guidance(hint, card, buttons)
 
     def _card(self, frames):
         """The card in the middle of the list: getting started with nothing loaded, or a first go at
