@@ -418,7 +418,18 @@ frame. The window title shows the recording's name.
 
 **Overlay mode (F2)** keeps Wombo Combo on top of the game, borderless and see-through, so you can
 practise with the input list over the game itself. Set how see-through it is with *Overlay
-opacity* in the View menu. **F3** switches to the older ring display, if you prefer it.
+opacity* in the View menu.
+
+**Other displays.** **F3** (View > Display) cycles through three ways of showing the recording:
+
+- **Input list** (the default): inputs scroll right to left onto a line, with key inputs,
+  verdicts and your attempts.
+- **Arrow lanes**: like a dance game. Arrows fall down five lanes onto their outlines at the
+  bottom: left, down-left/up-left, down/up, down-right/up-right, right. An up arrow falls down the
+  down/up lane pointing up, and that lane's outline is a double-headed arrow that holds either.
+  The outline lights up with the direction you're holding. Buttons fall down their own columns on
+  the right.
+- **Ring**: the original display, with the stick as a spiral around a circle.
 
 ## Settings
 
@@ -447,7 +458,7 @@ Settings are saved automatically.
 |---|---|
 | F1 | Help and keys |
 | F2 | Overlay mode |
-| F3 | Switch between the input list and the ring display |
+| F3 | Next display: input list, arrow lanes, ring |
 | Shift+F3 | Show / hide notes |
 | F4 | Practice / Review |
 | F5 | Restart |

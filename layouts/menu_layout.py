@@ -223,7 +223,7 @@ class MenuBar(BoxLayout):
 
         view_menu = Menu()
         view_menu.add_item("Overlay mode", app.toggle_overlay, "F2")
-        self.display_item = view_menu.add_item("Show input list", app.toggle_display, "F3")
+        self.display_item = view_menu.add_item("Display: input list", app.toggle_display, "F3")
         self.notes_item = view_menu.add_item("Hide notes", app.toggle_notes, "Shift+F3")
         self.actions_item = view_menu.add_item("Show game actions", app.toggle_actions)
         self.next_item = view_menu.add_item("Hide up-next panel", app.toggle_up_next)
@@ -333,7 +333,8 @@ class MenuBar(BoxLayout):
         self.actions_item.label.text = "Show controller buttons" if visible else "Show game actions"
 
     def set_display_mode(self, mode):
-        self.display_item.label.text = "Show ring display" if mode == "list" else "Show input list"
+        names = {"list": "input list", "lanes": "arrow lanes", "ring": "ring"}
+        self.display_item.label.text = f"Display: {names.get(mode, mode)}"  # F3 moves to the next.
 
     def update(self, recording, playing, looping, practicing, status, demoing=False):
         self.record_button.text = "Stop" if recording else "Record"

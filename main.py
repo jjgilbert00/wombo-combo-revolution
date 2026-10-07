@@ -41,6 +41,7 @@ from key_inputs import demo_track, derive, derive_hold, describe, normalized
 from layouts.input_list_layout import LANES, InputListLayout
 from games import GAMES
 from layouts.menu_layout import AttemptsPopup, ButtonMapPopup, GameActionsPopup, HelpPopup, KeyInputPopup, Menu, MenuBar, NotePopup, SettingsPopup
+from layouts.arrow_lanes_layout import ArrowLanesLayout
 from layouts.playalong_layout import PlayAlongLayout
 from playalong import PlayalongController
 from sampler import FPS, InputSampler
@@ -54,7 +55,7 @@ TITLE = "Wombo Combo"
 HOTKEYS = [
     ("F1", "Help and keys", "show_help"),
     ("F2", "Overlay mode (on top, borderless)", "toggle_overlay"),
-    ("F3", "Switch between ring and input list", "toggle_display"),
+    ("F3", "Next display: input list, arrow lanes, ring", "toggle_display"),
     ("Shift+F3", "Show / hide notes", "toggle_notes"),
     ("F4", "Practice on/off (record your attempt while playing)", "toggle_practice"),
     ("F5", "Restart playback", "restart_playback"),
@@ -167,7 +168,9 @@ class WomboComboApp(App):
 
         self.playalong_controller.set_looping(self.config.getboolean("wombo", "loop"))
         self.playalong_layout = PlayAlongLayout()
+        self.arrow_lanes_layout = ArrowLanesLayout()
         self.input_list_layout = InputListLayout()
+        self.displays = {"list": self.input_list_layout, "lanes": self.arrow_lanes_layout, "ring": self.playalong_layout}
         self.input_list_layout.set_lookahead(self.config.getfloat("wombo", "lookahead"))
         self.input_list_layout.on_scrub = self.scrub
         self.input_list_layout.on_zoom = self.set_list_zoom
@@ -342,9 +345,9 @@ class WomboComboApp(App):
             self.input_list_layout.update_state(self.playalong_controller.list_snapshot(frames_before, frames_after))
             if self.topmost:
                 self._fit_overlay()
-        else:
+        else:  # The arrow lanes and the ring are drawn from the same upcoming frames.
             controller_state, upcoming_frames = self.playalong_controller.snapshot()
-            self.playalong_layout.update_state(controller_state, upcoming_frames)
+            self.display.update_state(controller_state, upcoming_frames)
 
     def select_controller(self):
         readers = find_controllers()
@@ -1172,7 +1175,8 @@ class WomboComboApp(App):
             self._set_on_top(True)
 
     def show_display(self, mode):
-        display = self.input_list_layout if mode == "list" else self.playalong_layout
+        mode = mode if mode in self.displays else "list"
+        display = self.displays[mode]
         if self.display:
             self.root_layout.remove_widget(self.display)
         self.root_layout.add_widget(display)  # Added last, so it sits below the menu bar.
@@ -1241,7 +1245,10 @@ class WomboComboApp(App):
         self.set_notes_visible(not self.input_list_layout.show_notes)
 
     def toggle_display(self):
-        self.show_display("ring" if self.display is self.input_list_layout else "list")
+        """The next display in turn: input list, arrow lanes, ring."""
+        modes = list(self.displays)
+        current = next(mode for mode, display in self.displays.items() if display is self.display)
+        self.show_display(modes[(modes.index(current) + 1) % len(modes)])
 
     def show_help(self):
         steps = [
