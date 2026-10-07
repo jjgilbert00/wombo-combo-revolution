@@ -331,6 +331,14 @@ class _Textures:
             self.counts[text] = _text_texture(text, COUNT_FONT_SIZE)
         return self.counts[text]
 
+    def up_next(self, text, size, colour):
+        key = (text, size, colour)
+        if key not in self.judgements:
+            label = MarkupLabel(text=f"[color={colour}]{text}[/color]", font_size=size, bold=True)
+            label.refresh()
+            self.judgements[key] = label.texture
+        return self.judgements[key]
+
     def judgement(self, text):
         if text not in self.judgements:
             label = MarkupLabel(text=text, font_size=sp(24), bold=True, outline_width=2, outline_color=(0, 0, 0))
@@ -456,6 +464,10 @@ class InputListLayout(StencilView):
                          size=lambda w, size: setattr(self._banner_bg, "size", size),
                          texture_size=lambda w, size: setattr(w, "size", size))
         self.add_widget(self.banner)
+        self.next_layer = InstructionGroup()
+        self.canvas.after.add(self.next_layer)
+        self.next_pool = _Pool(self.next_layer, self._make_strip)
+        self.show_next = True  # The up-next panel, set by the app.
         self.judgement_layer = InstructionGroup()
         self.canvas.after.add(self.judgement_layer)
         self.judgement_pool = _Pool(self.judgement_layer, self._make_strip)
@@ -921,6 +933,53 @@ class InputListLayout(StencilView):
         self.history_cells.finish(hide)
         self.history_texts.finish(hide)
 
+    def _draw_up_next(self, snapshot, lanes, top):
+        """A still panel left of the line with the next inputs to make, biggest first, so they can be
+        read without following them across the screen. A bar under the first fills as it nears the
+        line, then (gold) runs through its window while it can be done."""
+        pool = self.next_pool
+        upcoming = snapshot.upcoming if self.show_next else ()
+        left, right = self._track_left() + dp(8), self._line_x() - dp(12)
+        if not upcoming or right - left < dp(120):
+            pool.finish(lambda item: setattr(item[0], "a", 0))
+            return
+        bottom_lane = min((y for name, (y, height) in lanes.items() if not isinstance(name, tuple)), default=top)
+        rows = []
+        for row, (notation, start, end) in enumerate(upcoming):
+            size = sp(34) if row == 0 else sp(20)
+            colour = "ffffff" if row == 0 else "a8a8b0"
+            rows.append(self.textures.up_next(notation, size, colour))
+        height = sum(texture.height + dp(6) for texture in rows) + dp(26)
+        panel_top = top - dp(4)
+        panel_bottom = max(bottom_lane, panel_top - height)
+        color, rect = pool.next()
+        color.rgba = (0.06, 0.06, 0.08, 0.88)
+        rect.texture, rect.pos, rect.size = None, (left, panel_bottom), (right - left, panel_top - panel_bottom)
+        y = panel_top - dp(8)
+        for row, texture in enumerate(rows):
+            y -= texture.height
+            color, rect = pool.next()
+            color.rgba = (1, 1, 1, 1)
+            rect.texture, rect.size, rect.pos = texture, texture.size, (left + dp(12), y)
+            if row == 0:
+                notation, start, end = upcoming[0]
+                frames_to_go = start - snapshot.position
+                bar_y, bar_width = y - dp(10), right - left - dp(24)
+                color, rect = pool.next()
+                color.rgba = (1, 1, 1, 0.12)
+                rect.texture, rect.pos, rect.size = None, (left + dp(12), bar_y), (bar_width, dp(6))
+                color, rect = pool.next()
+                if frames_to_go > 0:  # Counting down to the window: fills as it nears the line.
+                    fill = max(0.0, 1 - frames_to_go / (self.lookahead * FPS))
+                    color.rgba = (1, 1, 1, 0.85)
+                else:  # In the window now: runs down to its end.
+                    fill = max(0.0, 1 - (snapshot.position - start) / max(1, end + 1 - start))
+                    color.rgba = (*KEY_COLOR, 1)
+                rect.texture, rect.pos, rect.size = None, (left + dp(12), bar_y), (bar_width * fill, dp(6))
+                y = bar_y - dp(6)
+            y -= dp(6)
+        pool.finish(lambda item: setattr(item[0], "a", 0))
+
     def _draw_judgements(self, judgements, top):
         """Verdicts popping up by the hit line as each key input is settled, rising as they fade."""
         line_x = self._line_x()
@@ -1001,6 +1060,7 @@ class InputListLayout(StencilView):
         # The hint sits under the live input, below any notes (which take up to three toast rows).
         self._place_guidance(live_y - dp(24) - (TOAST_ROWS * dp(40) if snapshot.notes and self.show_notes else 0))
         self._draw_selection(snapshot, lanes_top, bottom + LANE_GAP)
+        self._draw_up_next(snapshot, lanes, lanes_top)
         self._draw_judgements(snapshot.judgements, lanes_top)
         self._show_banner(snapshot.last_pass, bottom)
 

@@ -140,7 +140,8 @@ class WomboComboApp(App):
             "lookahead": 1.5,  # Seconds of input shown ahead of the line: the scroll speed.
             "input_display": "list",  # The input list is where practice happens; the ring is optional.
             "show_notes": 1,
-            "show_actions": 1,  # Show a game's actions (a medium punch, a Drive Impact) instead of buttons.
+            "show_actions": 1,
+            "show_next": 1,  # The up-next panel left of the hit line.  # Show a game's actions (a medium punch, a Drive Impact) instead of buttons.
             "default_game": "sf6",  # Game for new recordings, and old ones that don't say.
             "first_run": 1,  # Opens the warm-up the first time the app starts.
             "lanes": ",".join(LANES),  # Input list lanes shown.
@@ -185,6 +186,7 @@ class WomboComboApp(App):
         self.set_notes_visible(self.config.getboolean("wombo", "show_notes"))
         self.set_game(self.default_game(), None, mark_edited=False)
         self.set_actions_visible(self.config.getboolean("wombo", "show_actions"))
+        self.set_up_next_visible(self.config.getboolean("wombo", "show_next"))
         self.set_lanes_shown(set(filter(None, self.config.get("wombo", "lanes").split(","))))
         self.menu_bar.set_recent(self.recent_recordings())
         return self.root_layout
@@ -1188,6 +1190,14 @@ class WomboComboApp(App):
         self.input_list_layout.textures.buttons.game = game
         if mark_edited:
             self.unsaved_edits = True
+
+    def set_up_next_visible(self, visible):
+        self.input_list_layout.show_next = visible
+        self.config.set("wombo", "show_next", int(visible))
+        self.menu_bar.set_up_next_visible(visible)
+
+    def toggle_up_next(self):
+        self.set_up_next_visible(not self.input_list_layout.show_next)
 
     def set_actions_visible(self, visible):
         self.playalong_controller.show_actions = visible

@@ -18,8 +18,8 @@ MAX_RUNS = 50  # Recent attempts kept in memory.
 ListSnapshot = namedtuple(
     "ListSnapshot",
     "live_state frame recording target_runs attempt_runs match_runs notes key_inputs history live_key judgements "
-    "last_pass position playing",
-    defaults=(0.0, False),
+    "last_pass position playing upcoming",
+    defaults=(0.0, False, ()),
 )
 # One earlier attempt in the input list: its label, its key input grades as (start, end, grade, offset),
 # when the track has no key inputs its per-frame match runs instead, and whether it's a saved attempt.
@@ -307,7 +307,28 @@ class PlayalongController:
         moving = self.running_state != RUNNING_STATES.STOPPED
         progress = min(1.0, max(0.0, (time.perf_counter() - self._last_tick) * FPS)) if moving else 0.0
         return snapshot._replace(position=snapshot.frame + progress,
-                                 playing=self.running_state == RUNNING_STATES.PLAYING)
+                                 playing=self.running_state == RUNNING_STATES.PLAYING,
+                                 upcoming=self._upcoming(snapshot.frame))
+
+    def _upcoming(self, frame, count=3):
+        """The next inputs to make from this frame, as (notation, start, end): the key inputs not yet
+        over, or without any, the next changes of input in the recording. For the up-next panel."""
+        with self._lock:
+            if self.running_state == RUNNING_STATES.RECORDING or not self.input_track:
+                return ()
+            if self.key_inputs:
+                return tuple((describe(self._shown_key_input(k)), k["start"], k["end"])
+                             for k in self.key_inputs if k["end"] >= frame)[:count]
+            upcoming = []
+            for start, length, key in runs_in_range(self.input_track, max(frame, 0), len(self.input_track)):
+                direction, buttons = self._shown_key(key, self.input_track, start)
+                if (direction, buttons) == (5, ()) or start + length <= frame:
+                    continue
+                notation = ("" if direction == 5 else str(direction)) + "+".join(buttons)
+                upcoming.append((notation, start, start + length - 1))
+                if len(upcoming) == count:
+                    break
+            return tuple(upcoming)
 
     def _list_snapshot(self, frames_before, frames_after):
         with self._lock:

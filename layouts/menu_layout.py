@@ -226,6 +226,7 @@ class MenuBar(BoxLayout):
         self.display_item = view_menu.add_item("Show input list", app.toggle_display, "F3")
         self.notes_item = view_menu.add_item("Hide notes", app.toggle_notes, "Shift+F3")
         self.actions_item = view_menu.add_item("Show game actions", app.toggle_actions)
+        self.next_item = view_menu.add_item("Hide up-next panel", app.toggle_up_next)
         view_menu.add_item("Help and keys", app.show_help, "F1")
         view_menu.add_separator()
         # Input list lanes, each shown or hidden; the right column says which.
@@ -324,6 +325,9 @@ class MenuBar(BoxLayout):
 
     def set_notes_visible(self, visible):
         self.notes_item.label.text = "Hide notes" if visible else "Show notes"
+
+    def set_up_next_visible(self, visible):
+        self.next_item.label.text = "Hide up-next panel" if visible else "Show up-next panel"
 
     def set_actions_visible(self, visible):
         self.actions_item.label.text = "Show controller buttons" if visible else "Show game actions"
