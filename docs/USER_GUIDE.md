@@ -17,6 +17,7 @@ Frame by frame, and attempt after attempt.
 - [Demoing a combo in game](#demoing-a-combo-in-game)
 - [Saving, opening and files](#saving-opening-and-files)
 - [Videos and overlay mode](#videos-and-overlay-mode)
+- [Displays](#displays)
 - [Settings](#settings)
 - [Keys and mouse reference](#keys-and-mouse-reference)
 - [Troubleshooting](#troubleshooting)
@@ -417,19 +418,31 @@ frame. The window title shows the recording's name.
   the game's own input lag in the video.
 
 **Overlay mode (F2)** keeps Wombo Combo on top of the game, borderless and see-through, so you can
-practise with the input list over the game itself. Set how see-through it is with *Overlay
-opacity* in the View menu.
+practise over the game itself. Set how see-through it is with *Overlay opacity* in the View menu.
+With the input list, the overlay shrinks to what the list draws, so it covers as little of the
+game as possible; with the arrow lanes or ring it keeps its full height.
 
-**Other displays.** **F3** (View > Display) cycles through three ways of showing the recording:
+## Displays
 
-- **Input list** (the default): inputs scroll right to left onto a line, with key inputs,
-  verdicts and your attempts.
+There are three ways to show the recording, and all of them do the same job, so pick whichever
+reads best for you. Choose one in *View > Display*, or press **F3** to cycle through them. Each
+display shows the practice feedback: the getting-started card, the hint line, a verdict (HIT,
+EARLY, LATE, MISS) as each key input is settled, and your score after each pass. Scroll speed
+(*Settings > Scroll speed*, or **Ctrl+Wheel**) and the lead-in apply to all three.
+
+- **Input list** (the default): inputs scroll right to left onto a line, with the frame meter,
+  key inputs, notes, the up-next panel and your recent and saved attempts.
 - **Arrow lanes**: like a dance game. Arrows fall down five lanes onto their outlines at the
   bottom: left, down-left/up-left, down/up, down-right/up-right, right. An up arrow falls down the
   down/up lane pointing up, and that lane's outline is a double-headed arrow that holds either.
   The outline lights up with the direction you're holding. Buttons fall down their own columns on
   the right.
-- **Ring**: the original display, with the stick as a spiral around a circle.
+- **Ring**: the stick as a spiral of upcoming directions around a circle, with the buttons falling
+  down columns beside it.
+
+**Held inputs.** In every display a held input is one icon with a tail behind it as long as it's
+held, like a dance game's hold notes, rather than a stack of icons. Hold it until the tail has
+passed.
 
 ## Settings
 
