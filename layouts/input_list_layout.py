@@ -20,6 +20,7 @@ from images import get_standard_button_icon
 from input_list import LIST_BUTTON_ORDER, draw_direction_glyph, input_key
 from games import GAMES, draw_action_icon
 from key_inputs import EARLY, LATE, PENDING, describe
+from sampler import FPS
 
 ICON_SIZE = dp(26)
 # A label is one icon wide: frame count on top, then the direction, then pressed buttons in a column.
@@ -39,11 +40,13 @@ RUN_LANE_GAP = dp(3)
 LANE_GAP = dp(8)
 LINE_FRACTION = 0.25  # Position of the hit line, as a fraction of the track width.
 
-# By default one frame is exactly one label wide, so every input has room for its label. Zooming
-# out shows more of the track; boxes then too narrow for a label just show the box.
-DEFAULT_PX_PER_FRAME = LABEL_WIDTH
-MIN_PX_PER_FRAME = dp(4)
-MAX_PX_PER_FRAME = dp(64)
+# The scroll speed is set by how far ahead of the line inputs appear, in seconds: the space right of
+# the line holds that much time. 1.5 s is a comfortable pace to read and react to; rhythm games give
+# similar warning. Frames are as wide as that makes them, so short inputs can be narrower than
+# their labels (see _draw_runs).
+DEFAULT_LOOKAHEAD = 1.5
+MIN_LOOKAHEAD, MAX_LOOKAHEAD = 0.4, 8.0
+DEFAULT_PX_PER_FRAME = LABEL_WIDTH  # Until the list has a size to work it out from.
 
 PANEL_COLOR = (0, 0, 0, 0.35)
 GUTTER_COLOR = (0.08, 0.08, 0.1, 1)
@@ -381,13 +384,14 @@ class InputListLayout(StencilView):
         super().__init__(**kwargs)
         self.textures = _Textures(controller_type, button_icon_style)
         self.px_per_frame = DEFAULT_PX_PER_FRAME
+        self.lookahead = DEFAULT_LOOKAHEAD  # Seconds of input shown ahead of the line.
         self.show_notes = True  # When off, notes only show as bars over their frames.
         self.dim_non_key = False  # Set by the app while the track has key inputs.
         self.lanes_shown = set(LANES)  # Set by the app; the key inputs lane also needs key inputs.
         self._history = []  # History rows from the last snapshot, one lane each.
         self.note_rows_used = 0  # Rows of note toasts in the last frame drawn.
         self.on_scrub = None  # Called with a frame delta when the user scrolls or drags.
-        self.on_zoom = None  # Called with the new pixels-per-frame.
+        self.on_zoom = None  # Called with the new lookahead, in seconds.
         self.on_select = None  # Called with (start, end) frames, inclusive, when the user selects frames.
         self.on_note_click = None  # Called with a note's index when its toast is clicked.
         self.on_key_input_click = None  # Called with a key input's index when its tag is clicked.
@@ -579,8 +583,19 @@ class InputListLayout(StencilView):
             lowest -= dp(14) + BRACE_HEIGHT + min(note_rows, TOAST_ROWS) * dp(40)
         return self.top - lowest + dp(8)
 
+    def _apply_speed(self):
+        """Frames as wide as the lookahead makes them, for the current size."""
+        ahead = self._track_right() - self._line_x()
+        if ahead > 0:
+            self.px_per_frame = max(dp(1.5), ahead / (self.lookahead * FPS))
+
+    def set_lookahead(self, seconds):
+        self.lookahead = max(MIN_LOOKAHEAD, min(MAX_LOOKAHEAD, seconds))
+        self._apply_speed()
+
     def frames_needed(self):
         """How many frames fit (before, after) the hit line."""
+        self._apply_speed()
         line_x = self._line_x()
         return (int((line_x - self._track_left()) / self.px_per_frame) + 2,
                 int((self._track_right() - line_x) / self.px_per_frame) + 2)
@@ -589,7 +604,8 @@ class InputListLayout(StencilView):
         return int(self._frame + (x - self._line_x()) // self.px_per_frame)
 
     def set_zoom(self, px_per_frame):
-        self.px_per_frame = max(MIN_PX_PER_FRAME, min(MAX_PX_PER_FRAME, px_per_frame))
+        """Sets the speed by frame width instead (for the current size)."""
+        self.set_lookahead((self._track_right() - self._line_x()) / (px_per_frame * FPS))
 
     # ---- Scrolling ---------------------------------------------------------------------------
 
@@ -606,9 +622,10 @@ class InputListLayout(StencilView):
             # Kivy reports wheel-away-from-you as "scrolldown"; that moves forward in time.
             direction = {"scrolldown": 1, "scrollright": 1, "scrollup": -1, "scrollleft": -1}.get(touch.button, 0)
             if _modifier_held("ctrl"):
-                self.set_zoom(self.px_per_frame * (1.25 if direction > 0 else 0.8))
+                # Zooming in shows less time ahead, so inputs move faster across the wider frames.
+                self.set_lookahead(self.lookahead * (0.8 if direction > 0 else 1.25))
                 if self.on_zoom:
-                    self.on_zoom(self.px_per_frame)
+                    self.on_zoom(self.lookahead)
             elif direction and self.on_scrub:
                 self.on_scrub(direction)  # One frame per wheel notch, for frame-by-frame stepping.
             return True
@@ -667,6 +684,8 @@ class InputListLayout(StencilView):
     def _draw_runs(self, pool, runs, snapshot, lane_y, color, dim_history, key_windows=None):
         line_x = self._line_x()
         track_left, track_right = self._track_left(), self._track_right()
+        label_edge = track_left  # Right edge of the last label drawn in this lane...
+        last_label = None  # ...and (its box, its priority), so a more important input can take its place.
         for start, length, key in runs:
             x0 = self._frame_x(start, snapshot.position)
             x1 = x0 + length * self.px_per_frame
@@ -686,17 +705,28 @@ class InputListLayout(StencilView):
             box.edge.pos = (x0, lane_y)
             box.edge.size = (dp(1), LANE_HEIGHT)
             # Labels are all the same size, anchored to the edge where the input starts. A held run
-            # keeps its label just right of the line, and a long run's label stays in view. When
-            # zoomed out, runs too narrow for a label show only the box.
-            if x1 - x0 < LABEL_WIDTH:
-                box.content_color.a = 0
-                continue
+            # keeps its label just right of the line, and a long run's label stays in view. A run
+            # too short for its label (a quick tap) still gets one if there's room before it's
+            # covered by the next, so it reads like a rhythm-game note; neutral ones give way.
+            wide = x1 - x0 >= LABEL_WIDTH
+            in_key = key_windows is None or any(s <= start + length - 1 and start <= e for s, e in key_windows)
+            priority = (not neutral, in_key, bool(key[1]), wide)
+            if not wide and (neutral or x0 + LABEL_PADDING < label_edge):
+                # Where labels clash, the input that matters more keeps its label: one a key input
+                # needs, then one with buttons, over a brief stray direction.
+                if neutral or not last_label or priority <= last_label[1]:
+                    box.content_color.a = 0
+                    continue
+                last_label[0].content_color.a = 0
             box.content_color.a = alpha
             label_x = x0 + LABEL_PADDING
-            label_right = x1 - ICON_SIZE - LABEL_PADDING
-            label_x = max(label_x, min(track_left + LABEL_PADDING, label_right))
-            if active:
-                label_x = max(label_x, min(line_x + LABEL_PADDING, label_right))
+            if wide:
+                label_right = x1 - ICON_SIZE - LABEL_PADDING
+                label_x = max(label_x, min(track_left + LABEL_PADDING, label_right))
+                if active:
+                    label_x = max(label_x, min(line_x + LABEL_PADDING, label_right))
+            label_edge = label_x + LABEL_WIDTH
+            last_label = (box, priority)
             box.label.set_stacked(label_x, lane_y + LANE_HEIGHT - dp(4), key, self.textures,
                                   self.textures.count(length))
         pool.finish(_Box.hide)

@@ -137,7 +137,7 @@ class WomboComboApp(App):
             "opacity": 0.5,
             "loop": 1,
             "practice": 1,
-            "list_frame_width": 0,  # Pixels per frame in the input list; 0 = one label wide.
+            "lookahead": 1.5,  # Seconds of input shown ahead of the line: the scroll speed.
             "input_display": "list",  # The input list is where practice happens; the ring is optional.
             "show_notes": 1,
             "show_actions": 1,  # Show a game's actions (a medium punch, a Drive Impact) instead of buttons.
@@ -167,9 +167,7 @@ class WomboComboApp(App):
         self.playalong_controller.set_looping(self.config.getboolean("wombo", "loop"))
         self.playalong_layout = PlayAlongLayout()
         self.input_list_layout = InputListLayout()
-        frame_width = self.config.getfloat("wombo", "list_frame_width")
-        if frame_width:
-            self.input_list_layout.set_zoom(dp(frame_width))
+        self.input_list_layout.set_lookahead(self.config.getfloat("wombo", "lookahead"))
         self.input_list_layout.on_scrub = self.scrub
         self.input_list_layout.on_zoom = self.set_list_zoom
         self.input_list_layout.on_select = self.set_selection
@@ -556,8 +554,8 @@ class WomboComboApp(App):
             controller.pause()
             controller.set_frame(controller.get_current_frame() + frames)
 
-    def set_list_zoom(self, px_per_frame):
-        self.config.set("wombo", "list_frame_width", round(px_per_frame / dp(1), 1))
+    def set_list_zoom(self, lookahead):
+        self.config.set("wombo", "lookahead", round(lookahead, 2))
 
     def set_selection(self, start, end=None):
         """Selects frames start..end (inclusive, either order) of the track, or clears with None."""
@@ -1308,6 +1306,10 @@ class WomboComboApp(App):
              self.config.get("wombo", "overlay_delay"), setter("overlay_delay")),
             ("Export overlay on save", bool, self.config.getboolean("wombo", "export_overlay_on_save"),
              setter("export_overlay_on_save")),
+            ("Scroll speed", [("Fast: 0.75 s ahead", "0.75"), ("1 s ahead", "1.0"), ("1.5 s ahead", "1.5"),
+                              ("2 s ahead", "2.0"), ("Slow: 3 s ahead", "3.0")],
+             str(self.config.getfloat("wombo", "lookahead")),
+             setter("lookahead", lambda: self.input_list_layout.set_lookahead(self.config.getfloat("wombo", "lookahead")))),
             ("Lead-in before practice", [("Off", "0"), ("0.5 s", "30"), ("1 s", "60"), ("2 s", "120")],
              self.config.get("wombo", "lead_in"),
              setter("lead_in", lambda: setattr(self.playalong_controller, "lead_in",
