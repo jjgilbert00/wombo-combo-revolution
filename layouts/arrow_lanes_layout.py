@@ -6,7 +6,8 @@ left, down-left/up-left, down/up, down-right/up-right, right. An arrow falls in 
 own way, so an up arrow comes down the down/up lane pointing up. At the bottom of each lane is its
 receptor: the outline of every arrow the lane holds, centred on each other, which lights up with
 the arrow the player is holding. In a shared lane one arrow is drawn in front, crisp, over a faint
-one behind: the down one (the lane's first) unless an up one is the next to arrive.
+one behind: the down one (the lane's first) unless an up one is at the receptor or the next to
+arrive. A held input stays in front until its last frame has passed.
 """
 from kivy.graphics import Color, Rectangle
 from kivy.resources import resource_find
@@ -113,9 +114,10 @@ class ArrowLane(Widget):
         icon = self._icon()
         mine = [d if d in self.directions else None for d in input_frames]
         runs = runs_of(mine)
-        # The arrow in front is the next one still to arrive (not one already at the receptor, so an
-        # up shows while a down charge is held), else the one held, else the lane's first.
-        front = next((d for first, _, d in runs if first > 0),
+        # The arrow in front is the one at the receptor or the next to arrive: one being held (a down
+        # charge, say) stays in front until its last frame has passed. Else the one the player is
+        # holding, else the lane's first.
+        front = next((d for _, _, d in runs),
                      direction if direction in self.directions else self.directions[0])
         self.receptor.texture = self.receptors[front].texture
         self.receptor_knock.texture = self.receptors[front].silhouette
