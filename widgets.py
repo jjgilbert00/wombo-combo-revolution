@@ -50,6 +50,7 @@ class DirectionalPromptWidget(Widget):
         self.arcs = []
         self.inner_circle_radius = self.width * 0.09
         self.outer_circle_radius = self.width / 2
+        self.offset = 0.0  # How far through the current frame, so prompts move smoothly.
         with self.canvas:
             Color(*GUIDE_COLOR)
             self.inner_border = Line()
@@ -69,6 +70,7 @@ class DirectionalPromptWidget(Widget):
         self.outer_border.circle = (*self.center_point, self.outer_circle_radius)
 
     def _point(self, direction, index, count):
+        index = max(0.0, index - self.offset)
         radius = self.inner_circle_radius + index / count * (self.outer_circle_radius - self.inner_circle_radius)
         angle = math.radians(self.direction_to_angle[direction])
         return self.center_point[0] + radius * math.cos(angle), self.center_point[1] + radius * math.sin(angle)
@@ -127,7 +129,8 @@ class DirectionalPromptWidget(Widget):
             mid_angle = (self.direction_to_angle[current] + self.direction_to_angle[following]) / 2
             if {current, following} == {3, 6}:  # 315 and 0 degrees are neighbours.
                 mid_angle += 180
-            end_radius = self.inner_circle_radius + (i + 1) / count * (self.outer_circle_radius - self.inner_circle_radius)
+            end_radius = self.inner_circle_radius + max(0.0, i + 1 - self.offset) / count * (
+                self.outer_circle_radius - self.inner_circle_radius)
             mid_radius = end_radius * 15 / 14  # 15/14 is a magic number that makes the arcs look good
             mid = (
                 self.center_point[0] + mid_radius * math.cos(math.radians(mid_angle)),
@@ -139,9 +142,10 @@ class DirectionalPromptWidget(Widget):
         for arc in self.arcs[arc_counter:]:
             arc.points = []
 
-    def update_state(self, input_frames):
+    def update_state(self, input_frames, offset=0.0):
         if not input_frames:
             input_frames = [5]
+        self.offset = offset
         self.draw_lines(input_frames)
         self.draw_arcs(input_frames)
         self.draw_dots(input_frames)
@@ -173,7 +177,7 @@ class ButtonColumn(Widget):
         self.button.pos = self.pos
         self.button.size = self._icon_size()
 
-    def update_state(self, pressed, input_frames):
+    def update_state(self, pressed, input_frames, offset=0.0):
         self.button_color.a = 1 if pressed else BUTTON_RELEASED_OPACITY
         icon_size = self._icon_size()
         travel = self.height - icon_size[1]
@@ -187,7 +191,7 @@ class ButtonColumn(Widget):
                 self.prompts.append(prompt)
                 self.prompt_group.add(prompt)
             prompt = self.prompts[shown]
-            prompt.pos = (self.x, self.y + travel * i / count)
+            prompt.pos = (self.x, self.y + travel * max(0.0, i - offset) / count)
             prompt.size = icon_size
             shown += 1
         for prompt in self.prompts[shown : self.visible_prompts]:

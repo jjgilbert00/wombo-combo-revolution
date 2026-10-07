@@ -292,12 +292,20 @@ class PlayalongController:
                 self.running_state = RUNNING_STATES.STOPPED
                 self._archive_attempt()  # Kept on screen to review, and in the history.
 
-    def snapshot(self):
-        """Returns (live controller state, upcoming frames to prompt) for the view."""
+    def snapshot(self, count=PLAYALONG_FRAMELENGTH):
+        """For the ring and arrow lanes displays: (live controller state, the next count frames to
+        prompt, how far through the current frame the clock is). During a lead-in the frames start
+        with neutral ones for the run-up, so the first inputs scroll in rather than wait."""
         with self._lock:
             if self.running_state == RUNNING_STATES.RECORDING:
-                return self.live_state, []
-            return self.live_state, [map_state(frame, self.button_map) for frame in self.get_playalong_frames()]
+                return self.live_state, [], 0.0
+            lead = min(self._lead, count)
+            frames = [get_neutral_controller_state() for _ in range(lead)]
+            frames += self.input_track[self.current_frame:self.current_frame + count - lead]
+            frames += [get_neutral_controller_state() for _ in range(count - len(frames))]
+            moving = self.running_state == RUNNING_STATES.PLAYING
+            offset = min(1.0, max(0.0, (time.perf_counter() - self._last_tick) * FPS)) if moving else 0.0
+            return self.live_state, [map_state(frame, self.button_map) for frame in frames], offset
 
     def list_snapshot(self, frames_before, frames_after):
         """Target runs, attempt runs and per-frame matches around the playhead, for the input list.

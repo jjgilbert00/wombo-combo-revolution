@@ -12,9 +12,9 @@ class JoystickLayout(RelativeLayout):
         self.directional_prompt_widget = DirectionalPromptWidget(pos_hint={"center_x": 0.5, "center_y": 0.5})
         self.add_widget(self.directional_prompt_widget)
 
-    def update_state(self, direction, input_frames):
+    def update_state(self, direction, input_frames, offset=0.0):
         self.stick_image.update_state(direction)
-        self.directional_prompt_widget.update_state(input_frames)
+        self.directional_prompt_widget.update_state(input_frames, offset)
 
 
 class PlayAlongLayout(RelativeLayout):
@@ -41,6 +41,7 @@ class PlayAlongLayout(RelativeLayout):
     def update_joystick_layout_size(self, *args):
         self.button_displays['direction'].height = self.width * 0.5
 
-    def update_state(self, controller_state, input_track):
+    def update_state(self, controller_state, input_track, offset=0.0):
+        """offset is how far through the current frame the clock is, for smooth movement."""
         for button, display in self.button_displays.items():
-            display.update_state(controller_state[button], [frame[button] for frame in input_track])
+            display.update_state(controller_state[button], [frame[button] for frame in input_track], offset)

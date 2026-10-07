@@ -346,8 +346,10 @@ class WomboComboApp(App):
             if self.topmost:
                 self._fit_overlay()
         else:  # The arrow lanes and the ring are drawn from the same upcoming frames.
-            controller_state, upcoming_frames = self.playalong_controller.snapshot()
-            self.display.update_state(controller_state, upcoming_frames)
+            # As much time ahead as the scroll speed setting says, like the input list.
+            count = max(10, round(self.input_list_layout.lookahead * FPS))
+            controller_state, upcoming_frames, offset = self.playalong_controller.snapshot(count)
+            self.display.update_state(controller_state, upcoming_frames, offset)
 
     def select_controller(self):
         readers = find_controllers()

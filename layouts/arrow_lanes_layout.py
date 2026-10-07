@@ -117,8 +117,9 @@ class ArrowLane(Widget):
         self.receptor.pos = self.held.pos = self.pos
         self.receptor.size = self.held.size = self._icon()
 
-    def update_state(self, direction, input_frames):
-        """direction is the one held now; input_frames the upcoming frames' directions."""
+    def update_state(self, direction, input_frames, offset=0.0):
+        """direction is the one held now; input_frames the upcoming frames' directions; offset how
+        far through the current frame the clock is."""
         if direction in self.directions:
             self.held.texture = self.arrows[direction]
             self.held_color.a = 1
@@ -137,7 +138,7 @@ class ArrowLane(Widget):
                 self.prompt_group.add(prompt)
             prompt = self.prompts[shown]
             prompt.texture = self.arrows[frame_direction]
-            prompt.pos = (self.x, self.y + travel * i / count)
+            prompt.pos = (self.x, self.y + travel * max(0.0, i - offset) / count)
             prompt.size = icon
             shown += 1
         for prompt in self.prompts[shown:self.visible_prompts]:
@@ -170,9 +171,9 @@ class ArrowLanesLayout(RelativeLayout):
             self.button_columns[name] = column
             self.add_widget(column)
 
-    def update_state(self, controller_state, input_track):
+    def update_state(self, controller_state, input_track, offset=0.0):
         directions = [frame["direction"] for frame in input_track]
         for lane in self.lanes:
-            lane.update_state(controller_state["direction"], directions)
+            lane.update_state(controller_state["direction"], directions, offset)
         for name, column in self.button_columns.items():
-            column.update_state(controller_state[name], [frame[name] for frame in input_track])
+            column.update_state(controller_state[name], [frame[name] for frame in input_track], offset)
