@@ -18,7 +18,7 @@ from PIL import Image, ImageChops, ImageFilter
 from images import get_standard_button_icon
 from layouts.feedback import FeedbackDisplay
 from input_list import draw_direction_glyph
-from widgets import (BUTTON_PROMPT_OPACITY, HOLD_TAIL_COLOR, OFFSCREEN, ButtonColumn, FallingRuns, Knockout,
+from widgets import (HOLD_TAIL_COLOR, OFFSCREEN, ButtonColumn, FallingRuns, Knockout,
                      runs_of, silhouette_of, texture_of)
 
 DEFAULT_LANES = ((4,), (1, 7), (2, 8), (3, 9), (6,))  # Left to right.
@@ -94,7 +94,7 @@ class ArrowLane(Widget):
             self.receptor = Rectangle(texture=receptors[directions[0]][0])
             self.held_color = Color(1, 1, 1, 0)
             self.held = Rectangle()
-        self.canvas.add(Color(1, 1, 1, BUTTON_PROMPT_OPACITY))
+        self.canvas.add(Color(1, 1, 1, 1))  # Falling arrows are solid.
         self.canvas.add(self.falling.head_group)
         self.bind(pos=self._layout, size=self._layout)
 
