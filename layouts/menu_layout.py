@@ -2,9 +2,10 @@ import os
 
 from kivy.clock import Clock
 from kivy.core.window import Window
-from kivy.graphics import Color, Ellipse, Rectangle, Triangle
+from kivy.graphics import Color, Ellipse, Rectangle, RoundedRectangle, Triangle
 from kivy.metrics import dp, sp
 from kivy.properties import BooleanProperty, ListProperty, StringProperty
+from kivy.uix.anchorlayout import AnchorLayout
 from kivy.uix.behaviors import ButtonBehavior
 from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.button import Button
@@ -156,12 +157,15 @@ class BarButton(HoverBehavior, Button):
 
     def __init__(self, **kwargs):
         kwargs.setdefault("size_hint_x", None)
+        kwargs.setdefault("font_size", FONT_SIZE)
+        fixed_width = "width" in kwargs  # Otherwise it's as wide as its text.
         super().__init__(
             background_normal="", background_down="", background_disabled_normal="", background_disabled_down="",
-            font_size=FONT_SIZE, color=TEXT_COLOR, disabled_color=DIM_TEXT_COLOR, **kwargs
+            color=TEXT_COLOR, disabled_color=DIM_TEXT_COLOR, **kwargs
         )
         self.bind(kind=self._refresh_color)
-        self.bind(texture_size=lambda *_: setattr(self, "width", self.texture_size[0] + dp(24)))
+        if not fixed_width:
+            self.bind(texture_size=lambda *_: setattr(self, "width", self.texture_size[0] + dp(24)))
         self.bind(hovered=self._refresh_color, state=self._refresh_color, highlight=self._refresh_color)
         self.bind(hovered=self._refresh_tooltip, state=self._refresh_tooltip)
         self._refresh_color()
@@ -522,92 +526,242 @@ class _Option(SpinnerOption):
                          font_size=FONT_SIZE, height=dp(32), **kwargs)
 
 
+class _Picker(Spinner):
+    """A dropdown, with a caret so it reads as one."""
+
+    def __init__(self, **kwargs):
+        super().__init__(option_cls=_Option, font_size=FONT_SIZE, color=TEXT_COLOR, background_normal="",
+                         background_color=(*theme.SURFACE_RAISED, 1), halign="left", valign="middle",
+                         padding=(dp(10), 0), **kwargs)
+        self.bind(size=lambda w, size: setattr(w, "text_size", (size[0] - dp(28), size[1])))
+        with self.canvas.after:
+            Color(*theme.TEXT_DIM)
+            self._caret = Triangle()
+        self.bind(pos=self._place_caret, size=self._place_caret)
+
+    def _place_caret(self, *args):
+        x, y = self.right - dp(16), self.center_y
+        self._caret.points = [x - dp(5), y + dp(3), x + dp(5), y + dp(3), x, y - dp(3)]
+
+
 def _spinner(values, selected, on_select):
-    spinner = Spinner(text=selected, values=values, option_cls=_Option, font_size=FONT_SIZE, color=TEXT_COLOR,
-                      background_normal="", background_color=(1, 1, 1, 0.08), size_hint_y=None, height=dp(32))
+    spinner = _Picker(text=selected, values=values, size_hint_y=None, height=dp(32))
     spinner.bind(text=lambda _, text: on_select(text))
     return spinner
 
 
+class _Stepper(BoxLayout):
+    """‹ value ›: steps through an ordered list of choices."""
+
+    def __init__(self, choices, current, on_change, **kwargs):
+        super().__init__(spacing=dp(2), **kwargs)
+        self.choices, self.on_change = choices, on_change
+        self.index = next((i for i, (_, value) in enumerate(choices) if value == current), 0)
+        self.back = button("\u2039", lambda: self._step(-1), size_hint_x=None, width=dp(34), font_size=theme.TITLE)
+        self.label = Label(font_size=FONT_SIZE, color=TEXT_COLOR)
+        with self.label.canvas.before:
+            Color(*theme.SURFACE_RAISED)
+            background = Rectangle()
+        self.label.bind(pos=lambda w, pos: setattr(background, "pos", pos),
+                        size=lambda w, size: setattr(background, "size", size))
+        self.forward = button("\u203a", lambda: self._step(1), size_hint_x=None, width=dp(34), font_size=theme.TITLE)
+        for widget in (self.back, self.label, self.forward):
+            self.add_widget(widget)
+        self._show()
+
+    def _step(self, delta):
+        index = max(0, min(len(self.choices) - 1, self.index + delta))
+        if index != self.index:
+            self.index = index
+            self._show()
+            self.on_change(self.choices[index][1])
+
+    def _show(self):
+        self.label.text = self.choices[self.index][0]
+        self.back.disabled = self.index == 0
+        self.forward.disabled = self.index == len(self.choices) - 1
+
+
+class _Switch(ButtonBehavior, Widget):
+    """An on/off switch in the app's colours: a pill, gold when on, with its knob at that end."""
+
+    active = BooleanProperty(False)
+
+    def __init__(self, active, on_change, **kwargs):
+        super().__init__(size_hint=(None, None), size=(dp(46), dp(24)), **kwargs)
+        with self.canvas:
+            self._track_color = Color()
+            self._track = RoundedRectangle(radius=[dp(12)])
+            Color(1, 1, 1, 1)
+            self._knob = Ellipse()
+        self.bind(pos=self._draw, size=self._draw, active=self._draw)
+        self.bind(on_release=lambda *_: setattr(self, "active", not self.active))
+        self.bind(active=lambda _, value: on_change(value))
+        self.active = active
+        self._draw()
+
+    def _draw(self, *args):
+        self._track_color.rgba = (*theme.ACCENT, 1) if self.active else (1, 1, 1, 0.18)
+        self._track.pos, self._track.size = self.pos, self.size
+        knob = self.height - dp(6)
+        x = self.right - knob - dp(3) if self.active else self.x + dp(3)
+        self._knob.pos, self._knob.size = (x, self.y + dp(3)), (knob, knob)
+
+
+def _section_title(text, width):
+    return Label(text=text.upper(), font_size=theme.CAPTION, bold=True, color=(*theme.ACCENT, 1), halign="left",
+                 valign="bottom", size_hint_y=None, height=dp(30), text_size=(width, dp(30)))
+
+
 class SettingsPopup(ModalView):
-    """Settings rows are (label, [(choice label, value)], current value, on_change) or a bool switch."""
+    """Settings in sections, laid out in columns. columns is [[(section title, rows)]]; a row is
+    (label, kind, choices, current value, on_change) where kind is "pick" (a dropdown, for named
+    choices), "step" (‹ value ›, for ordered ones) or "switch" (on/off; choices unused)."""
 
-    def __init__(self, rows, **kwargs):
-        super().__init__(size_hint=(None, None), size=(dp(480), dp(64) + dp(44) * (len(rows) + 1)),
-                         background="", background_color=(0, 0, 0, 0.5), **kwargs)
-        panel = BoxLayout(orientation="vertical", padding=dp(16), spacing=dp(12))
-        _paint_background(panel, PANEL_COLOR)
-        panel.add_widget(Label(text="Settings", font_size=theme.TITLE, bold=True, color=TEXT_COLOR, size_hint_y=None,
-                               height=dp(24), halign="left", text_size=(dp(448), None)))
-        grid = GridLayout(cols=2, spacing=(dp(12), dp(12)), row_default_height=dp(32), row_force_default=True)
-        for label, choices, current, on_change in rows:
-            grid.add_widget(Label(text=label, font_size=FONT_SIZE, color=TEXT_COLOR, halign="left", valign="middle",
-                                  size_hint_x=None, width=dp(160), text_size=(dp(160), dp(32))))
-            if choices is bool:
-                switch = Switch(active=current, size_hint_x=None, width=dp(80))
-                switch.bind(active=lambda _, value, cb=on_change: cb(value))
-                row = BoxLayout()
-                row.add_widget(switch)
-                row.add_widget(Widget())
-                grid.add_widget(row)
-            else:
-                labels = [text for text, _ in choices]
-                values = dict(choices)
-                selected = next((text for text, value in choices if value == current), labels[0])
-                grid.add_widget(_spinner(labels, selected, lambda text, cb=on_change, v=values: cb(v[text])))
-        panel.add_widget(grid)
-        close = button("Done", self.dismiss, "primary", size_hint=(None, None), height=dp(32), pos_hint={"right": 1})
-        panel.add_widget(close)
-        self.add_widget(panel)
+    ROW = dp(40)
+    COLUMN_WIDTH = dp(400)
+    LABEL_WIDTH = dp(170)
 
-
-class HelpPopup(ModalView):
-    """Getting-started steps across the top, then key sections in two columns.
-    columns is [[(section title, [(key, description)])]]; on_manual opens the user guide."""
-
-    KEY_WIDTH = dp(96)
-    COLUMN_WIDTH = dp(440)
-
-    def __init__(self, steps, columns, on_manual, **kwargs):
-        row_count = max(sum(len(rows) + 1.4 for _, rows in column) for column in columns)
-        super().__init__(size_hint=(None, None), size=(dp(940), dp(170) + dp(24) * len(steps) + dp(25) * row_count),
+    def __init__(self, columns, **kwargs):
+        rows_height = max(sum(dp(30) + self.ROW * len(rows) for _, rows in column) for column in columns)
+        super().__init__(size_hint=(None, None),
+                         size=(self.COLUMN_WIDTH * len(columns) + dp(32) * len(columns) + dp(8),
+                               rows_height + dp(130)),
                          background="", background_color=(0, 0, 0, 0.5), **kwargs)
         panel = BoxLayout(orientation="vertical", padding=dp(20), spacing=dp(8))
         _paint_background(panel, PANEL_COLOR)
-        panel.add_widget(self._label("Getting started", theme.TITLE, TEXT_COLOR, dp(26), bold=True))
-        for number, step in enumerate(steps, 1):
-            panel.add_widget(self._label(f"{number}.  {step}", FONT_SIZE, TEXT_COLOR, dp(24), markup=True))
-        body = BoxLayout(spacing=dp(20), padding=(0, dp(10), 0, 0))
+        panel.add_widget(Label(text="Settings", font_size=theme.TITLE, bold=True, color=TEXT_COLOR, size_hint_y=None,
+                               height=dp(28), halign="left", valign="middle", text_size=(self.width - dp(40), dp(28))))
+        body = BoxLayout(spacing=dp(32))
         for column in columns:
-            box = BoxLayout(orientation="vertical", spacing=dp(1))
+            box = BoxLayout(orientation="vertical", size_hint_x=None, width=self.COLUMN_WIDTH)
             for title, rows in column:
-                box.add_widget(self._label(title, FONT_SIZE, TEXT_COLOR, dp(32), bold=True, valign="bottom"))
-                for key, description in rows:
-                    row = BoxLayout(size_hint_y=None, height=dp(24))
-                    row.add_widget(Label(text=key, font_size=FONT_SIZE, color=(*theme.ACCENT, 1), size_hint_x=None,
-                                         width=self.KEY_WIDTH, halign="left", valign="middle",
-                                         text_size=(self.KEY_WIDTH, dp(24))))
-                    row.add_widget(Label(text=description, font_size=FONT_SIZE, color=TEXT_COLOR, halign="left",
-                                         valign="middle", shorten=True,
-                                         text_size=(self.COLUMN_WIDTH - self.KEY_WIDTH, dp(24))))
-                    box.add_widget(row)
+                box.add_widget(_section_title(title, self.COLUMN_WIDTH))
+                for label, kind, choices, current, on_change in rows:
+                    box.add_widget(self._row(label, kind, choices, current, on_change))
             box.add_widget(Widget())
             body.add_widget(box)
         panel.add_widget(body)
-        actions = BoxLayout(size_hint_y=None, height=dp(32), spacing=dp(8))
-        actions.add_widget(self._label("Hover over any button for a tip. The user guide covers everything in detail.",
-                                       theme.CAPTION, DIM_TEXT_COLOR, dp(32)))
-        guide = button("Open user guide", lambda: (self.dismiss(), on_manual()))
-        close = button("Close", self.dismiss, "primary")
-        actions.add_widget(guide)
-        actions.add_widget(close)
+        actions = BoxLayout(size_hint_y=None, height=dp(34))
+        actions.add_widget(Label(text="Changes apply right away.", font_size=theme.CAPTION, color=DIM_TEXT_COLOR,
+                                 halign="left", valign="middle", size_hint_x=None, width=dp(300),
+                                 text_size=(dp(300), dp(34))))
+        actions.add_widget(Widget())
+        actions.add_widget(button("Done", self.dismiss, "primary"))
         panel.add_widget(actions)
         self.add_widget(panel)
+
+    def _row(self, label, kind, choices, current, on_change):
+        row = BoxLayout(size_hint_y=None, height=self.ROW, padding=(0, dp(4)), spacing=dp(12))
+        row.add_widget(Label(text=label, font_size=FONT_SIZE, color=TEXT_COLOR, halign="left", valign="middle",
+                             size_hint_x=None, width=self.LABEL_WIDTH, text_size=(self.LABEL_WIDTH, None)))
+        if kind == "switch":
+            holder = AnchorLayout(anchor_x="left", anchor_y="center")
+            holder.add_widget(_Switch(current, on_change))
+            row.add_widget(holder)
+        elif kind == "step":
+            row.add_widget(_Stepper(choices, current, on_change))
+        else:
+            labels = [text for text, _ in choices]
+            values = dict(choices)
+            selected = next((text for text, value in choices if value == current), labels[0])
+            picker = _spinner(labels, selected, lambda text, cb=on_change, v=values: cb(v[text]))
+            picker.size_hint_y = 1
+            row.add_widget(picker)
+        return row
+
+
+class HelpPopup(ModalView):
+    """Help in two tabs. Getting started: the steps, then legends for what the colours mean. Keys:
+    groups of (key, what it does, works in game) in columns. on_manual opens the user guide."""
+
+    KEY_WIDTH = dp(110)
+    COLUMN_WIDTH = dp(440)
+    ROW = dp(26)
+
+    def __init__(self, steps, legends, key_columns, on_manual, **kwargs):
+        rows = max(sum(len(group) + 1.5 for _, group in column) for column in key_columns)
+        super().__init__(size_hint=(None, None), size=(dp(960), dp(150) + self.ROW * rows),
+                         background="", background_color=(0, 0, 0, 0.5), **kwargs)
+        panel = BoxLayout(orientation="vertical", padding=dp(20), spacing=dp(10))
+        _paint_background(panel, PANEL_COLOR)
+        tabs = BoxLayout(size_hint_y=None, height=dp(34), spacing=dp(4))
+        self.pages = {"Getting started": self._getting_started(steps, legends), "Keys": self._keys(key_columns)}
+        self.tab_buttons = {}
+        for name in self.pages:
+            tab = Chip(text=name)
+            tab.bind(on_release=lambda *_, name=name: self.show(name))
+            self.tab_buttons[name] = tab
+            tabs.add_widget(tab)
+        tabs.add_widget(Widget())
+        panel.add_widget(tabs)
+        self.page_holder = BoxLayout()
+        panel.add_widget(self.page_holder)
+        actions = BoxLayout(size_hint_y=None, height=dp(34), spacing=dp(8))
+        actions.add_widget(self._label("Hover over any button for a tip. The user guide covers everything in detail.",
+                                       theme.CAPTION, DIM_TEXT_COLOR, dp(34)))
+        actions.add_widget(button("Open user guide", lambda: (self.dismiss(), on_manual())))
+        actions.add_widget(button("Close", self.dismiss, "primary"))
+        panel.add_widget(actions)
+        self.add_widget(panel)
+        self.show("Getting started")
+
+    def show(self, name):
+        self.page_holder.clear_widgets()
+        self.page_holder.add_widget(self.pages[name])
+        for tab_name, tab in self.tab_buttons.items():
+            tab.active = tab_name == name
+
+    def _getting_started(self, steps, legends):
+        page = BoxLayout(orientation="vertical", spacing=dp(6))
+        for number, step in enumerate(steps, 1):
+            page.add_widget(self._label(f"[b]{number}.[/b]  {step}", FONT_SIZE, TEXT_COLOR, dp(30), markup=True))
+        body = BoxLayout(spacing=dp(32), padding=(0, dp(8), 0, 0))
+        for title, items in legends:
+            box = BoxLayout(orientation="vertical", spacing=dp(2))
+            box.add_widget(_section_title(title, self.COLUMN_WIDTH))
+            for color, name, description in items:
+                row = BoxLayout(size_hint_y=None, height=self.ROW, spacing=dp(10))
+                swatch = Widget(size_hint=(None, None), size=(dp(28), dp(14)))
+                with swatch.canvas:
+                    Color(*color[:3])
+                    rect = Rectangle(size=swatch.size)
+                swatch.bind(pos=lambda w, pos, r=rect: setattr(r, "pos", pos),
+                            size=lambda w, size, r=rect: setattr(r, "size", size))
+                holder = AnchorLayout(size_hint_x=None, width=dp(28))
+                holder.add_widget(swatch)
+                row.add_widget(holder)
+                row.add_widget(Label(text=name, font_size=FONT_SIZE, bold=True, color=TEXT_COLOR, halign="left",
+                                     valign="middle", size_hint_x=None, width=dp(90), text_size=(dp(90), self.ROW)))
+                row.add_widget(self._label(description, FONT_SIZE, DIM_TEXT_COLOR, self.ROW))
+                box.add_widget(row)
+            box.add_widget(Widget())
+            body.add_widget(box)
+        page.add_widget(body)
+        return page
+
+    def _keys(self, key_columns):
+        page = BoxLayout(spacing=dp(32))
+        for column in key_columns:
+            box = BoxLayout(orientation="vertical", spacing=dp(1))
+            for title, group in column:
+                box.add_widget(_section_title(title, self.COLUMN_WIDTH))
+                for key, description, in_game in group:
+                    row = BoxLayout(size_hint_y=None, height=self.ROW)
+                    row.add_widget(Label(text=key, font_size=FONT_SIZE, bold=True, color=(*theme.ACCENT, 1),
+                                         size_hint_x=None, width=self.KEY_WIDTH, halign="left", valign="middle",
+                                         text_size=(self.KEY_WIDTH, self.ROW)))
+                    text = description + ("   " + theme.markup("in game too", theme.TEXT_FAINT) if in_game else "")
+                    row.add_widget(self._label(text, FONT_SIZE, TEXT_COLOR, self.ROW, markup=True))
+                    box.add_widget(row)
+            box.add_widget(Widget())
+            page.add_widget(box)
+        return page
 
     @staticmethod
     def _label(text, font_size, color, height, bold=False, markup=False, valign="middle"):
         label = Label(text=text, font_size=font_size, color=color, bold=bold, markup=markup, size_hint_y=None,
-                      height=height, halign="left", valign=valign)
+                      height=height, halign="left", valign=valign, shorten=True)
         label.bind(size=lambda l, size: setattr(l, "text_size", size))
         return label
 

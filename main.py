@@ -1295,43 +1295,67 @@ class WomboComboApp(App):
     def show_help(self):
         steps = [
             "Open a recording with [b]Ctrl+O[/b] (or drop its .json / .mp4 on the window), or record one with "
-            "[b]F8[/b] and save it with [b]F12[/b].",
+            "[b]F8[/b] and save it with [b]F12[/b]. The File menu has samples to try.",
             "Press [b]Space[/b] or [b]Start[/b] and play along: press each input as it reaches the line. No "
             "controller? [b]WASD[/b] + [b]U I O[/b] / [b]J K L[/b].",
             "Mark what matters: select frames (drag in the frame meter) and press [b]K[/b]. Runs are graded "
             "below your attempt.",
-            "Look back: scroll or drag the list, [b]S[/b] saves an attempt, [b]A[/b] lists and replays attempts.",
+            "Look back: scroll or drag the list, [b]S[/b] saves an attempt, [b]A[/b] lists and replays attempts. "
+            "[b]F3[/b] tries another display.",
         ]
-        in_game = [(key, description) for key, description, _ in HOTKEYS]
-        in_window = [
-            ("Space", "Play / pause"),
-            ("Home", "Restart (a fresh attempt while practising)"),
-            ("Ctrl+O", "Open a recording"),
-            ("Ctrl+S", "Save changes to the recording"),
-            ("N", "Add a note to the selection"),
-            ("K", "Mark the selection as a key input"),
-            ("S", "Save the attempt with the recording"),
-            ("A", "Attempts: rename, show, replay, delete"),
-            ("Esc", "Clear the selection"),
+        legends = [
+            ("How an input went", [
+                (theme.HIT, "Hit", "On time (in a row of runs, with a tick)"),
+                (theme.EARLY, "Early", "Too soon, by the frames shown"),
+                (theme.LATE, "Late", "Too late, by the frames shown"),
+                (theme.MISS, "Missed", "Not done (with a cross)"),
+                (theme.PENDING, "Waiting", "Not reached yet"),
+            ]),
+            ("What the colours mark", [
+                (theme.ACCENT, "Key input", "Must be pressed somewhere in its window"),
+                (theme.HOLD, "Hold", "A key input held for a number of frames"),
+                (theme.EXACT, "Exact span", "A key input matched frame for frame"),
+                (theme.METER_BUTTON, "Button", "Frame meter: a button is down on that frame"),
+                (theme.METER_DIRECTION, "Stick", "Frame meter: the stick is off neutral"),
+            ]),
         ]
-        in_window = [("Start / Back", "On the controller: play or pause / start over")] + in_window
-        mouse = [
-            ("Wheel / drag", "Move through the list, a frame per notch"),
-            ("Ctrl+Wheel", "Zoom in and out"),
-            ("Click", "Select a frame (Shift+click extends)"),
-            ("Drag Frames", "Select a range (in the frame meter)"),
-            ("Right-click", "Menu for the selection"),
-            ("Click a tag", "Edit a note or key input"),
+        hotkey = {action: key for key, _, action in HOTKEYS}
+        practise = [
+            ("Space / Start", "Play or pause", False),
+            (hotkey["play"] + " / " + hotkey["pause"], "Play / pause", True),
+            ("Home / Back", "Restart: a fresh attempt while practising", False),
+            (hotkey["restart_playback"], "Restart", True),
+            (hotkey["toggle_practice"], "Practice or review (replay your attempt)", True),
+            ("S", "Save the attempt with the recording", False),
+            ("A", "Attempts: rename, show, replay, delete", False),
         ]
-        colours = [
-            ("Green", "Hit (or a frame that matched)"),
-            ("Blue / orange", "Early / late, with frames off"),
-            ("Red", "Missed"),
-            ("Grey", "Not reached yet"),
+        edit = [
+            ("Click", "Select a frame (Shift+click extends)", False),
+            ("Drag in Frames", "Select a range of frames", False),
+            ("Right-click", "Menu for the selection", False),
+            ("K", "Mark the selection as a key input", False),
+            ("N", "Add a note to the selection", False),
+            ("Click a tag", "Edit a note or key input", False),
+            ("Esc", "Clear the selection", False),
         ]
-        columns = [[("In game (these work while the game has focus)", in_game)],
-                   [("In this window", in_window), ("Mouse", mouse), ("Attempt colours", colours)]]
-        HelpPopup(steps, columns, self.open_user_guide).open()
+        record = [
+            (hotkey["toggle_recording"], "Start / stop recording", True),
+            ("Ctrl+O / " + hotkey["open_track"], "Open a recording", True),
+            ("Ctrl+S", "Save changes to the recording", False),
+            (hotkey["save_recording"], "Save recording as (with its video)", True),
+            (hotkey["demo_recording"], "Demo the recording in game", True),
+            (hotkey["demo_key_inputs"], "Demo just the key inputs in game", True),
+        ]
+        view = [
+            (hotkey["show_help"], "This help", True),
+            (hotkey["toggle_overlay"], "Overlay mode: on top of the game", True),
+            (hotkey["toggle_display"], "Next display: input list, arrow lanes, ring", True),
+            (hotkey["toggle_notes"], "Show / hide notes", True),
+            ("Wheel / drag", "Move through the list, a frame per notch", False),
+            ("Ctrl+Wheel", "Scroll speed (zoom)", False),
+        ]
+        columns = [[("Practise", practise), ("Edit", edit)], [("Record, files and demos", record), ("View", view)]]
+        HelpPopup(steps, legends, columns, self.open_user_guide).open()
 
     def open_user_guide(self):
         path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "docs", "USER_GUIDE.md")
@@ -1352,37 +1376,45 @@ class WomboComboApp(App):
             return on_change
 
         displays = list_displays() or [(0, "")]
-        rows = [
-            ("Controller", [("First connected", "auto")] + [(r.name, r.name) for r in readers],
-             self.config.get("wombo", "controller"), setter("controller", self.select_controller)),
-            ("Record video", bool, self.config.getboolean("wombo", "capture_video"), setter("capture_video")),
-            ("Capture display", [(f"Display {i + 1}  {size}", str(i)) for i, size in displays],
-             self.config.get("wombo", "display"), setter("display")),
-            ("Video size", [(label, str(h)) for label, h in VIDEO_HEIGHTS],
-             self.config.get("wombo", "video_height"), setter("video_height")),
-            ("Encoder", ENCODERS, self.config.get("wombo", "encoder"), setter("encoder")),
-            ("Overlay input delay", [(f"{n} frames", str(n)) for n in range(13)],
-             self.config.get("wombo", "overlay_delay"), setter("overlay_delay")),
-            ("Export overlay on save", bool, self.config.getboolean("wombo", "export_overlay_on_save"),
-             setter("export_overlay_on_save")),
-            ("Scroll speed", [("Fast: 0.75 s ahead", "0.75"), ("1 s ahead", "1.0"), ("1.5 s ahead", "1.5"),
-                              ("2 s ahead", "2.0"), ("Slow: 3 s ahead", "3.0")],
-             str(self.config.getfloat("wombo", "lookahead")),
-             setter("lookahead", lambda: self.input_list_layout.set_lookahead(self.config.getfloat("wombo", "lookahead")))),
-            ("Lead-in before practice", [("Off", "0"), ("0.5 s", "30"), ("1 s", "60"), ("2 s", "120")],
-             self.config.get("wombo", "lead_in"),
-             setter("lead_in", lambda: setattr(self.playalong_controller, "lead_in",
-                                               self.config.getint("wombo", "lead_in")))),
-            ("Demo countdown", [("1 s", "60"), ("2 s", "120"), ("3 s", "180"), ("5 s", "300")],
-             self.config.get("wombo", "demo_countdown"), setter("demo_countdown")),
-            ("Game for new recordings", [("None", "")] + [(game["name"], key) for key, game in GAMES.items()],
-             self.config.get("wombo", "default_game"), setter("default_game")),
-            ("Recent attempts shown", [(str(n), str(n)) for n in (0, 1, 2, 3, 5, 8, 10, 15, 20)],
-             self.config.get("wombo", "recent_attempts"),
+        config = self.config
+        practice = [
+            ("Scroll speed", "step", [("Fast: 0.75 s ahead", "0.75"), ("1 s ahead", "1.0"), ("1.5 s ahead", "1.5"),
+                                      ("2 s ahead", "2.0"), ("Slow: 3 s ahead", "3.0")],
+             str(config.getfloat("wombo", "lookahead")),
+             setter("lookahead", lambda: self.input_list_layout.set_lookahead(config.getfloat("wombo", "lookahead")))),
+            ("Lead-in", "step", [("Off", "0"), ("0.5 s", "30"), ("1 s", "60"), ("2 s", "120")],
+             config.get("wombo", "lead_in"),
+             setter("lead_in", lambda: setattr(self.playalong_controller, "lead_in", config.getint("wombo", "lead_in")))),
+            ("Recent attempts shown", "step", [(str(n), str(n)) for n in (0, 1, 2, 3, 5, 8, 10, 15, 20)],
+             config.get("wombo", "recent_attempts"),
              setter("recent_attempts", lambda: self.playalong_controller.set_history_count(
-                 self.config.getint("wombo", "recent_attempts")))),
+                 config.getint("wombo", "recent_attempts")))),
         ]
-        SettingsPopup(rows).open()
+        controller = [
+            ("Controller", "pick", [("First connected", "auto")] + [(r.name, r.name) for r in readers],
+             config.get("wombo", "controller"), setter("controller", self.select_controller)),
+            ("Game for new recordings", "pick", [("None", "")] + [(game["name"], key) for key, game in GAMES.items()],
+             config.get("wombo", "default_game"), setter("default_game")),
+        ]
+        demo = [
+            ("Demo countdown", "step", [("1 s", "60"), ("2 s", "120"), ("3 s", "180"), ("5 s", "300")],
+             config.get("wombo", "demo_countdown"), setter("demo_countdown")),
+        ]
+        recording = [
+            ("Record video", "switch", None, config.getboolean("wombo", "capture_video"), setter("capture_video")),
+            ("Capture display", "pick", [(f"Display {i + 1}  {size}", str(i)) for i, size in displays],
+             config.get("wombo", "display"), setter("display")),
+            ("Video size", "pick", [(label, str(h)) for label, h in VIDEO_HEIGHTS],
+             config.get("wombo", "video_height"), setter("video_height")),
+            ("Encoder", "pick", ENCODERS, config.get("wombo", "encoder"), setter("encoder")),
+            ("Overlay input delay", "step", [(f"{n} frames", str(n)) for n in range(13)],
+             config.get("wombo", "overlay_delay"), setter("overlay_delay")),
+            ("Export overlay on save", "switch", None, config.getboolean("wombo", "export_overlay_on_save"),
+             setter("export_overlay_on_save")),
+        ]
+        columns = [[("Practice", practice), ("Controller and game", controller), ("Demo", demo)],
+                   [("Recording and video", recording)]]
+        SettingsPopup(columns).open()
 
 
 if __name__ == "__main__":
