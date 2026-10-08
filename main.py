@@ -55,6 +55,21 @@ from theme import markup
 from video_writer import nvenc_available, resolve_encoder, write_capture_and_overlay, write_input_video
 
 logger = logging.getLogger(__name__)
+
+
+def write_tick(path):
+    """A short, soft click: a decaying 1.6 kHz blip, 30 ms, as a WAV file."""
+    import math
+    import struct
+    import wave
+    rate, length = 44100, 0.03
+    samples = [int(9000 * math.exp(-i / (rate * 0.006)) * math.sin(2 * math.pi * 1600 * i / rate))
+               for i in range(int(rate * length))]
+    with wave.open(path, "wb") as out:
+        out.setnchannels(1)
+        out.setsampwidth(2)
+        out.setframerate(rate)
+        out.writeframes(struct.pack(f"<{len(samples)}h", *samples))
 TITLE = "Wombo Combo"
 
 HOTKEYS = [
@@ -142,6 +157,7 @@ class WomboComboApp(App):
             "export_overlay_on_save": 1,
             "opacity": 0.5,
             "see_through": 1,  # Overlay mode: only what's drawn covers the game, not the background.
+            "hit_sound": 0,  # A tick for each key input hit while practising.
             "loop": 1,
             "practice": 1,
             "lookahead": 1.5,  # Seconds of input shown ahead of the line: the scroll speed.
@@ -165,6 +181,7 @@ class WomboComboApp(App):
         return False  # Disable Kivy's built-in F1 settings panel; F1 shows hotkeys instead.
 
     def build(self):
+        self.icon = os.path.join(os.path.dirname(os.path.abspath(__file__)), "images", "app_icon.png")
         Window.clearcolor = (*BACKGROUND, 0.5)
         # Up to 1920x1080, but never bigger than the screen (with room for the taskbar).
         screen_width, screen_height = win32api.GetSystemMetrics(0), win32api.GetSystemMetrics(1)
@@ -353,6 +370,7 @@ class WomboComboApp(App):
     # ---- Per-frame -----------------------------------------------------------------------------
 
     def refresh(self, dt):
+        self._tick_on_hits()  # Every frame, so the tick comes with the hit.
         if self.display is self.input_list_layout:
             self.input_list_layout.dim_non_key = bool(self.playalong_controller.key_inputs)
             frames_before, frames_after = self.input_list_layout.frames_needed()
@@ -391,6 +409,17 @@ class WomboComboApp(App):
     def beep(ok=True):
         """A system sound for feedback that has to reach the player in game (asynchronous)."""
         winsound.MessageBeep(winsound.MB_OK if ok else winsound.MB_ICONHAND)
+
+    def _tick_on_hits(self):
+        """With Hit sound on, a short tick for each key input hit (heard even with the game in front)."""
+        controller = self.playalong_controller
+        hits, _ = controller.key_input_score() if controller.is_playing() and controller.practice else (0, 0)
+        if hits > getattr(self, "_hits_heard", 0) and self.config.getboolean("wombo", "hit_sound"):
+            path = os.path.join(self.temp_dir, "tick.wav")
+            if not os.path.exists(path):
+                write_tick(path)
+            winsound.PlaySound(path, winsound.SND_FILENAME | winsound.SND_ASYNC | winsound.SND_NODEFAULT)
+        self._hits_heard = hits
 
     def update_status(self, dt):
         controller = self.playalong_controller
@@ -1444,6 +1473,7 @@ class WomboComboApp(App):
              config.get("wombo", "default_game"), setter("default_game")),
         ]
         demo = [
+            ("Hit sound", "switch", None, config.getboolean("wombo", "hit_sound"), setter("hit_sound")),
             ("Demo countdown", "step", [("1 s", "60"), ("2 s", "120"), ("3 s", "180"), ("5 s", "300")],
              config.get("wombo", "demo_countdown"), setter("demo_countdown")),
         ]
@@ -1459,7 +1489,7 @@ class WomboComboApp(App):
             ("Export overlay on save", "switch", None, config.getboolean("wombo", "export_overlay_on_save"),
              setter("export_overlay_on_save")),
         ]
-        columns = [[("Practice", practice), ("Controller and game", controller), ("Demo", demo)],
+        columns = [[("Practice", practice), ("Controller and game", controller), ("Sound and demo", demo)],
                    [("Recording and video", recording)]]
         SettingsPopup(columns).open()
 

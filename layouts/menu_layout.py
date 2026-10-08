@@ -1,5 +1,6 @@
 import os
 
+from kivy.animation import Animation
 from kivy.clock import Clock
 from kivy.core.window import Window
 from kivy.graphics import Color, Ellipse, Rectangle, RoundedRectangle, Triangle
@@ -62,6 +63,16 @@ def _paint_background(widget, color):
         widget._bg_rect = Rectangle(pos=widget.pos, size=widget.size)
     widget.bind(pos=lambda w, pos: setattr(w._bg_rect, "pos", pos))
     widget.bind(size=lambda w, size: setattr(w._bg_rect, "size", size))
+
+
+class Dialog(ModalView):
+    """A modal dialog whose panel fades and rises into place as it opens, rather than popping."""
+
+    def on_pre_open(self):
+        if self.children:
+            panel = self.children[0]
+            panel.opacity = 0
+            Animation(opacity=1, d=0.12, t="out_quad").start(panel)
 
 
 class HoverBehavior:
@@ -359,6 +370,8 @@ class MenuBar(BoxLayout):
         self.app = app
         _paint_background(self, BAR_COLOR)
 
+        self.add_widget(Label(text="WOMBO COMBO", font_size=theme.CAPTION, bold=True, color=(*theme.ACCENT, 1),
+                              size_hint_x=None, width=dp(108)))
         file_menu = Menu()
         self.file_menu = file_menu
         self.set_recent([])
@@ -618,7 +631,7 @@ def _section_title(text, width):
                  valign="bottom", size_hint_y=None, height=dp(30), text_size=(width, dp(30)))
 
 
-class SettingsPopup(ModalView):
+class SettingsPopup(Dialog):
     """Settings in sections, laid out in columns. columns is [[(section title, rows)]]; a row is
     (label, kind, choices, current value, on_change) where kind is "pick" (a dropdown, for named
     choices), "step" (‹ value ›, for ordered ones) or "switch" (on/off; choices unused)."""
@@ -676,7 +689,7 @@ class SettingsPopup(ModalView):
         return row
 
 
-class HelpPopup(ModalView):
+class HelpPopup(Dialog):
     """Help in two tabs. Getting started: the steps, then legends for what the colours mean. Keys:
     groups of (key, what it does, works in game) in columns. on_manual opens the user guide."""
 
@@ -771,7 +784,7 @@ class HelpPopup(ModalView):
         return label
 
 
-class NotePopup(ModalView):
+class NotePopup(Dialog):
     """Edits a note's text. on_save(text) is called with the new text; saving empty text counts as a
     delete. on_delete is only offered when editing an existing note."""
 
@@ -823,7 +836,7 @@ class _Toggle(ToggleButton):
         self.color = theme.TEXT_ON_ACCENT if self.state == "down" else TEXT_COLOR
 
 
-class KeyInputPopup(ModalView):
+class KeyInputPopup(Dialog):
     """Edits a key input: whether it's a press in a window, a hold or an exact span, its eligible
     frames, and the motion, direction and buttons it requires. Every part can be dropped with one
     click or keystroke, so stray directions or buttons from the recording are easy to remove.
@@ -1014,7 +1027,7 @@ class KeyInputPopup(ModalView):
         self.preview.text = self.describe(self.key_input)
 
 
-class AttemptsPopup(ModalView):
+class AttemptsPopup(Dialog):
     """Manages saved attempts and recent runs: rename, show or hide saved ones in the input list,
     save a recent run, replay any of them against the target, or delete. Deleting takes a second
     click. `app` provides attempts_overview() and the actions; the list is rebuilt after each one."""
@@ -1100,7 +1113,7 @@ class AttemptsPopup(ModalView):
         return row
 
 
-class ButtonMapPopup(ModalView):
+class ButtonMapPopup(Dialog):
     """Maps each recorded button to one of the player's. Picking a button that another recorded
     button already uses swaps the two, so the map stays one-to-one. Changes apply at once through
     on_change(mapping); used is how many times each recorded button is pressed in the recording."""
@@ -1171,7 +1184,7 @@ class ButtonMapPopup(ModalView):
 NO_ACTION = "None"
 
 
-class GameActionsPopup(ModalView):
+class GameActionsPopup(Dialog):
     """Picks the recording's game and which recorded button is which of its actions, so the input
     list can show actions (a medium punch, a Drive Impact) instead of buttons. Changes apply at once
     through on_change(game, layout)."""

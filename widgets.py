@@ -308,7 +308,9 @@ class ButtonColumn(Widget):
         self.button.size = self.button_knock.size = self._icon_size()
 
     def update_state(self, pressed, input_frames, offset=0.0):
-        self.button_color.rgba = (1, 1, 1, 1) if pressed else IDLE_TINT
+        # Pressed: lit, and green while the recording wants it pressed now (holding it right).
+        wanted = bool(input_frames) and bool(input_frames[0])
+        self.button_color.rgba = ((0.6, 1, 0.65, 1) if wanted else (1, 1, 1, 1)) if pressed else IDLE_TINT
         icon_size = self._icon_size()
         if not input_frames:
             self.falling.draw([], self.x, self.y, icon_size, 0, 1, offset, None)

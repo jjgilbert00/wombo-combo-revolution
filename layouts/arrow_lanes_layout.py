@@ -18,6 +18,7 @@ from PIL import Image, ImageChops, ImageFilter
 
 from images import get_standard_button_icon
 from layouts.feedback import FeedbackDisplay
+import theme
 from input_list import draw_direction_glyph
 from widgets import HOLD_TAIL_COLOR, OFFSCREEN, ButtonColumn, FallingRuns, Knockout, Prompt, runs_of
 
@@ -106,7 +107,9 @@ class ArrowLane(Widget):
         if direction in self.directions:
             self.held.texture = self.arrows[direction].texture
             self.held_knock.texture = self.arrows[direction].silhouette
-            self.held_color.a = 1
+            # Green while it's the direction the recording wants now: holding it right.
+            on_time = bool(input_frames) and input_frames[0] == direction
+            self.held_color.rgba = (*theme.HIT, 1) if on_time else (1, 1, 1, 1)
             self.held_knock.pos, self.held_knock.size = self.pos, self._icon()
         else:
             self.held_color.a = 0

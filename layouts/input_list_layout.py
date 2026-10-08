@@ -350,6 +350,13 @@ class _Textures:
             self.lane_labels[text, font_size] = label.texture
         return self.lane_labels[text, font_size]
 
+    def placeholder(self, text):
+        if ("placeholder", text) not in self.notes:
+            label = CoreLabel(text=text, font_size=theme.BODY, italic=True, color=theme.TEXT_FAINT)
+            label.refresh()
+            self.notes["placeholder", text] = label.texture
+        return self.notes["placeholder", text]
+
     def count(self, frames):
         text = str(frames) if frames <= DISPLAY_COUNT_LIMIT else f"{DISPLAY_COUNT_LIMIT}+"
         if text not in self.counts:
@@ -451,6 +458,8 @@ class InputListLayout(StencilView):
             self.selection_fill = Rectangle()
             self.selection_edge_color = Color(*SELECTION_COLOR, 0)
             self.selection_edges = [Rectangle(), Rectangle()]
+            self.placeholder_color = Color(1, 1, 1, 0)
+            self.placeholder = Rectangle()
         with self.canvas.after:
             # The gutter covers boxes that scroll past the left edge of the track.
             self.gutter_color = Color(*GUTTER_COLOR)
@@ -1022,6 +1031,17 @@ class InputListLayout(StencilView):
             y -= dp(6)
         pool.finish(lambda item: setattr(item[0], "a", 0))
 
+    def _draw_placeholder(self, snapshot, lanes):
+        """In the empty You lane before playing, what will appear there."""
+        empty = not any(key != (5, ()) for _, _, key in snapshot.attempt_runs)
+        show = "attempt" in lanes and empty and not snapshot.playing and not self.minimal
+        self.placeholder_color.a = 1 if show else 0
+        if show:
+            y, height = lanes["attempt"]
+            texture = self.textures.placeholder("Your inputs appear here as you play")
+            self.placeholder.texture, self.placeholder.size = texture, texture.size
+            self.placeholder.pos = (self._line_x() + dp(16), y + (height - texture.height) / 2)
+
     def _draw_selection(self, snapshot, top, bottom):
         if not self.selection or top <= bottom:
             self.selection_color.a = self.selection_edge_color.a = 0
@@ -1075,6 +1095,15 @@ class InputListLayout(StencilView):
                            if start <= snapshot.frame < start + length), None)
         matched = not snapshot.recording and live_key == target_key
         self.line_color.rgba = (*MATCH_COLOR, 1) if matched else LINE_COLOR
+        # A hit just now: the line flares, wide and bright, for a moment.
+        flare = max((max(0.0, 1 - age / 0.25) for grade, _, _, age in snapshot.judgements if grade == "hit"),
+                    default=0.0)
+        width = dp(2) + dp(4) * flare
+        self.line.pos = (self._line_x() - width / 2, self.line.pos[1])
+        self.line.size = (width, self.line.size[1])
+        if flare:
+            self.line_color.rgba = (*MATCH_COLOR, 1)
+        self._draw_placeholder(snapshot, lanes)
         self.live_color.a = 0 if snapshot.recording else 1
         self.live.set_row(self._line_x() - ICON_SIZE / 2, live_y - dp(4), ICON_SIZE,
                           live_key, self.textures)

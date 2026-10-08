@@ -8,6 +8,7 @@ in the display's own coordinates (local ones for a RelativeLayout).
 """
 import time
 
+from kivy.animation import Animation
 from kivy.core.text.markup import MarkupLabel
 from kivy.graphics import Color, InstructionGroup, Rectangle
 from kivy.metrics import dp, sp
@@ -98,6 +99,10 @@ class Feedback:
         if self.banner.text != text:
             self.banner.text = text
             self.banner.texture_update()
+            if "PERFECT" in text:  # A little celebration: it lands a size too big and settles.
+                Animation.cancel_all(self.banner, "font_size")
+                self.banner.font_size = theme.TITLE * 1.35
+                Animation(font_size=theme.TITLE, d=0.35, t="out_back").start(self.banner)
         self.banner.opacity = 1
         x, top, centred = self._banner_at
         self.banner.pos = (x - self.banner.width / 2 if centred else x, top - self.banner.height)
@@ -152,8 +157,15 @@ class CardLayer(FloatLayout):
         if self.card.text != text:
             self.card.text = text
             self.card.text_size = (dp(620), None)
+        if bool(text) != self.showing:
+            # Fades in, so it doesn't pop; goes at once (play has started).
+            Animation.cancel_all(self)
+            if text:
+                self.opacity = 0
+                Animation(opacity=1, d=0.15, t="out_quad").start(self)
+            else:
+                self.opacity = 0
         self.showing = bool(text)
-        self.opacity = 1 if text else 0
         self._scrim_color.a = self.SCRIM[3] if text else 0
         specs = tuple((label, primary) for label, _, primary in buttons) if text else ()
         if specs != self._specs:
