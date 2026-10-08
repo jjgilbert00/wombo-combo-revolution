@@ -41,7 +41,7 @@ from input_list import LIST_BUTTON_ORDER, full_map, inverse_map, map_key_input, 
 from key_inputs import demo_track, derive, derive_hold, describe, normalized
 from layouts.input_list_layout import LANES, InputListLayout
 from games import GAMES
-from layouts.menu_layout import AttemptsPopup, ButtonMapPopup, GameActionsPopup, HelpPopup, KeyInputPopup, Menu, MenuBar, NotePopup, SettingsPopup
+from layouts.menu_layout import StatusBar, AttemptsPopup, ButtonMapPopup, GameActionsPopup, HelpPopup, KeyInputPopup, Menu, MenuBar, NotePopup, SettingsPopup
 from layouts.arrow_lanes_layout import ArrowLanesLayout
 from layouts.feedback import CardLayer
 from layouts.playalong_layout import PlayAlongLayout
@@ -191,9 +191,11 @@ class WomboComboApp(App):
         self.root_layout.add_widget(self.menu_bar)
         # The display, with the getting-started card over it.
         self.stage = FloatLayout()
-        self.card_layer = CardLayer()
+        self.card_layer = CardLayer(pos_hint={"x": 0, "y": 0})
         self.stage.add_widget(self.card_layer)
         self.root_layout.add_widget(self.stage)
+        self.status_bar = StatusBar()
+        self.root_layout.add_widget(self.status_bar)
         self.display = None
         self.show_display(self.config.get("wombo", "input_display"))
         self.set_notes_visible(self.config.getboolean("wombo", "show_notes"))
@@ -441,15 +443,17 @@ class WomboComboApp(App):
             parts.append(self.message[0])
         reader = self.sampler.reader
         parts.append(reader.name if reader and reader.connected else markup("No controller", theme.WARNING))
-        parts.append(f"{stats.rate:.1f} Hz")
+        if stats.rate and abs(stats.rate - FPS) > 2:  # Only when input timing is off.
+            parts.append(markup(f"Input at {stats.rate:.0f} Hz", theme.WARNING))
         self.menu_bar.update(controller.is_recording(), controller.is_playing(), controller.loop, controller.practice,
-                             "   |   ".join(parts), demoing=bool(controller.demo_kind()))
+                             demoing=bool(controller.demo_kind()))
+        separator = markup("  \u00b7  ", theme.TEXT_FAINT)
         card, buttons = self._card(frames)
         # Over the game, the overlay shows the list only; the hints are for the app window.
         hint = "" if self.topmost or card else self._next_step_hint()  # The card says it all when shown.
         self.card_layer.set_card(card, buttons)
-        for display in self.displays.values():  # Every display, so switching keeps the hint.
-            display.set_hint(hint)
+        self.status_bar.set(hint, separator.join(parts))
+        for display in self.displays.values():
             display.card_up = bool(card)
 
     def _card(self, frames):
@@ -1145,12 +1149,14 @@ class WomboComboApp(App):
                 win32gui.ShowWindow(hwnd, win32con.SW_RESTORE)  # A maximized window can't be resized.
             Window.borderless = True
             self.root_layout.remove_widget(self.menu_bar)
+            self.root_layout.remove_widget(self.status_bar)
             self._place_window(left, top, width, height)
             Window.bind(on_draw=self._keep_on_top)
         else:
             Window.unbind(on_draw=self._keep_on_top)
             Window.borderless = False
             self.root_layout.add_widget(self.menu_bar, index=len(self.root_layout.children))
+            self.root_layout.add_widget(self.status_bar, index=0)
             self._set_on_top(False)
             self._overlay_origin = None
             # Put back exactly where it was. Again shortly after, as the border comes back after a delay
@@ -1214,6 +1220,7 @@ class WomboComboApp(App):
         display = self.displays[mode]
         if self.display:
             self.stage.remove_widget(self.display)
+        display.pos_hint = {"x": 0, "y": 0}  # Fill the stage, between the bars.
         self.stage.add_widget(display, index=len(self.stage.children))  # Under the card.
         self.display = display
         self.config.set("wombo", "input_display", mode)

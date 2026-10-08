@@ -386,8 +386,8 @@ class InputListLayout(StencilView):
     extends the selection) and dragging in the frame meter or key inputs lane selects a range.
     Right-clicking opens a menu of things to do with the selection.
 
-    Guidance from the app shows as a hint line under everything, and with no recording loaded, as
-    a card explaining how to get started.
+    Verdicts pop up left of the line as key inputs are settled, and a pass's score shows under
+    the lanes.
     """
 
     def __init__(self, controller_type="XGamepad", button_icon_style="Alt", **kwargs):
@@ -451,9 +451,9 @@ class InputListLayout(StencilView):
         self.next_pool = _Pool(self.next_layer, self._make_strip)
         self.show_next = True  # The up-next panel, set by the app.
         self.card_up = False  # Set by the app while the getting-started card covers the list.
-        # The hint line, verdicts and pass banner, shared with the other displays.
+        # The verdicts and pass banner, shared with the other displays.
         self.feedback = Feedback(self)
-        self.hint, self.banner = self.feedback.hint, self.feedback.banner
+        self.banner = self.feedback.banner
         self._label_hits = []  # (x, y, width, height, full name) of each gutter label, for tooltips.
         Window.bind(mouse_pos=self._on_mouse_pos)
         self.history_cells = _Pool(self.history_layer, self._make_strip)
@@ -562,9 +562,6 @@ class InputListLayout(StencilView):
         self.line.size = (dp(2), self.top - MARGIN - live_y + dp(4))
         self._select_bands = [(y - LANE_GAP / 2, y + height + (MARGIN if name == "meter" else LANE_GAP / 2))
                               for name, (y, height) in lanes.items() if name in ("meter", "keys")]
-
-    def set_hint(self, hint):
-        self.feedback.set_hint(hint)
 
     def _on_mouse_pos(self, window, pos):
         """The full name of a gutter label under the mouse, as a tooltip (long names are cut short)."""
@@ -1024,14 +1021,11 @@ class InputListLayout(StencilView):
         lanes_top = self.top - MARGIN
         live_y = bottom - ICON_SIZE
         self._draw_notes(snapshot.notes, snapshot, lanes_top, live_y - dp(14))
-        # The hint sits under the live input, below any notes (which take up to three toast rows).
-        notes_bottom = live_y - dp(24) - (TOAST_ROWS * dp(40) if snapshot.notes and self.show_notes else 0)
-        left, right = self._track_left(), self._track_right()
+        left = self._track_left()
         # Verdicts sit left of the line, at the foot of the up-next column, clear of the inputs
         # coming in: three rows of them, newest on top.
         lowest_lane = min((y for y, _ in lanes.values()), default=bottom)
-        self.feedback.place(hint=(left, max(notes_bottom, self.y + dp(60)), right - left),
-                            verdicts=(left + dp(12), lowest_lane + dp(3 * 36 + 8)),
+        self.feedback.place(verdicts=(left + dp(12), lowest_lane + dp(3 * 36 + 8)),
                             banner=(self._line_x() + ICON_SIZE * 5, bottom + dp(2), False))
         self.feedback.draw(snapshot.judgements, snapshot.last_pass)
         self._draw_selection(snapshot, lanes_top, bottom + LANE_GAP)

@@ -1,6 +1,6 @@
-"""Practice feedback shared by every display: the hint line, the verdicts that pop up as each key
-input is settled, and the score banner after a pass. And the getting-started/coach card, which sits
-over whichever display is showing (CardLayer).
+"""Practice feedback shared by every display: the verdicts that pop up as each key input is settled
+and the score banner after a pass. And the getting-started/coach card, which sits over whichever
+display is showing (CardLayer). The hint line lives in the status bar, the same for every display.
 
 A display makes one Feedback, which adds its widgets to the display, tells it where things go with
 place() as it lays itself out, and passes it the latest verdicts and pass with draw(). Positions are
@@ -47,34 +47,20 @@ def _panel_label(background, **kwargs):
 class Feedback:
     def __init__(self, host):
         self.host = host
-        self.hint = Label(markup=True, font_size=theme.BODY, color=theme.TEXT_DIM, halign="left", valign="top",
-                          size_hint=(None, None))
         self.banner = _panel_label((0.08, 0.08, 0.1, 0.94), font_size=theme.TITLE, color=theme.TEXT,
                                    padding=(dp(18), dp(10)), opacity=0)
-        for widget in (self.hint, self.banner):
-            host.add_widget(widget)
+        host.add_widget(self.banner)
         self.verdict_layer = InstructionGroup()
         host.canvas.after.add(self.verdict_layer)
         self.verdicts = []  # (Color, Rectangle), pooled.
         self._verdicts_at = (0, 0)
         self._banner_at = (0, 0, False)  # x, top, centred on x
 
-    # ---- The hint ----------------------------------------------------------------------------
-
-    def set_hint(self, hint):
-        if self.hint.text != hint:
-            self.hint.text = hint
-
     # ---- Layout ------------------------------------------------------------------------------
 
-    def place(self, hint, verdicts, banner):
-        """hint: (x, top, width); verdicts: (x, top) of the newest; banner: (x, top, centred) where
-        centred puts its middle at x."""
-        x, top, width = hint
-        self.hint.text_size = (width, None)
-        self.hint.texture_update()
-        self.hint.size = (width, self.hint.texture_size[1])
-        self.hint.pos = (x, top - self.hint.height)
+    def place(self, verdicts, banner):
+        """verdicts: (x, top) of the newest; banner: (x, top, centred) where centred puts its middle
+        at x."""
         self._verdicts_at = verdicts
         self._banner_at = banner
 
@@ -202,24 +188,17 @@ class CardLayer(FloatLayout):
 
 class FeedbackDisplay:
     """For the falling displays (arrow lanes, ring): the shared feedback, laid out around their
-    prompts: the hint top left, the banner centred under it and verdicts at verdict_spot(), which
-    each display defines in its own coordinates."""
+    prompts: the banner top centre and verdicts at verdict_spot(), which each display defines in
+    its own coordinates."""
 
     card_up = False  # Set by the app while the card covers the display.
 
     def _init_feedback(self):
         self.feedback = Feedback(self)
 
-    def set_hint(self, hint):
-        self.feedback.set_hint(hint)
-
     def show_feedback(self, judgements, last_pass):
         width, height = self.size
-        hint_top = height - dp(12)
-        hint = self.feedback.hint
-        hint_bottom = hint_top - (hint.height + dp(8) if hint.text else 0)
-        self.feedback.place(hint=(dp(16), hint_top, width * 0.45), verdicts=self.verdict_spot(),
-                            banner=(width / 2, hint_bottom - dp(4), True))
+        self.feedback.place(verdicts=self.verdict_spot(), banner=(width / 2, height - dp(16), True))
         self.feedback.draw(judgements, last_pass)
 
     def verdict_spot(self):

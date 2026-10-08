@@ -2,7 +2,7 @@ import os
 
 from kivy.clock import Clock
 from kivy.core.window import Window
-from kivy.graphics import Color, Rectangle
+from kivy.graphics import Color, Ellipse, Rectangle, Triangle
 from kivy.metrics import dp, sp
 from kivy.properties import BooleanProperty, ListProperty, StringProperty
 from kivy.uix.behaviors import ButtonBehavior
@@ -38,17 +38,17 @@ MENU_TIPS = {
     "Edit": "Notes, key inputs and attempts. Select frames in the input list first (right-click for a menu)",
     "View": "Choose which lanes to show, hide notes, overlay mode",
     "Settings": "Controller, video capture, lead-in and attempt history",
-    "Record": "Record a new take from your controller: F8 starts and stops, even while the game has focus. "
+    "Record": "Record a new take from your controller (F8, even while the game has focus). "
               "Also captures the screen if Record video is on in Settings",
-    "Play": "Play or pause: Space in this window, F6 / F7 in game",
-    "Restart": "Back to the first frame: Home in this window, F5 in game. "
+    "Play": "Play or pause (Space in this window, F6 / F7 in game)",
+    "Restart": "Back to the first frame (Home in this window, F5 in game). "
                "While practising this starts a fresh attempt",
-    "Loop": "Loop on: the recording repeats, and each pass is kept as a recent attempt",
+    "Loop": "Loop: the recording repeats, and each pass is kept as a recent attempt",
+    "Review": "Review: playing replays your last attempt against the recording. F4 switches",
     "Demo": "Watch the combo in game: a virtual controller plays the recording, either as recorded or cleaned "
             "down to its key inputs (Shift+F6 / Shift+F7, even while the game has focus). Needs vgamepad; see the "
             "user guide",
-    "Practice": "Practice: playing scores your controller against the recording.\n"
-                "Review: playing replays your last attempt instead. F4 switches",
+    "Practice": "Practice: playing scores your controller against the recording. F4 switches",
 }
 DISPLAY_NAMES = {"list": "Input list", "lanes": "Arrow lanes", "ring": "Ring"}
 LANE_MENU_ITEMS = [("meter", "Frame meter"), ("target", "Recording"), ("keys", "Key inputs"),
@@ -135,12 +135,24 @@ class Tooltip(Label):
             self.parent.remove_widget(self)
 
 
+# Button kinds, the same everywhere: (background, text colour). One primary per dialog.
+BUTTON_KINDS = {
+    "primary": ((*theme.ACCENT, 1), theme.TEXT_ON_ACCENT),
+    "secondary": ((1, 1, 1, 0.1), theme.TEXT),
+    "danger": ((1, 1, 1, 0.1), theme.MISS),  # Destructive: red text; red fill once it asks to confirm.
+    "confirm": ((*theme.DANGER, 1), (1, 1, 1, 1)),
+    "selected": ((*theme.ACCENT, 1), theme.TEXT_ON_ACCENT),
+    "ghost": ((0, 0, 0, 0), theme.TEXT),  # Bar items.
+}
+
+
 class BarButton(HoverBehavior, Button):
-    """Flat, text-sized button for the menu bar. `highlight` tints it, e.g. while recording.
-    `tooltip` is shown after hovering for a moment."""
+    """Flat, text-sized button: menu bar items, and dialog buttons by `kind` (BUTTON_KINDS).
+    `highlight` tints it, e.g. while recording. `tooltip` is shown after hovering for a moment."""
 
     highlight = ListProperty([0, 0, 0, 0])
     tooltip = StringProperty("")
+    kind = StringProperty("ghost")
 
     def __init__(self, **kwargs):
         kwargs.setdefault("size_hint_x", None)
@@ -148,6 +160,7 @@ class BarButton(HoverBehavior, Button):
             background_normal="", background_down="", background_disabled_normal="", background_disabled_down="",
             font_size=FONT_SIZE, color=TEXT_COLOR, disabled_color=DIM_TEXT_COLOR, **kwargs
         )
+        self.bind(kind=self._refresh_color)
         self.bind(texture_size=lambda *_: setattr(self, "width", self.texture_size[0] + dp(24)))
         self.bind(hovered=self._refresh_color, state=self._refresh_color, highlight=self._refresh_color)
         self.bind(hovered=self._refresh_tooltip, state=self._refresh_tooltip)
@@ -160,14 +173,128 @@ class BarButton(HoverBehavior, Button):
             Tooltip.get().hide(self)
 
     def _refresh_color(self, *args):
+        background, text = BUTTON_KINDS[self.kind]
+        self.color = text
         if self.highlight[3]:
             self.background_color = self.highlight
+        elif self.kind != "ghost":
+            # Lighter on hover, darker pressed.
+            shade = 1.12 if self.state == "normal" and self.hovered else 0.88 if self.state == "down" else 1
+            r, g, b, a = background
+            self.background_color = (min(1, r * shade + (0.04 if a < 0.5 and self.hovered else 0)),
+                                     min(1, g * shade), min(1, b * shade), a + (0.06 if a < 0.5 and self.hovered else 0))
         elif self.state == "down":
             self.background_color = ACTIVE_COLOR
         elif self.hovered:
             self.background_color = HOVER_COLOR
         else:
             self.background_color = (0, 0, 0, 0)
+
+
+def button(text, callback, kind="secondary", **kwargs):
+    """A dialog button of a kind from BUTTON_KINDS."""
+    widget = BarButton(text=text, kind=kind, **kwargs)
+    widget.bind(on_release=lambda *_: callback())
+    return widget
+
+
+def confirm_button(text, callback, **kwargs):
+    """A destructive button that asks first: the first click turns it red ("Sure?"), the second acts."""
+    widget = BarButton(text=text, kind="danger", **kwargs)
+
+    def click(*_):
+        if widget.kind == "danger":
+            widget.text, widget.kind = "Sure?", "confirm"
+        else:
+            callback()
+
+    widget.bind(on_release=click)
+    return widget
+
+
+class IconButton(HoverBehavior, ButtonBehavior, Widget):
+    """A square transport button with a drawn icon: record, stop, play, pause or restart."""
+
+    icon = StringProperty("play")
+    tooltip = StringProperty("")
+    highlight = ListProperty([0, 0, 0, 0])
+
+    def __init__(self, **kwargs):
+        super().__init__(size_hint_x=None, width=BAR_HEIGHT + dp(4), **kwargs)
+        with self.canvas.before:
+            self._bg_color = Color(0, 0, 0, 0)
+            self._bg = Rectangle()
+        self.bind(pos=self._draw, size=self._draw, icon=self._draw, disabled=self._draw, hovered=self._draw,
+                  state=self._draw, highlight=self._draw)
+        self.bind(hovered=self._refresh_tooltip, state=self._refresh_tooltip)
+        self._draw()
+
+    def _refresh_tooltip(self, *args):
+        if self.tooltip and self.hovered and self.state == "normal":
+            Tooltip.get().schedule(self, self.tooltip)
+        else:
+            Tooltip.get().hide(self)
+
+    def _draw(self, *args):
+        self._bg.pos, self._bg.size = self.pos, self.size
+        self._bg_color.rgba = (self.highlight if self.highlight[3] else ACTIVE_COLOR if self.state == "down"
+                               else HOVER_COLOR if self.hovered else (0, 0, 0, 0))
+        self.canvas.clear()
+        cx, cy, s = self.center_x, self.center_y, dp(13)
+        alpha = 0.35 if self.disabled else 1
+        with self.canvas:
+            if self.icon == "record":
+                Color(*theme.DANGER[:3], alpha) if not self.highlight[3] else Color(1, 1, 1, alpha)
+                Ellipse(pos=(cx - s / 2, cy - s / 2), size=(s, s))
+            elif self.icon == "stop":
+                Color(1, 1, 1, alpha)
+                Rectangle(pos=(cx - s * 0.42, cy - s * 0.42), size=(s * 0.84, s * 0.84))
+            elif self.icon == "play":
+                Color(*theme.TEXT[:3], alpha)
+                Triangle(points=[cx - s * 0.4, cy - s / 2, cx - s * 0.4, cy + s / 2, cx + s * 0.5, cy])
+            elif self.icon == "pause":
+                Color(*theme.TEXT[:3], alpha)
+                Rectangle(pos=(cx - s * 0.42, cy - s / 2), size=(s * 0.3, s))
+                Rectangle(pos=(cx + s * 0.12, cy - s / 2), size=(s * 0.3, s))
+            elif self.icon == "restart":
+                Color(*theme.TEXT[:3], alpha)
+                Rectangle(pos=(cx - s * 0.5, cy - s / 2), size=(s * 0.18, s))
+                Triangle(points=[cx + s * 0.45, cy - s / 2, cx + s * 0.45, cy + s / 2, cx - s * 0.3, cy])
+
+
+class Chip(BarButton):
+    """An on/off toggle in the bar: gold when on (the app's one "selected" style)."""
+
+    active = BooleanProperty(False)
+
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self.bind(active=lambda *_: setattr(self, "kind", "selected" if self.active else "ghost"))
+
+
+class StatusBar(BoxLayout):
+    """Along the bottom: what to do next on the left (the same for every display), the state of
+    things on the right."""
+
+    HEIGHT = dp(30)
+
+    def __init__(self, **kwargs):
+        super().__init__(size_hint_y=None, height=self.HEIGHT, padding=(dp(14), 0), spacing=dp(16), **kwargs)
+        _paint_background(self, BAR_COLOR)
+        self.hint = Label(markup=True, font_size=FONT_SIZE, color=DIM_TEXT_COLOR, halign="left", valign="middle",
+                          shorten=True, shorten_from="right")
+        self.hint.bind(size=lambda label, size: setattr(label, "text_size", size))
+        self.status = Label(markup=True, font_size=FONT_SIZE, color=DIM_TEXT_COLOR, halign="right", valign="middle",
+                            size_hint_x=None)
+        self.status.bind(texture_size=lambda label, size: setattr(label, "width", size[0]))
+        self.add_widget(self.hint)
+        self.add_widget(self.status)
+
+    def set(self, hint, status):
+        if self.hint.text != hint:
+            self.hint.text = hint
+        if self.status.text != status:
+            self.status.text = status
 
 
 class MenuItem(HoverBehavior, ButtonBehavior, BoxLayout):
@@ -276,11 +403,23 @@ class MenuBar(BoxLayout):
         self.add_widget(settings_button)
 
         self.add_widget(self._divider())
-        self.record_button = self._transport("Record", app.toggle_recording)
-        self.play_button = self._transport("Play", app.toggle_playback)
-        self._transport("Restart", app.restart_playback)
-        self.loop_button = self._transport("Loop", app.toggle_loop)
-        self.practice_button = self._transport("Practice", app.toggle_practice)
+        self.record_button = self._icon("record", "Record", app.toggle_recording)
+        self.play_button = self._icon("play", "Play", app.toggle_playback)
+        self._icon("restart", "Restart", app.restart_playback)
+        self.add_widget(self._divider())
+        self.loop_button = Chip(text="Loop", tooltip=MENU_TIPS["Loop"])
+        self.loop_button.bind(on_release=lambda *_: app.toggle_loop())
+        self.add_widget(self.loop_button)
+        self.add_widget(Widget(size_hint_x=None, width=dp(10)))
+        # Practice | Review: which one playing does. Clicking the other one switches.
+        self.practicing = True
+        self.practice_button = Chip(text="Practice", tooltip=MENU_TIPS["Practice"])
+        self.practice_button.bind(on_release=lambda *_: self.practicing or app.toggle_practice())
+        self.review_button = Chip(text="Review", tooltip=MENU_TIPS["Review"])
+        self.review_button.bind(on_release=lambda *_: self.practicing and app.toggle_practice())
+        self.add_widget(self.practice_button)
+        self.add_widget(self.review_button)
+        self.add_widget(self._divider())
         demo_menu = Menu()
         demo_menu.add_item("Demo the recording", app.demo_recording, "Shift+F6")
         demo_menu.add_item("Demo the key inputs", app.demo_key_inputs, "Shift+F7")
@@ -291,16 +430,13 @@ class MenuBar(BoxLayout):
         self.demo_button.bind(on_release=demo_menu.open)
         self.add_widget(self.demo_button)
 
-        self.status = Label(markup=True, font_size=FONT_SIZE, color=DIM_TEXT_COLOR, halign="right", valign="middle",
-                            shorten=True, shorten_from="left", padding=(dp(10), 0))
-        self.status.bind(size=lambda label, size: setattr(label, "text_size", size))
-        self.add_widget(self.status)
+        self.add_widget(Widget())  # The rest of the bar stays clear.
 
-    def _transport(self, text, callback):
-        button = BarButton(text=text, tooltip=MENU_TIPS[text])
-        button.bind(on_release=lambda *_: callback())
-        self.add_widget(button)
-        return button
+    def _icon(self, icon, tip, callback):
+        widget = IconButton(icon=icon, tooltip=MENU_TIPS[tip])
+        widget.bind(on_release=lambda *_: callback())
+        self.add_widget(widget)
+        return widget
 
     def _divider(self):
         divider = Widget(size_hint_x=None, width=dp(17))
@@ -367,18 +503,17 @@ class MenuBar(BoxLayout):
             item.shortcut.text = "showing" if item_mode == mode else ""
             item.label.color = TEXT_COLOR if item_mode == mode else DIM_TEXT_COLOR
 
-    def update(self, recording, playing, looping, practicing, status, demoing=False):
-        self.record_button.text = "Stop" if recording else "Record"
+    def update(self, recording, playing, looping, practicing, demoing=False):
+        self.record_button.icon = "stop" if recording else "record"
         self.record_button.highlight = RECORD_COLOR if recording else (0, 0, 0, 0)
-        self.play_button.text = "Pause" if playing else "Play"
+        self.record_button.tooltip = "Stop recording (F8)" if recording else MENU_TIPS["Record"]
+        self.play_button.icon = "pause" if playing else "play"
         self.play_button.disabled = recording
-        # The toggles say what they're set to, rather than relying on a highlight.
-        self.loop_button.text = "Loop on" if looping else "Loop off"
-        self.loop_button.highlight = ACTIVE_COLOR if looping else (0, 0, 0, 0)
-        self.practice_button.text = "Practice" if practicing else "Review"
-        self.practice_button.highlight = ACTIVE_COLOR if practicing else (0, 0, 0, 0)
+        self.loop_button.active = looping
+        self.practicing = practicing
+        self.practice_button.active = practicing
+        self.review_button.active = not practicing
         self.demo_button.highlight = DEMO_COLOR if demoing else (0, 0, 0, 0)
-        self.status.text = status
 
 
 class _Option(SpinnerOption):
@@ -421,9 +556,7 @@ class SettingsPopup(ModalView):
                 selected = next((text for text, value in choices if value == current), labels[0])
                 grid.add_widget(_spinner(labels, selected, lambda text, cb=on_change, v=values: cb(v[text])))
         panel.add_widget(grid)
-        close = BarButton(text="Done", size_hint=(None, None), height=dp(32), pos_hint={"right": 1},
-                          highlight=(1, 1, 1, 0.1))
-        close.bind(on_release=lambda *_: self.dismiss())
+        close = button("Done", self.dismiss, "primary", size_hint=(None, None), height=dp(32), pos_hint={"right": 1})
         panel.add_widget(close)
         self.add_widget(panel)
 
@@ -464,10 +597,8 @@ class HelpPopup(ModalView):
         actions = BoxLayout(size_hint_y=None, height=dp(32), spacing=dp(8))
         actions.add_widget(self._label("Hover over any button for a tip. The user guide covers everything in detail.",
                                        theme.CAPTION, DIM_TEXT_COLOR, dp(32)))
-        guide = BarButton(text="Open user guide", highlight=(1, 1, 1, 0.1))
-        guide.bind(on_release=lambda *_: (self.dismiss(), on_manual()))
-        close = BarButton(text="Close", highlight=(1, 1, 1, 0.1))
-        close.bind(on_release=lambda *_: self.dismiss())
+        guide = button("Open user guide", lambda: (self.dismiss(), on_manual()))
+        close = button("Close", self.dismiss, "primary")
         actions.add_widget(guide)
         actions.add_widget(close)
         panel.add_widget(actions)
@@ -500,14 +631,10 @@ class NotePopup(ModalView):
 
         buttons = BoxLayout(size_hint_y=None, height=dp(32), spacing=dp(8))
         if on_delete:
-            delete = BarButton(text="Delete", highlight=(0.85, 0.2, 0.2, 0.8))
-            delete.bind(on_release=lambda *_: (self.dismiss(), on_delete()))
-            buttons.add_widget(delete)
+            buttons.add_widget(confirm_button("Delete", lambda: (self.dismiss(), on_delete())))
         buttons.add_widget(Widget())
-        cancel = BarButton(text="Cancel")
-        cancel.bind(on_release=lambda *_: self.dismiss())
-        save = BarButton(text="Save", highlight=(1, 1, 1, 0.12))
-        save.bind(on_release=lambda *_: self._save(on_save))
+        cancel = button("Cancel", self.dismiss, "ghost")
+        save = button("Save", lambda: self._save(on_save), "primary")
         buttons.add_widget(cancel)
         buttons.add_widget(save)
         panel.add_widget(buttons)
@@ -633,14 +760,10 @@ class KeyInputPopup(ModalView):
 
         actions = BoxLayout(size_hint_y=None, height=self.ROW_HEIGHT, spacing=dp(8))
         if on_delete:
-            delete = BarButton(text="Delete", highlight=(0.85, 0.2, 0.2, 0.8))
-            delete.bind(on_release=lambda *_: (self.dismiss(), on_delete()))
-            actions.add_widget(delete)
+            actions.add_widget(confirm_button("Delete", lambda: (self.dismiss(), on_delete())))
         actions.add_widget(Widget())
-        cancel = BarButton(text="Cancel")
-        cancel.bind(on_release=lambda *_: self.dismiss())
-        save = BarButton(text="Save", highlight=(1, 1, 1, 0.12))
-        save.bind(on_release=lambda *_: (self.dismiss(), on_save(self.key_input)))
+        cancel = button("Cancel", self.dismiss, "ghost")
+        save = button("Save", lambda: (self.dismiss(), on_save(self.key_input)), "primary")
         actions.add_widget(cancel)
         actions.add_widget(save)
         panel.add_widget(actions)
@@ -661,9 +784,7 @@ class KeyInputPopup(ModalView):
                      text_size=(dp(250), None))
 
     def _stepper(self, text, edge, delta):
-        button = BarButton(text=text, highlight=(1, 1, 1, 0.08))
-        button.bind(on_release=lambda *_: self._step(edge, delta))
-        return button
+        return button(text, lambda: self._step(edge, delta))
 
     def _step(self, edge, delta):
         start, end = self.key_input["start"], self.key_input["end"]
@@ -761,9 +882,7 @@ class AttemptsPopup(ModalView):
         panel.add_widget(scroll)
         actions = BoxLayout(size_hint_y=None, height=self.ROW_HEIGHT)
         actions.add_widget(Widget())
-        close = BarButton(text="Close", highlight=(1, 1, 1, 0.12))
-        close.bind(on_release=lambda *_: self.dismiss())
-        actions.add_widget(close)
+        actions.add_widget(button("Close", self.dismiss, "primary"))
         panel.add_widget(actions)
         self.add_widget(panel)
         self.refresh()
@@ -791,10 +910,8 @@ class AttemptsPopup(ModalView):
         label.bind(size=lambda l, size: setattr(l, "text_size", size))
         return label
 
-    def _button(self, text, callback, highlight=(1, 1, 1, 0.08)):
-        button = BarButton(text=text, highlight=highlight)
-        button.bind(on_release=lambda *_: callback())
-        return button
+    def _button(self, text, callback):
+        return button(text, callback)
 
     def _row(self, attempt):
         kind, attempt_id = attempt["kind"], attempt["id"]
@@ -820,17 +937,7 @@ class AttemptsPopup(ModalView):
         else:
             row.add_widget(self._button("Save", lambda: (self.app.save_run(attempt_id), self.refresh())))
         row.add_widget(self._button("Replay", lambda: (self.dismiss(), self.app.replay_attempt(kind, attempt_id))))
-        delete = self._button("Delete", lambda: None)
-
-        def confirm(*_):
-            if delete.text == "Delete":
-                delete.text, delete.highlight = "Sure?", (0.85, 0.2, 0.2, 0.8)
-            else:
-                self.app.delete_attempt(kind, attempt_id)
-                self.refresh()
-
-        delete.bind(on_release=confirm)
-        row.add_widget(delete)
+        row.add_widget(confirm_button("Delete", lambda: (self.app.delete_attempt(kind, attempt_id), self.refresh())))
         return row
 
 
@@ -876,13 +983,9 @@ class ButtonMapPopup(ModalView):
             row.add_widget(spinner)
             panel.add_widget(row)
         actions = BoxLayout(size_hint_y=None, height=dp(32), spacing=dp(8))
-        reset = BarButton(text="Reset to recorded", highlight=(1, 1, 1, 0.08))
-        reset.bind(on_release=lambda *_: self._reset())
-        actions.add_widget(reset)
+        actions.add_widget(button("Reset to recorded", self._reset))
         actions.add_widget(Widget())
-        done = BarButton(text="Done", highlight=(1, 1, 1, 0.12))
-        done.bind(on_release=lambda *_: self.dismiss())
-        actions.add_widget(done)
+        actions.add_widget(button("Done", self.dismiss, "primary"))
         panel.add_widget(actions)
         self.add_widget(panel)
 
@@ -958,13 +1061,9 @@ class GameActionsPopup(ModalView):
             row.add_widget(spinner)
             panel.add_widget(row)
         actions_row = BoxLayout(size_hint_y=None, height=dp(32), spacing=dp(8))
-        reset = BarButton(text="Default layout", highlight=(1, 1, 1, 0.08))
-        reset.bind(on_release=lambda *_: self._reset())
-        actions_row.add_widget(reset)
+        actions_row.add_widget(button("Default layout", self._reset))
         actions_row.add_widget(Widget())
-        done = BarButton(text="Done", highlight=(1, 1, 1, 0.12))
-        done.bind(on_release=lambda *_: self.dismiss())
-        actions_row.add_widget(done)
+        actions_row.add_widget(button("Done", self.dismiss, "primary"))
         panel.add_widget(actions_row)
         self.add_widget(panel)
         self._refresh()
