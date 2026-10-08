@@ -31,7 +31,7 @@ COUNT_FONT_SIZE = sp(14)
 DISPLAY_COUNT_LIMIT = 99  # Longer holds show "99+", like training-mode input displays.
 LANE_BUTTON_ROWS = 3  # Lanes are tall enough for this many buttons; more overflow the lane.
 MARGIN = dp(24)
-GUTTER_WIDTH = dp(72)  # Lane names, left of the track.
+GUTTER_WIDTH = dp(104)  # Lane names, left of the track.
 METER_HEIGHT = dp(18)  # Frame meter: one block per target frame, above the target lane.
 LANE_HEIGHT = dp(4) + dp(18) + (ICON_SIZE + dp(2)) * (1 + LANE_BUTTON_ROWS) + dp(4)
 STRIP_HEIGHT = dp(8)  # Per-frame match indicator between the two lanes.
@@ -314,11 +314,15 @@ class _Textures:
         self.judgements = {}
 
     def lane_label(self, text, font_size=sp(13)):
-        """A gutter label, shortened to fit the gutter."""
+        """A gutter label, shortened at its end to fit the gutter (the start of a name says most)."""
         if (text, font_size) not in self.lane_labels:
-            label = CoreLabel(text=text, font_size=font_size, bold=True, shorten=True,
-                              text_size=(GUTTER_WIDTH - dp(4), None))
-            label.refresh()
+            shown = text
+            while True:
+                label = CoreLabel(text=shown, font_size=font_size, bold=True)
+                label.refresh()
+                if label.texture.width <= GUTTER_WIDTH - dp(8) or len(shown) <= 2:
+                    break
+                shown = shown[:-2].rstrip() + "…"
             self.lane_labels[text, font_size] = label.texture
         return self.lane_labels[text, font_size]
 
@@ -445,10 +449,12 @@ class InputListLayout(StencilView):
         self.canvas.after.add(self.next_layer)
         self.next_pool = _Pool(self.next_layer, self._make_strip)
         self.show_next = True  # The up-next panel, set by the app.
-        # The hint line, cards, verdicts and pass banner, shared with the other displays.
+        self.card_up = False  # Set by the app while the getting-started card covers the list.
+        # The hint line, verdicts and pass banner, shared with the other displays.
         self.feedback = Feedback(self)
-        self.hint, self.welcome = self.feedback.hint, self.feedback.card
-        self.banner, self.card_buttons = self.feedback.banner, self.feedback.card_buttons
+        self.hint, self.banner = self.feedback.hint, self.feedback.banner
+        self._label_hits = []  # (x, y, width, height, full name) of each gutter label, for tooltips.
+        Window.bind(mouse_pos=self._on_mouse_pos)
         self.history_cells = _Pool(self.history_layer, self._make_strip)
         self.history_texts = _Pool(self.history_text_layer, self._make_strip)
         self.labels = _Pool(self.label_layer, self._make_strip)
@@ -502,6 +508,7 @@ class InputListLayout(StencilView):
     def _arrange(self, lanes, bottom):
         """Lane panels and gutter labels, the gutter, and the hit line down to the live input."""
         left, right = self._track_left(), self._track_right()
+        self._label_hits = []
         for name, (y, height) in lanes.items():
             is_run = isinstance(name, tuple)
             if not is_run and name not in LANES:
@@ -516,26 +523,43 @@ class InputListLayout(StencilView):
                              else self.textures.lane_label(LANES[name]))
             label.size = label.texture.size
             label.pos = (self.x + MARGIN, y + (height - label.texture.height) / 2)
+            name_text = self._history[name[1]].label if is_run else LANES[name]
+            self._label_hits.append((self.x, y, left - self.x, height, name_text))
         hide = lambda item: setattr(item[0], "a", 0)
         self.panels.finish(hide)
         self.labels.finish(hide)
         live_y = bottom - ICON_SIZE
-        self.gutter.pos = (self.x, live_y - dp(4))
-        self.gutter.size = (left - self.x, self.top - live_y + dp(4))
+        # The gutter ends with the last lane it names.
+        lowest = min((y for y, _ in lanes.values()), default=bottom)
+        self.gutter.pos = (self.x, lowest - dp(4))
+        self.gutter.size = (left - self.x, self.top - lowest + dp(4))
         self.line.pos = (self._line_x() - dp(1), live_y - dp(4))
         self.line.size = (dp(2), self.top - MARGIN - live_y + dp(4))
         self._select_bands = [(y - LANE_GAP / 2, y + height + (MARGIN if name == "meter" else LANE_GAP / 2))
                               for name, (y, height) in lanes.items() if name in ("meter", "keys")]
 
-    def set_guidance(self, hint, welcome="", buttons=()):
-        """The hint line's text, and the card's (empty hides it) with its buttons."""
-        self.feedback.set_guidance(hint, welcome, buttons)
+    def set_hint(self, hint):
+        self.feedback.set_hint(hint)
+
+    def _on_mouse_pos(self, window, pos):
+        """The full name of a gutter label under the mouse, as a tooltip (long names are cut short)."""
+        from layouts.menu_layout import Tooltip
+        if not self.get_root_window():
+            return
+        x, y = self.to_widget(*pos)
+        hit = next(((hx, hy, name) for hx, hy, w, h, name in self._label_hits
+                    if hx <= x <= hx + w and hy <= y <= hy + h), None)
+        tip = Tooltip.get()
+        if hit and tip.owner_key != ("lane", hit[2]):
+            tip.schedule_at(("lane", hit[2]), self.to_window(hit[0] + MARGIN, hit[1]), hit[2])
+        elif not hit and isinstance(tip.owner_key, tuple) and tip.owner_key[0] == "lane":
+            tip.hide(tip.owner_key)
 
     def content_height(self, note_rows):
         """How tall the list needs to be to show everything it draws: the shown lanes, the live input
         under them, and note_rows rows of note toasts. For fitting the overlay window. While the
         getting-started card shows, it needs the whole window: None."""
-        if self.welcome.opacity:
+        if self.card_up:
             return None
         _, bottom = self._lanes()
         lowest = bottom - ICON_SIZE - dp(4)  # The live input row.
@@ -572,8 +596,6 @@ class InputListLayout(StencilView):
     def on_touch_down(self, touch):
         if not self.collide_point(*touch.pos):
             return super().on_touch_down(touch)
-        if self.card_buttons.opacity and self.card_buttons.collide_point(*touch.pos):
-            return super().on_touch_down(touch)  # The card's buttons.
         if touch.button == "right":
             if self.on_context_menu:
                 self.on_context_menu(self.frame_at(touch.x), touch.pos)
@@ -884,29 +906,36 @@ class InputListLayout(StencilView):
         self.history_cells.finish(hide)
         self.history_texts.finish(hide)
 
+    def _up_next_shown(self, snapshot):
+        left, right = self._track_left(), self._line_x() - dp(1)
+        return self.show_next and snapshot.playing and snapshot.upcoming and right - left >= dp(140)
+
     def _draw_up_next(self, snapshot, lanes, top):
-        """A still panel left of the line with the next inputs to make, biggest first, so they can be
-        read without following them across the screen. A bar under the first fills as it nears the
-        line, then (gold) runs through its window while it can be done."""
+        """While playing, the space left of the line becomes a still panel with the next inputs to
+        make, biggest first, so they can be read without following them across the screen (what's
+        already past doesn't matter mid-attempt). A bar under the first fills as it nears the line,
+        then (gold) runs through its window while it can be done. The verdicts show at its foot."""
         pool = self.next_pool
-        upcoming = snapshot.upcoming if self.show_next else ()
-        left, right = self._track_left() + dp(8), self._line_x() - dp(12)
-        if not upcoming or right - left < dp(120):
+        if not self._up_next_shown(snapshot):
             pool.finish(lambda item: setattr(item[0], "a", 0))
             return
-        bottom_lane = min((y for name, (y, height) in lanes.items() if not isinstance(name, tuple)), default=top)
+        upcoming = snapshot.upcoming
+        left, right = self._track_left(), self._line_x() - dp(1)
+        bottom_lane = min((y for y, height in lanes.values()), default=top)
         rows = []
         for row, (notation, start, end) in enumerate(upcoming):
             size = sp(34) if row == 0 else sp(20)
             colour = "ffffff" if row == 0 else "a8a8b0"
             rows.append(self.textures.up_next(notation, size, colour))
-        height = sum(texture.height + dp(6) for texture in rows) + dp(26)
-        panel_top = top - dp(4)
-        panel_bottom = max(bottom_lane, panel_top - height)
+        panel_top, panel_bottom = top + MARGIN / 2, bottom_lane - dp(4)
         color, rect = pool.next()
-        color.rgba = (0.06, 0.06, 0.08, 0.88)
+        color.rgba = (0.07, 0.07, 0.09, 1)  # Opaque: nothing scrolls through underneath.
         rect.texture, rect.pos, rect.size = None, (left, panel_bottom), (right - left, panel_top - panel_bottom)
-        y = panel_top - dp(8)
+        color, rect = pool.next()
+        color.rgba = (1, 1, 1, 0.14)  # Its edge.
+        rect.texture, rect.pos, rect.size = None, (right - dp(1), panel_bottom), (dp(1), panel_top - panel_bottom)
+        left, right = left + dp(8), right - dp(12)
+        y = top - dp(4) - dp(8)
         for row, texture in enumerate(rows):
             y -= texture.height
             color, rect = pool.next()
@@ -969,9 +998,11 @@ class InputListLayout(StencilView):
         # The hint sits under the live input, below any notes (which take up to three toast rows).
         notes_bottom = live_y - dp(24) - (TOAST_ROWS * dp(40) if snapshot.notes and self.show_notes else 0)
         left, right = self._track_left(), self._track_right()
+        # Verdicts sit left of the line, at the foot of the up-next column, clear of the inputs
+        # coming in: three rows of them, newest on top.
+        lowest_lane = min((y for y, _ in lanes.values()), default=bottom)
         self.feedback.place(hint=(left, max(notes_bottom, self.y + dp(60)), right - left),
-                            card_center=(self.center_x, self.center_y),
-                            verdicts=(self._line_x() + dp(10), lanes_top - dp(40)),
+                            verdicts=(left + dp(12), lowest_lane + dp(3 * 36 + 8)),
                             banner=(self._line_x() + ICON_SIZE * 5, bottom + dp(2), False))
         self.feedback.draw(snapshot.judgements, snapshot.last_pass)
         self._draw_selection(snapshot, lanes_top, bottom + LANE_GAP)

@@ -27,6 +27,7 @@ from kivy.clock import Clock
 from kivy.core.window import Window
 from kivy.metrics import dp
 from kivy.uix.boxlayout import BoxLayout
+from kivy.uix.floatlayout import FloatLayout
 from kivy.uix.modalview import ModalView
 from kivy.uix.widget import Widget
 import win32api
@@ -42,6 +43,7 @@ from layouts.input_list_layout import LANES, InputListLayout
 from games import GAMES
 from layouts.menu_layout import AttemptsPopup, ButtonMapPopup, GameActionsPopup, HelpPopup, KeyInputPopup, Menu, MenuBar, NotePopup, SettingsPopup
 from layouts.arrow_lanes_layout import ArrowLanesLayout
+from layouts.feedback import CardLayer
 from layouts.playalong_layout import PlayAlongLayout
 from playalong import PlayalongController
 from sampler import FPS, InputSampler
@@ -185,6 +187,11 @@ class WomboComboApp(App):
         self.menu_bar = MenuBar(self)
         self.root_layout = BoxLayout(orientation="vertical")
         self.root_layout.add_widget(self.menu_bar)
+        # The display, with the getting-started card over it.
+        self.stage = FloatLayout()
+        self.card_layer = CardLayer()
+        self.stage.add_widget(self.card_layer)
+        self.root_layout.add_widget(self.stage)
         self.display = None
         self.show_display(self.config.get("wombo", "input_display"))
         self.set_notes_visible(self.config.getboolean("wombo", "show_notes"))
@@ -435,8 +442,10 @@ class WomboComboApp(App):
         card, buttons = self._card(frames)
         # Over the game, the overlay shows the list only; the hints are for the app window.
         hint = "" if self.topmost or card else self._next_step_hint()  # The card says it all when shown.
-        for display in self.displays.values():  # Every display, so switching keeps the card and hint.
-            display.set_guidance(hint, card, buttons)
+        self.card_layer.set_card(card, buttons)
+        for display in self.displays.values():  # Every display, so switching keeps the hint.
+            display.set_hint(hint)
+            display.card_up = bool(card)
 
     def _card(self, frames):
         """The card in the middle of the list: getting started with nothing loaded, or a first go at
@@ -455,8 +464,12 @@ class WomboComboApp(App):
             else:
                 note = ("[color=ffb454][b]No controller found.[/b][/color] Plug one in (it's picked up by itself), "
                         "or play on the keyboard: [b]WASD[/b] to move, [b]U I O[/b] punches, [b]J K L[/b] kicks.")
-            return COACH.format(controller=note), (("Start", self.play, True),)
+            return COACH.format(controller=note), (("Start", self.play, True), ("Not now", self.skip_coaching, False))
         return "", ()
+
+    def skip_coaching(self):
+        """Closes the coach card without starting, to look around first."""
+        self.coaching = False
 
     def _next_step_hint(self):
         """One line on what to do next, for where the player is right now."""
@@ -1195,8 +1208,8 @@ class WomboComboApp(App):
         mode = mode if mode in self.displays else "list"
         display = self.displays[mode]
         if self.display:
-            self.root_layout.remove_widget(self.display)
-        self.root_layout.add_widget(display)  # Added last, so it sits below the menu bar.
+            self.stage.remove_widget(self.display)
+        self.stage.add_widget(display, index=len(self.stage.children))  # Under the card.
         self.display = display
         self.config.set("wombo", "input_display", mode)
         self.menu_bar.set_display_mode(mode)

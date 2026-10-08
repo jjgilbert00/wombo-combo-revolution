@@ -86,6 +86,10 @@ class Tooltip(Label):
         self._pending = None
         self._owner = None
 
+    @property
+    def owner_key(self):
+        return self._owner
+
     @classmethod
     def get(cls):
         if cls._instance is None:
@@ -97,7 +101,14 @@ class Tooltip(Label):
         self._owner = widget
         self._pending = Clock.schedule_once(lambda dt: self._show(widget, text), self.DELAY)
 
-    def _show(self, widget, text):
+    def schedule_at(self, key, window_pos, text):
+        """Like schedule, for something drawn rather than a widget: shown under window_pos. key
+        identifies it, for hide(key)."""
+        self.hide()
+        self._owner = key
+        self._pending = Clock.schedule_once(lambda dt: self._show(None, text, window_pos), self.DELAY)
+
+    def _show(self, widget, text, window_pos=None):
         self.text_size = (None, None)
         self.text = text
         self.texture_update()
@@ -105,7 +116,7 @@ class Tooltip(Label):
             self.text_size = (dp(340) - dp(20), None)  # Long tips wrap.
             self.texture_update()
         self.size = self.texture_size
-        x, y = widget.to_window(widget.x, widget.y)
+        x, y = window_pos or widget.to_window(widget.x, widget.y)
         self.pos = (max(dp(4), min(x, Window.width - self.width - dp(4))), y - self.height - dp(4))
         if not self.parent:
             Window.add_widget(self)
@@ -117,6 +128,7 @@ class Tooltip(Label):
         if self._pending:
             self._pending.cancel()
             self._pending = None
+        self._owner = None
         if self.parent:
             self.parent.remove_widget(self)
 
@@ -162,8 +174,8 @@ class MenuItem(HoverBehavior, ButtonBehavior, BoxLayout):
     def __init__(self, text, shortcut="", **kwargs):
         super().__init__(size_hint_y=None, height=dp(32), padding=(dp(12), 0), **kwargs)
         _paint_background(self, (0, 0, 0, 0))
-        self.label = Label(text=text, font_size=FONT_SIZE, color=TEXT_COLOR, halign="left", valign="middle",
-                           text_size=(dp(158), None))
+        self.label = Label(text=text, font_size=FONT_SIZE, color=TEXT_COLOR, halign="left", valign="middle")
+        self.label.bind(size=lambda label, size: setattr(label, "text_size", (size[0], None)))
         self.add_widget(self.label)
         self.shortcut = Label(text=shortcut, font_size=FONT_SIZE, color=DIM_TEXT_COLOR, halign="right",
                               size_hint_x=None, width=dp(64), text_size=(dp(64), None))
@@ -176,15 +188,25 @@ class MenuItem(HoverBehavior, ButtonBehavior, BoxLayout):
 
 class Menu(DropDown):
     def __init__(self, **kwargs):
-        super().__init__(auto_width=False, width=dp(250), **kwargs)
+        super().__init__(auto_width=False, width=dp(220), **kwargs)
         _paint_background(self.container, PANEL_COLOR)
         self.container.padding = (0, dp(4))
+
+    MAX_WIDTH = dp(380)
 
     def add_item(self, text, callback, shortcut=""):
         item = MenuItem(text, shortcut)
         item.bind(on_release=lambda *_: (self.dismiss(), callback()))
         self.add_widget(item)
+        self.fit(item)
         return item
+
+    def fit(self, item):
+        """Widens the menu to fit an item's text on one line (up to MAX_WIDTH; longer is cut short)."""
+        probe = Label(text=item.label.text, font_size=FONT_SIZE)
+        probe.texture_update()
+        needed = probe.texture_size[0] + item.shortcut.width + dp(12) * 2 + dp(16)
+        self.width = min(self.MAX_WIDTH, max(self.width, needed))
 
     def add_separator(self):
         separator = Widget(size_hint_y=None, height=dp(9))
@@ -301,6 +323,7 @@ class MenuBar(BoxLayout):
         """Rebuilds the File menu, listing recently opened recordings right under Open, then the samples."""
         menu, app = self.file_menu, self.app
         menu.clear_widgets()
+        menu.width = dp(220)
         menu.add_item("Open recording...", app.open_track, "Ctrl+O")
         for path in paths:
             name = os.path.splitext(os.path.basename(path))[0]
@@ -754,7 +777,9 @@ class AttemptsPopup(ModalView):
         self.rows.add_widget(Label(text=title, font_size=FONT_SIZE, bold=True, color=TEXT_COLOR, halign="left",
                                    valign="bottom", size_hint_y=None, height=dp(28), text_size=(dp(720), dp(28))))
         if not attempts:
-            self.rows.add_widget(self._text(empty_text, DIM_TEXT_COLOR, None))
+            empty = self._text(empty_text, DIM_TEXT_COLOR, None)
+            empty.size_hint_y, empty.height = None, self.ROW_HEIGHT
+            self.rows.add_widget(empty)
         for attempt in attempts:
             self.rows.add_widget(self._row(attempt))
 

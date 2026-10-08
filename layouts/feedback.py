@@ -1,5 +1,6 @@
-"""Practice feedback shared by every display: the hint line, the getting-started/coach card with its
-buttons, the verdicts that pop up as each key input is settled, and the score banner after a pass.
+"""Practice feedback shared by every display: the hint line, the verdicts that pop up as each key
+input is settled, and the score banner after a pass. And the getting-started/coach card, which sits
+over whichever display is showing (CardLayer).
 
 A display makes one Feedback, which adds its widgets to the display, tells it where things go with
 place() as it lays itself out, and passes it the latest verdicts and pass with draw(). Positions are
@@ -12,6 +13,7 @@ from kivy.graphics import Color, InstructionGroup, Rectangle
 from kivy.metrics import dp, sp
 from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.button import Button
+from kivy.uix.floatlayout import FloatLayout
 from kivy.uix.label import Label
 
 from key_inputs import EARLY, LATE
@@ -51,13 +53,9 @@ class Feedback:
         self.host = host
         self.hint = Label(markup=True, font_size=sp(14), color=(0.78, 0.78, 0.82, 1), halign="left", valign="top",
                           size_hint=(None, None))
-        self.card = _panel_label((0.1, 0.1, 0.13, 0.97), font_size=sp(15), color=(0.9, 0.9, 0.92, 1),
-                                 halign="left", valign="middle", padding=(dp(28), dp(22)), opacity=0)
         self.banner = _panel_label((0.08, 0.08, 0.1, 0.94), font_size=sp(18), color=(0.95, 0.95, 0.97, 1),
                                    padding=(dp(18), dp(10)), opacity=0)
-        self.card_buttons = BoxLayout(size_hint=(None, None), height=dp(40), spacing=dp(8), opacity=0)
-        self._button_specs = None
-        for widget in (self.hint, self.card, self.banner, self.card_buttons):
+        for widget in (self.hint, self.banner):
             host.add_widget(widget)
         self.verdict_layer = InstructionGroup()
         host.canvas.after.add(self.verdict_layer)
@@ -65,50 +63,22 @@ class Feedback:
         self._verdicts_at = (0, 0)
         self._banner_at = (0, 0, False)  # x, top, centred on x
 
-    # ---- The card and hint -------------------------------------------------------------------
+    # ---- The hint ----------------------------------------------------------------------------
 
-    def set_guidance(self, hint, card="", buttons=()):
-        """The hint line's text, and the card's (empty hides it) with its buttons: (text, callback,
-        primary) each, under the card."""
+    def set_hint(self, hint):
         if self.hint.text != hint:
             self.hint.text = hint
-        if self.card.text != card:
-            self.card.text = card
-            self.card.text_size = (dp(620), None)
-        self.card.opacity = 1 if card else 0
-        specs = tuple((text, primary) for text, _, primary in buttons) if card else ()
-        if specs != self._button_specs:
-            self._button_specs = specs
-            self.card_buttons.clear_widgets()
-            for text, callback, primary in (buttons if card else ()):
-                button = Button(text=text, font_size=sp(15), bold=primary, background_normal="", background_down="",
-                                background_color=(0.25, 0.55, 0.95, 1) if primary else (1, 1, 1, 0.12))
-                button.bind(on_release=lambda *_, callback=callback: callback())
-                self.card_buttons.add_widget(button)
-        self.card_buttons.opacity = 1 if specs else 0
-        self.card_buttons.disabled = not specs
-
-    @property
-    def card_showing(self):
-        return bool(self.card.opacity)
-
-    def card_hit(self, touch):
-        return bool(self.card_buttons.opacity) and self.card_buttons.collide_point(*touch.pos)
 
     # ---- Layout ------------------------------------------------------------------------------
 
-    def place(self, hint, card_center, verdicts, banner):
-        """hint: (x, top, width); card_center: (x, y); verdicts: (x, top) of the newest; banner:
-        (x, top, centred) where centred puts its middle at x."""
+    def place(self, hint, verdicts, banner):
+        """hint: (x, top, width); verdicts: (x, top) of the newest; banner: (x, top, centred) where
+        centred puts its middle at x."""
         x, top, width = hint
         self.hint.text_size = (width, None)
         self.hint.texture_update()
         self.hint.size = (width, self.hint.texture_size[1])
         self.hint.pos = (x, top - self.hint.height)
-        cx, cy = card_center
-        self.card.pos = (cx - self.card.width / 2, cy - self.card.height / 2 + dp(24))
-        self.card_buttons.width = self.card.width
-        self.card_buttons.pos = (self.card.x, self.card.y - self.card_buttons.height - dp(6))
         self._verdicts_at = verdicts
         self._banner_at = banner
 
@@ -172,24 +142,87 @@ class Feedback:
         return "   ·   ".join(parts)
 
 
+class CardLayer(FloatLayout):
+    """The getting-started or coach card, over whichever display is showing: the display dimmed
+    behind it, so nothing it draws pokes out from under the card, and its buttons under it. While
+    it shows it takes every click (the buttons get theirs); hidden, clicks go through."""
+
+    SCRIM = (0.05, 0.05, 0.06, 0.62)
+
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        with self.canvas.before:
+            self._scrim_color = Color(*self.SCRIM[:3], 0)
+            self._scrim = Rectangle()
+        self.bind(pos=self._layout, size=self._layout)
+        self.card = _panel_label((0.1, 0.1, 0.13, 1), font_size=sp(15), color=(0.9, 0.9, 0.92, 1),
+                                 halign="left", valign="middle", padding=(dp(28), dp(22)))
+        self.buttons = BoxLayout(size_hint=(None, None), height=dp(40), spacing=dp(8))
+        self.add_widget(self.card)
+        self.add_widget(self.buttons)
+        self.card.bind(size=self._layout)
+        self._specs = None
+        self.showing = False
+        self.set_card("")
+
+    def set_card(self, text, buttons=()):
+        """The card's text (empty hides it) and its buttons: (text, callback, primary) each."""
+        if self.card.text != text:
+            self.card.text = text
+            self.card.text_size = (dp(620), None)
+        self.showing = bool(text)
+        self.opacity = 1 if text else 0
+        self._scrim_color.a = self.SCRIM[3] if text else 0
+        specs = tuple((label, primary) for label, _, primary in buttons) if text else ()
+        if specs != self._specs:
+            self._specs = specs
+            self.buttons.clear_widgets()
+            for label, callback, primary in (buttons if text else ()):
+                button = Button(text=label, font_size=sp(15), bold=primary, background_normal="", background_down="",
+                                background_color=(0.25, 0.55, 0.95, 1) if primary else (1, 1, 1, 0.12))
+                button.bind(on_release=lambda *_, callback=callback: callback())
+                self.buttons.add_widget(button)
+        self._layout()
+
+    def _layout(self, *args):
+        self._scrim.pos, self._scrim.size = self.pos, self.size
+        self.card.pos = (self.center_x - self.card.width / 2, self.center_y - self.card.height / 2 + dp(24))
+        self.buttons.width = self.card.width
+        self.buttons.pos = (self.card.x, self.card.y - self.buttons.height - dp(6))
+
+    def on_touch_down(self, touch):
+        if not self.showing:
+            return False
+        super().on_touch_down(touch)
+        return True  # Modal while it shows.
+
+    def on_touch_move(self, touch):
+        return self.showing and (super().on_touch_move(touch) or True)
+
+    def on_touch_up(self, touch):
+        return self.showing and (super().on_touch_up(touch) or True)
+
+
 class FeedbackDisplay:
     """For the falling displays (arrow lanes, ring): the shared feedback, laid out around their
-    prompts: the hint top left, the banner centred under it, the card in the middle and verdicts at
-    verdict_spot(), which each display defines in its own coordinates."""
+    prompts: the hint top left, the banner centred under it and verdicts at verdict_spot(), which
+    each display defines in its own coordinates."""
+
+    card_up = False  # Set by the app while the card covers the display.
 
     def _init_feedback(self):
         self.feedback = Feedback(self)
 
-    def set_guidance(self, hint, card="", buttons=()):
-        self.feedback.set_guidance(hint, card, buttons)
+    def set_hint(self, hint):
+        self.feedback.set_hint(hint)
 
     def show_feedback(self, judgements, last_pass):
         width, height = self.size
         hint_top = height - dp(12)
         hint = self.feedback.hint
         hint_bottom = hint_top - (hint.height + dp(8) if hint.text else 0)
-        self.feedback.place(hint=(dp(16), hint_top, width * 0.45), card_center=(width / 2, height / 2),
-                            verdicts=self.verdict_spot(), banner=(width / 2, hint_bottom - dp(4), True))
+        self.feedback.place(hint=(dp(16), hint_top, width * 0.45), verdicts=self.verdict_spot(),
+                            banner=(width / 2, hint_bottom - dp(4), True))
         self.feedback.draw(judgements, last_pass)
 
     def verdict_spot(self):
