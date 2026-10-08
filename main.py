@@ -49,7 +49,7 @@ from playalong import PlayalongController
 from sampler import FPS, InputSampler
 from screen_capture import ScreenRecorder, list_displays, prepare_capture
 from virtual_pad import VirtualPad, VirtualPadError
-from widgets import BACKGROUND
+from widgets import BACKGROUND, set_background
 import theme
 from theme import markup
 from video_writer import nvenc_available, resolve_encoder, write_capture_and_overlay, write_input_video
@@ -141,6 +141,7 @@ class WomboComboApp(App):
             "overlay_delay": 4,
             "export_overlay_on_save": 1,
             "opacity": 0.5,
+            "see_through": 1,  # Overlay mode: only what's drawn covers the game, not the background.
             "loop": 1,
             "practice": 1,
             "lookahead": 1.5,  # Seconds of input shown ahead of the line: the scroll speed.
@@ -202,6 +203,7 @@ class WomboComboApp(App):
         self.set_game(self.default_game(), None, mark_edited=False)
         self.set_actions_visible(self.config.getboolean("wombo", "show_actions"))
         self.set_up_next_visible(self.config.getboolean("wombo", "show_next"))
+        self.menu_bar.set_see_through(self.config.getboolean("wombo", "see_through"))
         self.set_lanes_shown(set(filter(None, self.config.get("wombo", "lanes").split(","))))
         self.menu_bar.set_recent(self.recent_recordings())
         return self.root_layout
@@ -1124,12 +1126,47 @@ class WomboComboApp(App):
         return self.config.getfloat("wombo", "opacity")
 
     def set_opacity(self, opacity):
-        Window.opacity = opacity
         self.config.set("wombo", "opacity", round(opacity, 2))
+        self._apply_window_alpha(opacity)
 
     def preview_opacity(self, active):
         # The window is only see-through in overlay mode; the slider previews it while adjusting.
-        Window.opacity = self.get_opacity() if active or self.topmost else 1
+        self._apply_window_alpha(self.get_opacity() if active or self.topmost else 1)
+
+    def _see_through(self):
+        return self.topmost and self.config.getboolean("wombo", "see_through")
+
+    def _apply_window_alpha(self, alpha):
+        """The window's opacity, and in a see-through overlay, the background colour made transparent
+        (Windows' colour key) so the game shows through around what's drawn."""
+        Window.opacity = alpha
+        if not self._see_through():
+            return
+        hwnd = Window.get_window_info().window
+        style = win32gui.GetWindowLong(hwnd, win32con.GWL_EXSTYLE)
+        if not style & win32con.WS_EX_LAYERED:
+            win32gui.SetWindowLong(hwnd, win32con.GWL_EXSTYLE, style | win32con.WS_EX_LAYERED)
+        key = win32api.RGB(*(round(c * 255) for c in theme.OVERLAY_KEY))
+        win32gui.SetLayeredWindowAttributes(hwnd, key, round(alpha * 255),
+                                            win32con.LWA_COLORKEY | win32con.LWA_ALPHA)
+
+    def _set_overlay_background(self):
+        """In a see-through overlay the background is the colour key; otherwise the usual grey."""
+        see_through = self._see_through()
+        background = theme.OVERLAY_KEY if see_through else BACKGROUND
+        Window.clearcolor = (*background, 1 if see_through else 0.5)
+        set_background(background)
+        self.input_list_layout.minimal = see_through
+
+    def toggle_see_through(self):
+        self.config.set("wombo", "see_through", int(not self.config.getboolean("wombo", "see_through")))
+        self.menu_bar.set_see_through(self.config.getboolean("wombo", "see_through"))
+        if self.topmost:
+            self._set_overlay_background()
+            hwnd = Window.get_window_info().window
+            if not self._see_through():  # Back to plain opacity.
+                win32gui.SetLayeredWindowAttributes(hwnd, 0, round(self.get_opacity() * 255), win32con.LWA_ALPHA)
+            self.preview_opacity(False)
 
     def toggle_overlay(self):
         self.topmost = not self.topmost
@@ -1150,6 +1187,7 @@ class WomboComboApp(App):
             if self._normal_placement[1] == win32con.SW_SHOWMAXIMIZED:
                 win32gui.ShowWindow(hwnd, win32con.SW_RESTORE)  # A maximized window can't be resized.
             Window.borderless = True
+            self._set_overlay_background()
             self.root_layout.remove_widget(self.menu_bar)
             self.root_layout.remove_widget(self.status_bar)
             self._place_window(left, top, width, height)
@@ -1161,6 +1199,7 @@ class WomboComboApp(App):
             self.root_layout.add_widget(self.status_bar, index=0)
             self._set_on_top(False)
             self._overlay_origin = None
+            self._set_overlay_background()
             self.input_list_layout.freeze_scale = False
             Clock.schedule_once(lambda dt: self.input_list_layout._rescale(), 0.3)
             # Put back exactly where it was. Again shortly after, as the border comes back after a delay

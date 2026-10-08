@@ -196,13 +196,24 @@ class Prompt:
         self.silhouette = silhouette_of(image)
 
 
+_knockout_colors = []  # Every Knockout's colour, to follow the window's background.
+
+
+def set_background(rgb):
+    """The window's background changed (e.g. to the see-through overlay's): knockouts follow it."""
+    for color in _knockout_colors:
+        color.rgb = rgb
+
+
 class Knockout:
     """Keeps hold tails behind everything: each thing drawn over the tails gets a rectangle of its
     silhouette in the background colour, in group, which goes between the tails and the things."""
 
     def __init__(self):
         self.group = InstructionGroup()
-        self.group.add(Color(*BACKGROUND, 1))
+        color = Color(*BACKGROUND, 1)
+        _knockout_colors.append(color)
+        self.group.add(color)
 
     def add(self, silhouette):
         """A rectangle for one covering thing; keep its pos and size in step with the thing's."""

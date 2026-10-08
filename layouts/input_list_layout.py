@@ -453,7 +453,7 @@ class InputListLayout(StencilView):
             self.selection_edges = [Rectangle(), Rectangle()]
         with self.canvas.after:
             # The gutter covers boxes that scroll past the left edge of the track.
-            Color(*GUTTER_COLOR)
+            self.gutter_color = Color(*GUTTER_COLOR)
             self.gutter = Rectangle()
             self.label_layer = InstructionGroup()
             self.line_color = Color(*LINE_COLOR)
@@ -476,6 +476,7 @@ class InputListLayout(StencilView):
         self.card_up = False  # Set by the app while the getting-started card covers the list.
         self.scale = 1.0
         self.freeze_scale = False  # Set by the app in overlay mode, where the window fits the list instead.
+        self.minimal = False  # A see-through overlay: no lane names or lane backgrounds, just the inputs.
         self.bind(size=self._rescale)
         # The verdicts and pass banner, shared with the other displays.
         self.feedback = Feedback(self)
@@ -561,9 +562,10 @@ class InputListLayout(StencilView):
         """Lane panels and gutter labels, the gutter, and the hit line down to the live input."""
         left, right = self._track_left(), self._track_right()
         self._label_hits = []
+        self.gutter_color.a = 0 if self.minimal else 1
         for name, (y, height) in lanes.items():
             is_run = isinstance(name, tuple)
-            if not is_run and name not in LANES:
+            if self.minimal or (not is_run and name not in LANES):
                 continue
             color, panel = self.panels.next()
             color.rgba = PANEL_COLOR

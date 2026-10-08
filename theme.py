@@ -22,6 +22,10 @@ SURFACE = (0.14, 0.14, 0.17)  # Dialogs, menus.
 SURFACE_RAISED = (0.19, 0.19, 0.23)  # Inputs, rows inside dialogs.
 GUTTER = (0.08, 0.08, 0.1)  # The input list's lane names.
 SCRIM = (0.05, 0.05, 0.06, 0.62)  # Behind cards and dialogs.
+# The background in a see-through overlay: Windows makes exactly this colour transparent, so the
+# game shows through everywhere nothing is drawn. Near black, so edges blending into it read as a
+# dark outline; not pure black, so black drawn on purpose (text outlines) stays.
+OVERLAY_KEY = (1 / 255, 1 / 255, 2 / 255)
 
 # ---- Text -------------------------------------------------------------------------------------
 TEXT = (0.93, 0.93, 0.95, 1)

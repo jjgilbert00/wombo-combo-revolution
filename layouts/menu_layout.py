@@ -384,6 +384,7 @@ class MenuBar(BoxLayout):
         view_menu.add_item("Next display", app.toggle_display, "F3")
         view_menu.add_separator()
         view_menu.add_item("Overlay mode", app.toggle_overlay, "F2")
+        self.see_through_item = view_menu.add_item("See-through overlay", app.toggle_see_through)
         self.notes_item = view_menu.add_item("Hide notes", app.toggle_notes, "Shift+F3")
         self.actions_item = view_menu.add_item("Show game actions", app.toggle_actions)
         self.next_item = view_menu.add_item("Hide up-next panel", app.toggle_up_next)
@@ -495,6 +496,10 @@ class MenuBar(BoxLayout):
 
     def set_notes_visible(self, visible):
         self.notes_item.label.text = "Hide notes" if visible else "Show notes"
+
+    def set_see_through(self, on):
+        """Overlay mode with only what's drawn covering the game (on), or the whole window (off)."""
+        self.see_through_item.shortcut.text = "on" if on else "off"
 
     def set_up_next_visible(self, visible):
         self.next_item.label.text = "Hide up-next panel" if visible else "Show up-next panel"
