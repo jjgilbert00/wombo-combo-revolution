@@ -17,20 +17,16 @@ from kivy.uix.floatlayout import FloatLayout
 from kivy.uix.label import Label
 
 from key_inputs import EARLY, LATE
+import theme
 
-GRADE_COLORS = {"hit": (0.45, 0.9, 0.5), "early": (0.45, 0.62, 1.0), "late": (1.0, 0.62, 0.2),
-                "miss": (1, 0.42, 0.42), "pending": (0.45, 0.45, 0.5)}
+GRADE_COLORS = theme.GRADES
 BANNER_SECONDS = 3.5  # How long a pass's score stays up.
 _verdict_textures = {}
 
 
-def _hex(rgb):
-    return "".join(f"{round(c * 255):02x}" for c in rgb)
-
-
 def _verdict_texture(text):
     if text not in _verdict_textures:
-        label = MarkupLabel(text=text, font_size=sp(24), bold=True, outline_width=2, outline_color=(0, 0, 0))
+        label = MarkupLabel(text=text, font_size=theme.TITLE, bold=True, outline_width=2, outline_color=(0, 0, 0))
         label.refresh()
         _verdict_textures[text] = label.texture
     return _verdict_textures[text]
@@ -51,9 +47,9 @@ def _panel_label(background, **kwargs):
 class Feedback:
     def __init__(self, host):
         self.host = host
-        self.hint = Label(markup=True, font_size=sp(14), color=(0.78, 0.78, 0.82, 1), halign="left", valign="top",
+        self.hint = Label(markup=True, font_size=theme.BODY, color=theme.TEXT_DIM, halign="left", valign="top",
                           size_hint=(None, None))
-        self.banner = _panel_label((0.08, 0.08, 0.1, 0.94), font_size=sp(18), color=(0.95, 0.95, 0.97, 1),
+        self.banner = _panel_label((0.08, 0.08, 0.1, 0.94), font_size=theme.TITLE, color=theme.TEXT,
                                    padding=(dp(18), dp(10)), opacity=0)
         for widget in (self.hint, self.banner):
             host.add_widget(widget)
@@ -127,13 +123,13 @@ class Feedback:
         if last_pass["total"]:
             parts = [f"[b]Run {last_pass['run']}[/b]", f"[b]{last_pass['hits']}/{last_pass['total']}[/b]"]
             if last_pass["hits"] == last_pass["total"]:
-                parts.append("[color=5ce176][b]PERFECT[/b][/color]")
+                parts.append(theme.markup("PERFECT", theme.HIT, bold=True))
                 if last_pass["streak"] > 1:
                     parts.append(f"{last_pass['streak']} in a row")
             else:
                 for notation, grade, offset in last_pass["problems"][:2]:
                     detail = {EARLY: f"{-offset}f early", LATE: f"{offset}f late"}.get(grade, "missed")
-                    parts.append(f"{notation} [color={_hex(GRADE_COLORS[grade])}]{detail}[/color]")
+                    parts.append(f"{notation} {theme.markup(detail, GRADE_COLORS[grade])}")
                 parts.append(f"best {last_pass['best']}/{last_pass['total']}")
         elif last_pass["match"] is not None:
             parts = [f"[b]Run {last_pass['run']}[/b]", f"matched {last_pass['match']:.0%} of frames"]
@@ -147,7 +143,7 @@ class CardLayer(FloatLayout):
     behind it, so nothing it draws pokes out from under the card, and its buttons under it. While
     it shows it takes every click (the buttons get theirs); hidden, clicks go through."""
 
-    SCRIM = (0.05, 0.05, 0.06, 0.62)
+    SCRIM = theme.SCRIM
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
@@ -155,7 +151,7 @@ class CardLayer(FloatLayout):
             self._scrim_color = Color(*self.SCRIM[:3], 0)
             self._scrim = Rectangle()
         self.bind(pos=self._layout, size=self._layout)
-        self.card = _panel_label((0.1, 0.1, 0.13, 1), font_size=sp(15), color=(0.9, 0.9, 0.92, 1),
+        self.card = _panel_label((*theme.SURFACE, 1), font_size=theme.LARGE, color=theme.TEXT,
                                  halign="left", valign="middle", padding=(dp(28), dp(22)))
         self.buttons = BoxLayout(size_hint=(None, None), height=dp(40), spacing=dp(8))
         self.add_widget(self.card)
@@ -178,8 +174,9 @@ class CardLayer(FloatLayout):
             self._specs = specs
             self.buttons.clear_widgets()
             for label, callback, primary in (buttons if text else ()):
-                button = Button(text=label, font_size=sp(15), bold=primary, background_normal="", background_down="",
-                                background_color=(0.25, 0.55, 0.95, 1) if primary else (1, 1, 1, 0.12))
+                button = Button(text=label, font_size=theme.LARGE, bold=primary, background_normal="",
+                                background_down="", background_color=(*theme.ACCENT, 1) if primary else (*theme.SURFACE_RAISED, 1),
+                                color=theme.TEXT_ON_ACCENT if primary else theme.TEXT)
                 button.bind(on_release=lambda *_, callback=callback: callback())
                 self.buttons.add_widget(button)
         self._layout()

@@ -50,6 +50,8 @@ from sampler import FPS, InputSampler
 from screen_capture import ScreenRecorder, list_displays, prepare_capture
 from virtual_pad import VirtualPad, VirtualPadError
 from widgets import BACKGROUND
+import theme
+from theme import markup
 from video_writer import nvenc_available, resolve_encoder, write_capture_and_overlay, write_input_video
 
 logger = logging.getLogger(__name__)
@@ -373,10 +375,13 @@ class WomboComboApp(App):
         if reader is None or not reader.connected:
             self.select_controller()
 
-    def flash(self, text, color="dddddd", seconds=4):
-        self.message = (f"[color={color}]{text}[/color]", time.time() + seconds)
+    FLASH_COLORS = {"info": theme.TEXT, "warning": theme.WARNING, "error": theme.MISS}
+
+    def flash(self, text, kind="info", seconds=4):
+        """A message in the status bar for a few seconds: kind is "info", "warning" or "error"."""
+        self.message = (markup(text, self.FLASH_COLORS[kind]), time.time() + seconds)
         # Also logged: a message shown while the game has focus is never seen.
-        logger.log(logging.WARNING if color in ("ff6b6b", "ffb454") else logging.INFO, "Status: %s", text)
+        logger.log(logging.INFO if kind == "info" else logging.WARNING, "Status: %s", text)
 
     @staticmethod
     def beep(ok=True):
@@ -395,12 +400,12 @@ class WomboComboApp(App):
         frames = len(controller.input_track)
         parts = []
         if controller.is_recording():
-            parts.append(f"[color=ff6b6b]REC[/color] {format_time(frames)}")
+            parts.append(f"{markup('REC', theme.DANGER, bold=True)} {format_time(frames)}")
             if controller.filled_frames:
-                parts.append(f"[color=ffb454]{controller.filled_frames} late frames[/color]")
+                parts.append(markup(f"{controller.filled_frames} late frames", theme.WARNING))
             backlog = self.screen_recorder.backlog() if self.screen_recorder else 0
             if backlog > FPS // 2:
-                parts.append(f"[color=ffb454]encoder {backlog / FPS:.1f}s behind[/color]")
+                parts.append(markup(f"encoder {backlog / FPS:.1f}s behind", theme.WARNING))
         elif frames:
             if controller.demo_kind():
                 lead = controller.get_lead()
@@ -420,9 +425,9 @@ class WomboComboApp(App):
                 accuracy = controller.matched_frames / controller.attempted_frames
                 parts.append(f"Match {accuracy:.0%} of {controller.attempted_frames}f")
             if controller.button_map:
-                parts.append("[color=8fb8ff]Buttons remapped[/color]")
+                parts.append(markup("Buttons remapped", theme.INFO))
             if self.unsaved_take or self.unsaved_edits:
-                parts.append("[color=ffb454]Unsaved[/color]")
+                parts.append(markup("Unsaved", theme.WARNING))
         else:
             parts.append("No track")
         if self.job_label:
@@ -431,11 +436,11 @@ class WomboComboApp(App):
         if self.selection:
             start, end = self.selection
             span = f"frame {start}" if start == end else f"frames {start}-{end} ({end - start + 1}f)"
-            parts.append(f"[color=8fb8ff]Selected {span}[/color]")
+            parts.append(markup(f"Selected {span}", theme.INFO))
         if self.message and time.time() < self.message[1]:
             parts.append(self.message[0])
         reader = self.sampler.reader
-        parts.append(reader.name if reader and reader.connected else "[color=ffb454]No controller[/color]")
+        parts.append(reader.name if reader and reader.connected else markup("No controller", theme.WARNING))
         parts.append(f"{stats.rate:.1f} Hz")
         self.menu_bar.update(controller.is_recording(), controller.is_playing(), controller.loop, controller.practice,
                              "   |   ".join(parts), demoing=bool(controller.demo_kind()))
@@ -462,7 +467,7 @@ class WomboComboApp(App):
             if reader and reader.connected:
                 note = f"Using [b]{reader.name}[/b]: press a button and it shows up under the line."
             else:
-                note = ("[color=ffb454][b]No controller found.[/b][/color] Plug one in (it's picked up by itself), "
+                note = (f"{markup('No controller found.', theme.WARNING, bold=True)} Plug one in (it's picked up by itself), "
                         "or play on the keyboard: [b]WASD[/b] to move, [b]U I O[/b] punches, [b]J K L[/b] kicks.")
             return COACH.format(controller=note), (("Start", self.play, True), ("Not now", self.skip_coaching, False))
         return "", ()
@@ -545,12 +550,12 @@ class WomboComboApp(App):
     def _demo(self, kind):
         controller = self.playalong_controller
         if controller.is_recording() or not controller.input_track:
-            self.flash("Open or record something to demo first", "ffb454")
+            self.flash("Open or record something to demo first", "warning")
             self.beep(False)
             return
         if kind == "key inputs":
             if not controller.key_inputs:
-                self.flash("No key inputs to demo: select frames and press K to mark them", "ffb454", 6)
+                self.flash("No key inputs to demo: select frames and press K to mark them", "warning", 6)
                 self.beep(False)
                 return
             track = demo_track(controller.get_key_inputs(), controller.get_input_track())
@@ -560,7 +565,7 @@ class WomboComboApp(App):
             try:
                 self.virtual_pad = VirtualPad()
             except VirtualPadError as e:
-                self.flash(str(e), "ff6b6b", 12)
+                self.flash(str(e), "error", 12)
                 self.beep(False)
                 return
         controller.pause()  # Also ends a demo already playing.
@@ -569,7 +574,7 @@ class WomboComboApp(App):
         # The game reads the player's own layout, so the demo presses the player's buttons.
         controller.start_demo(track, lambda state: pad.send(map_state(state, mapping)), countdown, kind)
         self.set_selection(None)
-        self.flash(f"Demo of the {kind} in {countdown / FPS:g}s: switch to the game", "8fd18f", 5)
+        self.flash(f"Demo of the {kind} in {countdown / FPS:g}s: switch to the game", "info", 5)
         self._countdown_second = None  # update_status ticks each second of the countdown audibly.
 
     def scrub(self, frames):
@@ -679,15 +684,15 @@ class WomboComboApp(App):
         def save(shown):
             edited = map_key_input(shown, to_recorded)
             if not edited.get("exact") and not (edited["motion"] or edited["buttons"] or edited["direction"]):
-                self.flash("A key input needs a motion, a direction or a button (or to be an exact span)", "ffb454")
+                self.flash("A key input needs a motion, a direction or a button (or to be an exact span)", "warning")
                 return
             if edited["hold"] and not edited["exact"]:
                 count = edited["end"] - edited["start"] + 1
                 if not (edited["buttons"] or edited["direction"]):
-                    self.flash("A hold needs a direction or a button to hold", "ffb454")
+                    self.flash("A hold needs a direction or a button to hold", "warning")
                     return
                 if edited["hold"] > count:
-                    self.flash(f"The hold is longer than its {count}-frame window", "ffb454")
+                    self.flash(f"The hold is longer than its {count}-frame window", "warning")
                     return
             controller.set_key_input(index, edited)
             self.unsaved_edits = True
@@ -709,7 +714,7 @@ class WomboComboApp(App):
         recorded button did."""
         controller = self.playalong_controller
         if controller.is_recording() or not controller.input_track:
-            self.flash("Open a recording to remap its buttons", "ffb454")
+            self.flash("Open a recording to remap its buttons", "warning")
             return
         track = controller.get_input_track()
         used = {button: sum(1 for i, frame in enumerate(track) if frame[button] and (i == 0 or not track[i - 1][button]))
@@ -733,7 +738,7 @@ class WomboComboApp(App):
             return
         saved = controller.save_attempt()
         if not saved:
-            self.flash("No attempt to save yet: turn on Practice (F4) and play", "ffb454")
+            self.flash("No attempt to save yet: turn on Practice (F4) and play", "warning")
             return
         self.store_saved_attempts(f"Saved attempt as \"{saved['name']}\"")
 
@@ -853,7 +858,7 @@ class WomboComboApp(App):
                 frame_sink = self.screen_recorder.capture
             except Exception as e:
                 logger.exception("Couldn't start video capture")
-                self.flash(f"Recording inputs only, video capture failed: {e}", "ffb454", 8)
+                self.flash(f"Recording inputs only, video capture failed: {e}", "warning", 8)
                 self.screen_recorder = None
         self.playalong_controller.start_recording(frame_sink)
         self.set_selection(None)
@@ -914,7 +919,7 @@ class WomboComboApp(App):
         """Opens the warm-up sample and coaches the player through a first go."""
         warm_up = next((path for path in self.sample_recordings() if "Warm-up" in os.path.basename(path)), None)
         if not warm_up:
-            self.flash("The warm-up sample is missing from the samples folder", "ff6b6b", 6)
+            self.flash("The warm-up sample is missing from the samples folder", "error", 6)
             return
         self.open_track(warm_up)
         self.coaching = bool(self.playalong_controller.input_track)
@@ -937,16 +942,16 @@ class WomboComboApp(App):
         if path.lower().endswith(".mp4"):
             path = os.path.splitext(path)[0] + ".json"
             if not os.path.exists(path):
-                self.flash(f"No inputs for that video: {os.path.basename(path)} is missing", "ff6b6b", 8)
+                self.flash(f"No inputs for that video: {os.path.basename(path)} is missing", "error", 8)
                 return
         elif not path.lower().endswith(".json"):
-            self.flash("Open a recording's .json or .mp4 file", "ffb454")
+            self.flash("Open a recording's .json or .mp4 file", "warning")
             return
         try:
             with open(path, "r") as fin:
                 data = json.load(fin)
         except (OSError, ValueError) as e:
-            self.flash(f"Couldn't open {os.path.basename(path)}: {e}", "ff6b6b", 8)
+            self.flash(f"Couldn't open {os.path.basename(path)}: {e}", "error", 8)
             return
         if self.playalong_controller.is_recording():
             self.stop_recording()
@@ -969,7 +974,7 @@ class WomboComboApp(App):
         if not self.playalong_controller.practice:
             self.toggle_practice()
         Window.set_title(f"{TITLE} - {os.path.splitext(os.path.basename(path))[0]}")
-        self.flash(f"Opened {os.path.basename(path)}. Press Space (or F6 in game) to practise", "8fd18f", 6)
+        self.flash(f"Opened {os.path.basename(path)}", "info", 6)
 
     def _track_data(self):
         """The track and everything made for it, as saved in its .json."""
@@ -1023,7 +1028,7 @@ class WomboComboApp(App):
         data = self._track_data()
         inputs, notes = data["inputs"], data.get("notes", [])
         if not inputs:
-            self.flash("Nothing to save", "ffb454")
+            self.flash("Nothing to save", "warning")
             return False
         path = dialogs.save_file("Save recording", "Recordings (*.mp4)", "*.mp4", "mp4")
         if not path:
@@ -1055,7 +1060,7 @@ class WomboComboApp(App):
         if self.playalong_controller.is_recording():
             self.stop_recording()
         if not self.capture_path:
-            self.flash("No video for this track. Record with video capture on, or open a saved recording.", "ffb454", 6)
+            self.flash("No video for this track. Record with video capture on, or open a saved recording.", "warning", 6)
             return
         path = dialogs.save_file("Export overlay video", "Videos (*.mp4)", "*.mp4", "mp4")
         if path:
@@ -1074,7 +1079,7 @@ class WomboComboApp(App):
         notes = self.playalong_controller.get_notes()
         key_inputs = self.playalong_controller.get_key_inputs()
         if not inputs:
-            self.flash("Nothing to export", "ffb454")
+            self.flash("Nothing to export", "warning")
             return
         path = dialogs.save_file("Export input video", "Videos (*.mp4)", "*.mp4", "mp4")
         if path:
@@ -1100,10 +1105,10 @@ class WomboComboApp(App):
             try:
                 work(lambda fraction: setattr(self, "job_progress", fraction))
                 if done_message:
-                    self.flash(done_message, "8fd18f")
+                    self.flash(done_message, "info")
             except Exception as e:
                 logger.exception("%s failed", label)
-                self.flash(f"{label} failed: {e}", "ff6b6b", 10)
+                self.flash(f"{label} failed: {e}", "error", 10)
             finally:
                 self.job_label, self.job_progress = None, None
 
@@ -1241,12 +1246,12 @@ class WomboComboApp(App):
     def toggle_actions(self):
         self.set_actions_visible(not self.playalong_controller.show_actions)
         if self.playalong_controller.show_actions and not self.playalong_controller.game:
-            self.flash("This recording has no game: choose one in Edit > Game actions...", "ffb454", 6)
+            self.flash("This recording has no game: choose one in Edit > Game actions...", "warning", 6)
 
     def edit_game_actions(self):
         controller = self.playalong_controller
         if controller.is_recording() or not controller.input_track:
-            self.flash("Open a recording to set its game actions", "ffb454")
+            self.flash("Open a recording to set its game actions", "warning")
             return
         track = controller.get_input_track()
         used = {button: sum(1 for i, frame in enumerate(track) if frame[button] and (i == 0 or not track[i - 1][button]))
@@ -1326,7 +1331,7 @@ class WomboComboApp(App):
         try:
             os.startfile(path)
         except OSError as e:
-            self.flash(f"Couldn't open the user guide ({path}): {e}", "ff6b6b", 8)
+            self.flash(f"Couldn't open the user guide ({path}): {e}", "error", 8)
 
     def open_settings_popup(self):
         readers = self.select_controller()

@@ -21,16 +21,18 @@ from kivy.uix.textinput import TextInput
 from kivy.uix.togglebutton import ToggleButton
 from kivy.uix.widget import Widget
 
+import theme
+
 BAR_HEIGHT = dp(36)
-BAR_COLOR = (0.10, 0.10, 0.12, 0.95)
-PANEL_COLOR = (0.14, 0.14, 0.17, 1)
+BAR_COLOR = (*theme.BAR, 0.95)
+PANEL_COLOR = (*theme.SURFACE, 1)
 HOVER_COLOR = (1, 1, 1, 0.08)
 ACTIVE_COLOR = (1, 1, 1, 0.16)
-RECORD_COLOR = (0.85, 0.2, 0.2, 1)
-DEMO_COLOR = (0.25, 0.5, 0.9, 1)
-TEXT_COLOR = (0.92, 0.92, 0.92, 1)
-DIM_TEXT_COLOR = (0.6, 0.6, 0.64, 1)
-FONT_SIZE = sp(14)
+RECORD_COLOR = (*theme.DANGER, 1)
+DEMO_COLOR = (*theme.HOLD, 0.55)
+TEXT_COLOR = theme.TEXT
+DIM_TEXT_COLOR = theme.TEXT_DIM
+FONT_SIZE = theme.BODY
 MENU_TIPS = {
     "File": "Open a recording (or drop one on the window), save, and export videos",
     "Edit": "Notes, key inputs and attempts. Select frames in the input list first (right-click for a menu)",
@@ -79,7 +81,7 @@ class Tooltip(Label):
     _instance = None
 
     def __init__(self, **kwargs):
-        super().__init__(markup=True, font_size=sp(13), color=TEXT_COLOR, size_hint=(None, None), halign="left",
+        super().__init__(markup=True, font_size=theme.BODY, color=TEXT_COLOR, size_hint=(None, None), halign="left",
                          valign="middle", padding=(dp(10), dp(6)), **kwargs)
         _paint_background(self, (0.05, 0.05, 0.07, 0.96))
         self.bind(texture_size=lambda *_: setattr(self, "size", self.texture_size))
@@ -400,7 +402,7 @@ class SettingsPopup(ModalView):
                          background="", background_color=(0, 0, 0, 0.5), **kwargs)
         panel = BoxLayout(orientation="vertical", padding=dp(16), spacing=dp(12))
         _paint_background(panel, PANEL_COLOR)
-        panel.add_widget(Label(text="Settings", font_size=sp(18), bold=True, color=TEXT_COLOR, size_hint_y=None,
+        panel.add_widget(Label(text="Settings", font_size=theme.TITLE, bold=True, color=TEXT_COLOR, size_hint_y=None,
                                height=dp(24), halign="left", text_size=(dp(448), None)))
         grid = GridLayout(cols=2, spacing=(dp(12), dp(12)), row_default_height=dp(32), row_force_default=True)
         for label, choices, current, on_change in rows:
@@ -439,7 +441,7 @@ class HelpPopup(ModalView):
                          background="", background_color=(0, 0, 0, 0.5), **kwargs)
         panel = BoxLayout(orientation="vertical", padding=dp(20), spacing=dp(8))
         _paint_background(panel, PANEL_COLOR)
-        panel.add_widget(self._label("Getting started", sp(17), TEXT_COLOR, dp(26), bold=True))
+        panel.add_widget(self._label("Getting started", theme.TITLE, TEXT_COLOR, dp(26), bold=True))
         for number, step in enumerate(steps, 1):
             panel.add_widget(self._label(f"{number}.  {step}", FONT_SIZE, TEXT_COLOR, dp(24), markup=True))
         body = BoxLayout(spacing=dp(20), padding=(0, dp(10), 0, 0))
@@ -449,7 +451,7 @@ class HelpPopup(ModalView):
                 box.add_widget(self._label(title, FONT_SIZE, TEXT_COLOR, dp(32), bold=True, valign="bottom"))
                 for key, description in rows:
                     row = BoxLayout(size_hint_y=None, height=dp(24))
-                    row.add_widget(Label(text=key, font_size=FONT_SIZE, color=(1.0, 0.78, 0.2, 1), size_hint_x=None,
+                    row.add_widget(Label(text=key, font_size=FONT_SIZE, color=(*theme.ACCENT, 1), size_hint_x=None,
                                          width=self.KEY_WIDTH, halign="left", valign="middle",
                                          text_size=(self.KEY_WIDTH, dp(24))))
                     row.add_widget(Label(text=description, font_size=FONT_SIZE, color=TEXT_COLOR, halign="left",
@@ -461,7 +463,7 @@ class HelpPopup(ModalView):
         panel.add_widget(body)
         actions = BoxLayout(size_hint_y=None, height=dp(32), spacing=dp(8))
         actions.add_widget(self._label("Hover over any button for a tip. The user guide covers everything in detail.",
-                                       sp(12), DIM_TEXT_COLOR, dp(32)))
+                                       theme.CAPTION, DIM_TEXT_COLOR, dp(32)))
         guide = BarButton(text="Open user guide", highlight=(1, 1, 1, 0.1))
         guide.bind(on_release=lambda *_: (self.dismiss(), on_manual()))
         close = BarButton(text="Close", highlight=(1, 1, 1, 0.1))
@@ -488,7 +490,7 @@ class NotePopup(ModalView):
                          background_color=(0, 0, 0, 0.5), **kwargs)
         panel = BoxLayout(orientation="vertical", padding=dp(16), spacing=dp(12))
         _paint_background(panel, PANEL_COLOR)
-        panel.add_widget(Label(text=title, font_size=sp(16), bold=True, color=TEXT_COLOR, size_hint_y=None,
+        panel.add_widget(Label(text=title, font_size=theme.TITLE, bold=True, color=TEXT_COLOR, size_hint_y=None,
                                height=dp(22), halign="left", text_size=(dp(388), None)))
         self.input = TextInput(text=text, multiline=False, size_hint_y=None, height=dp(34), font_size=FONT_SIZE,
                                background_color=(1, 1, 1, 0.08), foreground_color=TEXT_COLOR,
@@ -531,8 +533,8 @@ class _Toggle(ToggleButton):
         if self.disabled:
             self.background_color = (1, 1, 1, 0.03)
         else:
-            self.background_color = (1.0, 0.78, 0.2, 0.9) if self.state == "down" else (1, 1, 1, 0.08)
-        self.color = (0.1, 0.08, 0.02, 1) if self.state == "down" else TEXT_COLOR
+            self.background_color = (*theme.ACCENT, 1) if self.state == "down" else (1, 1, 1, 0.08)
+        self.color = theme.TEXT_ON_ACCENT if self.state == "down" else TEXT_COLOR
 
 
 class KeyInputPopup(ModalView):
@@ -557,9 +559,9 @@ class KeyInputPopup(ModalView):
         panel = BoxLayout(orientation="vertical", padding=dp(16), spacing=dp(10))
         _paint_background(panel, PANEL_COLOR)
         header = BoxLayout(size_hint_y=None, height=dp(24))
-        header.add_widget(Label(text=title, font_size=sp(16), bold=True, color=TEXT_COLOR, halign="left",
+        header.add_widget(Label(text=title, font_size=theme.TITLE, bold=True, color=TEXT_COLOR, halign="left",
                                 valign="middle", size_hint_x=None, width=dp(300), text_size=(dp(300), dp(24))))
-        self.preview = Label(font_size=sp(16), bold=True, color=(1.0, 0.78, 0.2, 1), halign="right",
+        self.preview = Label(font_size=theme.LARGE, bold=True, color=(*theme.ACCENT, 1), halign="right",
                              valign="middle")
         self.preview.bind(size=lambda label, size: setattr(label, "text_size", size))
         header.add_widget(self.preview)
@@ -655,7 +657,7 @@ class KeyInputPopup(ModalView):
 
     @staticmethod
     def _hint(text):
-        return Label(text=text, font_size=sp(12), color=DIM_TEXT_COLOR, halign="left", valign="middle",
+        return Label(text=text, font_size=theme.CAPTION, color=DIM_TEXT_COLOR, halign="left", valign="middle",
                      text_size=(dp(250), None))
 
     def _stepper(self, text, edge, delta):
@@ -746,10 +748,10 @@ class AttemptsPopup(ModalView):
         panel = BoxLayout(orientation="vertical", padding=dp(16), spacing=dp(10))
         _paint_background(panel, PANEL_COLOR)
         header = BoxLayout(size_hint_y=None, height=dp(24))
-        header.add_widget(Label(text="Attempts", font_size=sp(16), bold=True, color=TEXT_COLOR, halign="left",
+        header.add_widget(Label(text="Attempts", font_size=theme.TITLE, bold=True, color=TEXT_COLOR, halign="left",
                                 valign="middle", size_hint_x=None, width=dp(120), text_size=(dp(120), dp(24))))
         header.add_widget(Label(text="Saved attempts are kept in the track's file. Replay plays one against the "
-                                     "recording; F4 goes back to practice.", font_size=sp(12), color=DIM_TEXT_COLOR,
+                                     "recording; F4 goes back to practice.", font_size=theme.CAPTION, color=DIM_TEXT_COLOR,
                                 halign="right", valign="middle", text_size=(dp(600), dp(24))))
         panel.add_widget(header)
         self.rows = GridLayout(cols=1, size_hint_y=None, spacing=dp(4))
@@ -850,10 +852,10 @@ class ButtonMapPopup(ModalView):
         self._updating = False
         panel = BoxLayout(orientation="vertical", padding=dp(16), spacing=dp(6))
         _paint_background(panel, PANEL_COLOR)
-        panel.add_widget(Label(text="Remap buttons for this recording", font_size=sp(16), bold=True, color=TEXT_COLOR,
+        panel.add_widget(Label(text="Remap buttons for this recording", font_size=theme.TITLE, bold=True, color=TEXT_COLOR,
                                size_hint_y=None, height=dp(24), halign="left", text_size=(dp(488), None)))
         panel.add_widget(Label(text="Pick the button you press for each recorded one. The list, scoring and demos "
-                                    "follow your buttons.", font_size=sp(12), color=DIM_TEXT_COLOR, size_hint_y=None,
+                                    "follow your buttons.", font_size=theme.CAPTION, color=DIM_TEXT_COLOR, size_hint_y=None,
                                height=dp(32), halign="left", valign="middle", text_size=(dp(488), dp(32))))
         for recorded in mapping:
             row = BoxLayout(size_hint_y=None, height=self.ROW_HEIGHT, spacing=dp(10))
@@ -862,7 +864,7 @@ class ButtonMapPopup(ModalView):
             row.add_widget(Label(text=f"Recorded {recorded}", font_size=FONT_SIZE, color=TEXT_COLOR if count else
                                  DIM_TEXT_COLOR, halign="left", valign="middle", size_hint_x=None, width=dp(120),
                                  text_size=(dp(120), self.ROW_HEIGHT)))
-            row.add_widget(Label(text=f"pressed {count}x" if count else "not used", font_size=sp(12),
+            row.add_widget(Label(text=f"pressed {count}x" if count else "not used", font_size=theme.CAPTION,
                                  color=DIM_TEXT_COLOR, halign="left", valign="middle", size_hint_x=None, width=dp(80),
                                  text_size=(dp(80), self.ROW_HEIGHT)))
             row.add_widget(Label(text="->", font_size=FONT_SIZE, color=DIM_TEXT_COLOR, size_hint_x=None,
@@ -925,10 +927,10 @@ class GameActionsPopup(ModalView):
         self._updating = False
         panel = BoxLayout(orientation="vertical", padding=dp(16), spacing=dp(6))
         _paint_background(panel, PANEL_COLOR)
-        panel.add_widget(Label(text="Game actions for this recording", font_size=sp(16), bold=True, color=TEXT_COLOR,
+        panel.add_widget(Label(text="Game actions for this recording", font_size=theme.TITLE, bold=True, color=TEXT_COLOR,
                                size_hint_y=None, height=dp(24), halign="left", text_size=(dp(488), None)))
         panel.add_widget(Label(text="Which action each recorded button is, in the layout it was recorded with. "
-                                    "View > Show game actions switches the list to them.", font_size=sp(12),
+                                    "View > Show game actions switches the list to them.", font_size=theme.CAPTION,
                                color=DIM_TEXT_COLOR, size_hint_y=None, height=dp(32), halign="left", valign="middle",
                                text_size=(dp(488), dp(32))))
         names = [NO_ACTION] + list(game_names.values())
@@ -947,7 +949,7 @@ class GameActionsPopup(ModalView):
             row.add_widget(Label(text=f"Recorded {recorded}", font_size=FONT_SIZE,
                                  color=TEXT_COLOR if count else DIM_TEXT_COLOR, halign="left", valign="middle",
                                  size_hint_x=None, width=dp(120), text_size=(dp(120), self.ROW_HEIGHT)))
-            row.add_widget(Label(text=f"pressed {count}x" if count else "not used", font_size=sp(12),
+            row.add_widget(Label(text=f"pressed {count}x" if count else "not used", font_size=theme.CAPTION,
                                  color=DIM_TEXT_COLOR, halign="left", valign="middle", size_hint_x=None, width=dp(80),
                                  text_size=(dp(80), self.ROW_HEIGHT)))
             spinner = _spinner([NO_ACTION], NO_ACTION, lambda action, recorded=recorded: self._choose(recorded, action))

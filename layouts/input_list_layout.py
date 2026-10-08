@@ -22,12 +22,13 @@ from games import GAMES, draw_action_icon
 from key_inputs import EARLY, LATE, PENDING, describe
 from layouts.feedback import Feedback
 from sampler import FPS
+import theme
 
 ICON_SIZE = dp(26)
 # A label is one icon wide: frame count on top, then the direction, then pressed buttons in a column.
 LABEL_PADDING = dp(2)
 LABEL_WIDTH = ICON_SIZE + 2 * LABEL_PADDING
-COUNT_FONT_SIZE = sp(14)
+COUNT_FONT_SIZE = theme.BODY
 DISPLAY_COUNT_LIMIT = 99  # Longer holds show "99+", like training-mode input displays.
 LANE_BUTTON_ROWS = 3  # Lanes are tall enough for this many buttons; more overflow the lane.
 MARGIN = dp(24)
@@ -50,29 +51,29 @@ MIN_LOOKAHEAD, MAX_LOOKAHEAD = 0.4, 8.0
 DEFAULT_PX_PER_FRAME = LABEL_WIDTH  # Until the list has a size to work it out from.
 
 PANEL_COLOR = (0, 0, 0, 0.35)
-GUTTER_COLOR = (0.08, 0.08, 0.1, 1)
+GUTTER_COLOR = (*theme.GUTTER, 1)
 LINE_COLOR = (1, 1, 1, 0.8)
-MATCH_COLOR = (0.45, 0.9, 0.5)
-MISS_COLOR = (1, 0.42, 0.42)
+MATCH_COLOR = theme.HIT
+MISS_COLOR = theme.MISS
 TARGET_BOX_COLOR = (1, 1, 1)
-ATTEMPT_BOX_COLOR = (0.45, 0.65, 1)
+ATTEMPT_BOX_COLOR = (0.8, 0.85, 1.0)  # The player's own inputs: a cool white, not a grade's blue.
 HISTORY_ALPHA = 0.45
-METER_NEUTRAL_COLOR = (0.38, 0.38, 0.42)
-METER_DIRECTION_COLOR = (0.3, 0.55, 0.95)
-METER_BUTTON_COLOR = (1.0, 0.68, 0.2)
-NOTE_COLOR = (1.0, 0.85, 0.35)
+METER_NEUTRAL_COLOR = theme.METER_NEUTRAL
+METER_DIRECTION_COLOR = theme.METER_DIRECTION
+METER_BUTTON_COLOR = theme.METER_BUTTON
+NOTE_COLOR = theme.INFO  # Notes are commentary: neutral, not the key inputs' gold.
 TOAST_COLOR = (0.12, 0.12, 0.15)
 TOAST_MAX_WIDTH = dp(260)
 TOAST_PADDING = dp(8)
 TOAST_ROWS = 3  # Overlapping notes stack into this many rows; any more are skipped.
 BRACE_HEIGHT = dp(12)
-SELECTION_COLOR = (0.4, 0.65, 1.0)
-KEY_COLOR = (1.0, 0.78, 0.2)
-EXACT_KEY_COLOR = (0.35, 0.85, 1.0)  # Exact spans stand apart from press-anywhere-in-window ones.
-HOLD_KEY_COLOR = (0.72, 0.55, 1.0)  # And holds from both.
+SELECTION_COLOR = theme.SELECTION
+KEY_COLOR = theme.ACCENT
+EXACT_KEY_COLOR = theme.EXACT  # Exact spans stand apart from press-anywhere-in-window ones.
+HOLD_KEY_COLOR = theme.HOLD  # And holds from both.
 KEY_RESULT_COLORS = {"hit": MATCH_COLOR, "miss": MISS_COLOR, "pending": (0.55, 0.55, 0.6)}
-GRADE_COLORS = {"hit": MATCH_COLOR, "early": (0.45, 0.62, 1.0), "late": (1.0, 0.62, 0.2), "miss": MISS_COLOR,
-                "pending": (0.45, 0.45, 0.5)}
+GRADE_COLORS = theme.GRADES
+MARK_COLOR = (0.06, 0.06, 0.08, 0.9)  # The tick or cross on a graded cell, so a grade isn't colour alone.
 NON_KEY_ALPHA = 0.35
 NON_KEY_ALPHA_PLAYING = 0.18  # Fainter still while playing, when only the key inputs matter.  # Target inputs outside every key input fade back once key inputs exist.
 CLICK_SLOP = dp(4)  # A press that moves less than this is a click, not a drag.
@@ -313,12 +314,12 @@ class _Textures:
         self.lane_labels = {}
         self.judgements = {}
 
-    def lane_label(self, text, font_size=sp(13)):
+    def lane_label(self, text, font_size=theme.BODY):
         """A gutter label, shortened at its end to fit the gutter (the start of a name says most)."""
         if (text, font_size) not in self.lane_labels:
             shown = text
             while True:
-                label = CoreLabel(text=shown, font_size=font_size, bold=True)
+                label = CoreLabel(text=shown, font_size=font_size, bold=True, color=(1, 1, 1, 1))
                 label.refresh()
                 if label.texture.width <= GUTTER_WIDTH - dp(8) or len(shown) <= 2:
                     break
@@ -342,25 +343,25 @@ class _Textures:
 
     def judgement(self, text):
         if text not in self.judgements:
-            label = MarkupLabel(text=text, font_size=sp(24), bold=True, outline_width=2, outline_color=(0, 0, 0))
+            label = MarkupLabel(text=text, font_size=theme.TITLE, bold=True, outline_width=2, outline_color=(0, 0, 0))
             label.refresh()
             self.judgements[text] = label.texture
         return self.judgements[text]
 
     def key_tag(self, text):
         if text not in self.key_tags:
-            label = CoreLabel(text=text, font_size=sp(12), bold=True, color=(0.1, 0.08, 0.02, 1))
+            label = CoreLabel(text=text, font_size=theme.CAPTION, bold=True, color=theme.TEXT_ON_ACCENT)
             label.refresh()
             self.key_tags[text] = label.texture
         return self.key_tags[text]
 
     def note(self, text):
         if text not in self.notes:
-            label = CoreLabel(text=text, font_size=sp(14))
+            label = CoreLabel(text=text, font_size=theme.BODY)
             label.refresh()
             if label.texture.width > TOAST_MAX_WIDTH - 2 * TOAST_PADDING:
                 # Only long notes wrap; short ones keep a toast that fits their text.
-                label = CoreLabel(text=text, font_size=sp(14), text_size=(TOAST_MAX_WIDTH - 2 * TOAST_PADDING, None))
+                label = CoreLabel(text=text, font_size=theme.BODY, text_size=(TOAST_MAX_WIDTH - 2 * TOAST_PADDING, None))
                 label.refresh()
             self.notes[text] = label.texture
         return self.notes[text]
@@ -457,6 +458,9 @@ class InputListLayout(StencilView):
         Window.bind(mouse_pos=self._on_mouse_pos)
         self.history_cells = _Pool(self.history_layer, self._make_strip)
         self.history_texts = _Pool(self.history_text_layer, self._make_strip)
+        self.mark_layer = InstructionGroup()
+        self.canvas.add(self.mark_layer)
+        self.marks = _Pool(self.mark_layer, self._make_mark)
         self.labels = _Pool(self.label_layer, self._make_strip)
 
     @staticmethod
@@ -465,6 +469,28 @@ class InputListLayout(StencilView):
         layer.add(color)
         layer.add(rect)
         return color, rect
+
+    @staticmethod
+    def _make_mark(layer):
+        color, line = Color(1, 1, 1, 0), Line(width=dp(1.4), joint="round", cap="round")
+        layer.add(color)
+        layer.add(line)
+        return color, line
+
+    def _mark(self, grade, x0, x1, y, height):
+        """A tick for a hit or a cross for a miss, in the middle of a graded cell (if it fits), so the
+        grade reads without its colour."""
+        if grade not in ("hit", "miss") or x1 - x0 < height * 0.9:
+            return
+        size = min(height * 0.62, dp(10))
+        cx, cy = (x0 + x1) / 2, y + height / 2
+        color, line = self.marks.next()
+        color.rgba = MARK_COLOR
+        h = size / 2
+        if grade == "hit":
+            line.points = [cx - h, cy, cx - h * 0.25, cy - h * 0.7, cx + h, cy + h * 0.75]
+        else:  # A cross: down one stroke and back up the other, drawn as one line.
+            line.points = [cx - h, cy + h, cx + h, cy - h, cx, cy, cx + h, cy + h, cx - h, cy - h]
 
     # ---- Geometry ----------------------------------------------------------------------------
 
@@ -517,9 +543,8 @@ class InputListLayout(StencilView):
             color.rgba = PANEL_COLOR
             panel.pos, panel.size = (left, y), (right - left, height)
             color, label = self.labels.next()
-            color.rgba = ((*KEY_COLOR, 0.9) if is_run and self._history[name[1]].saved
-                          else (1, 1, 1, 0.6 if is_run else 0.85))
-            label.texture = (self.textures.lane_label(self._history[name[1]].label, sp(11)) if is_run
+            color.rgba = (theme.TEXT if not is_run or self._history[name[1]].saved else theme.TEXT_DIM)
+            label.texture = (self.textures.lane_label(self._history[name[1]].label, theme.CAPTION) if is_run
                              else self.textures.lane_label(LANES[name]))
             label.size = label.texture.size
             label.pos = (self.x + MARGIN, y + (height - label.texture.height) / 2)
@@ -822,6 +847,8 @@ class InputListLayout(StencilView):
                 graphic.block_text.size = texture.size
                 graphic.block_result_color.rgba = (*KEY_RESULT_COLORS[outcome], 1)
                 graphic.block_result.pos, graphic.block_result.size = (x0, y), (x1 - x0, dp(4))
+                if x1 - x0 >= texture.width + dp(8) + height:
+                    self._mark(outcome, x1 - height, x1, y + dp(3), height - dp(3))
                 self._key_tag_hits.append((x0, y, x1 - x0, height, index))
             if not target:
                 self._draw_key_result(graphic, key_input, outcome, hold_run, is_hold, snapshot, x0, x1, strip)
@@ -885,6 +912,7 @@ class InputListLayout(StencilView):
                 color, rect = self.history_cells.next()
                 color.rgba = (*GRADE_COLORS[grade], 0.35 if grade == PENDING else 0.9)
                 rect.pos, rect.size = (x0, y), (x1 - x0, height)
+                self._mark(grade, x0, x1, y, height)
                 if grade not in (EARLY, LATE):
                     continue
                 # A tick where the input actually came, linked back to the window it missed.
@@ -924,8 +952,8 @@ class InputListLayout(StencilView):
         bottom_lane = min((y for y, height in lanes.values()), default=top)
         rows = []
         for row, (notation, start, end) in enumerate(upcoming):
-            size = sp(34) if row == 0 else sp(20)
-            colour = "ffffff" if row == 0 else "a8a8b0"
+            size = theme.DISPLAY if row == 0 else theme.TITLE
+            colour = theme.hex_of(theme.TEXT if row == 0 else theme.TEXT_DIM)
             rows.append(self.textures.up_next(notation, size, colour))
         panel_top, panel_bottom = top + MARGIN / 2, bottom_lane - dp(4)
         color, rect = pool.next()
@@ -992,6 +1020,7 @@ class InputListLayout(StencilView):
         self._draw_matches(shown("strip", snapshot.match_runs), snapshot, lane_y("strip"))
         self._draw_key_inputs(snapshot.key_inputs, snapshot, lanes)
         self._draw_history(snapshot, lanes)
+        self.marks.finish(lambda item: setattr(item[0], "a", 0))
         lanes_top = self.top - MARGIN
         live_y = bottom - ICON_SIZE
         self._draw_notes(snapshot.notes, snapshot, lanes_top, live_y - dp(14))
