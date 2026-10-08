@@ -8,10 +8,11 @@ import math
 
 from images import IMAGE_SOURCE_DIRECTION
 
-PROMPT_COLOR = (1, 1, 1, 0.9)
-GUIDE_COLOR = (1, 1, 1, 0.25)
-BUTTON_RELEASED_OPACITY = 0.4
-BUTTON_PROMPT_OPACITY = 0.6
+PROMPT_COLOR = (0.93, 0.93, 0.95, 1)
+GUIDE_COLOR = (1, 1, 1, 0.16)
+BUTTON_RELEASED_OPACITY = 0.4  # (Older displays.)
+BUTTON_PROMPT_OPACITY = 1.0
+IDLE_TINT = (0.5, 0.5, 0.54, 1)  # A button not pressed: dimmed but solid, so it doesn't read as disabled.
 BACKGROUND = (0.2, 0.2, 0.2)  # The window's.
 # Kivy keeps the old geometry when an Ellipse is resized to zero, so unused graphics are parked here.
 OFFSCREEN = (-10000, -10000)
@@ -43,7 +44,8 @@ class DirectionalPromptWidget(Widget):
         9: 45,
     }
     adjacent_pairs = {(1, 2), (2, 3), (3, 6), (6, 9), (9, 8), (8, 7), (7, 4), (4, 1)}
-    dot_radius = 5
+    dot_radius = 6
+    line_width = 3
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -56,8 +58,10 @@ class DirectionalPromptWidget(Widget):
         self.offset = 0.0  # How far through the current frame, so prompts move smoothly.
         with self.canvas:
             Color(*GUIDE_COLOR)
-            self.inner_border = Line()
-            self.outer_border = Line()
+            self.inner_border = Line(width=1.5)
+            self.outer_border = Line(width=1.5)
+            # A faint spoke for each direction, the paths prompts come in along.
+            self.spokes = [Line(width=1) for _ in self.direction_to_angle]
             Color(*PROMPT_COLOR)
             self.prompt_group = InstructionGroup()
 
@@ -66,11 +70,19 @@ class DirectionalPromptWidget(Widget):
         self.update_canvas()
 
     def update_canvas(self, *args):
-        self.inner_circle_radius = self.width * 0.09
-        self.outer_circle_radius = self.width / 2
-        self.center_point = (self.x + self.width / 2, self.y + self.width / 2)
+        # The ring fits the widget's shorter side, centred.
+        side = min(self.width, self.height) * 0.96
+        self.inner_circle_radius = side * 0.09
+        self.outer_circle_radius = side / 2
+        self.center_point = self.center
         self.inner_border.circle = (*self.center_point, self.inner_circle_radius)
         self.outer_border.circle = (*self.center_point, self.outer_circle_radius)
+        for spoke, angle in zip(self.spokes, self.direction_to_angle.values()):
+            a = math.radians(angle)
+            spoke.points = [self.center_point[0] + self.inner_circle_radius * math.cos(a),
+                            self.center_point[1] + self.inner_circle_radius * math.sin(a),
+                            self.center_point[0] + self.outer_circle_radius * math.cos(a),
+                            self.center_point[1] + self.outer_circle_radius * math.sin(a)]
 
     def _point(self, direction, index, count):
         index = max(0.0, index - self.offset)
@@ -112,7 +124,7 @@ class DirectionalPromptWidget(Widget):
             while i + 1 < count and input_frames[i + 1] == input_frames[start]:
                 i += 1
             if input_frames[start] != 5 and i > start:
-                line = self._pooled(self.lines, line_counter, lambda: Line(width=2))
+                line = self._pooled(self.lines, line_counter, lambda: Line(width=self.line_width, cap="round"))
                 line.points = [*self._point(input_frames[start], start, count), *self._point(input_frames[i], i, count)]
                 line_counter += 1
             i += 1
@@ -139,7 +151,7 @@ class DirectionalPromptWidget(Widget):
                 self.center_point[0] + mid_radius * math.cos(math.radians(mid_angle)),
                 self.center_point[1] + mid_radius * math.sin(math.radians(mid_angle)),
             )
-            arc = self._pooled(self.arcs, arc_counter, lambda: Line(width=2))
+            arc = self._pooled(self.arcs, arc_counter, lambda: Line(width=self.line_width, cap="round"))
             arc.bezier = [*start, *mid, *end]
             arc_counter += 1
         for arc in self.arcs[arc_counter:]:
@@ -271,7 +283,7 @@ class ButtonColumn(Widget):
         self.button_knock = knockout.add(self.prompt.silhouette)
         self.canvas.add(knockout.group)
         with self.canvas:
-            self.button_color = Color(1, 1, 1, BUTTON_RELEASED_OPACITY)
+            self.button_color = Color(*IDLE_TINT)
             self.button = Rectangle(texture=self.texture)
         self.canvas.add(Color(1, 1, 1, BUTTON_PROMPT_OPACITY))
         self.canvas.add(self.falling.head_group)
@@ -285,7 +297,7 @@ class ButtonColumn(Widget):
         self.button.size = self.button_knock.size = self._icon_size()
 
     def update_state(self, pressed, input_frames, offset=0.0):
-        self.button_color.a = 1 if pressed else BUTTON_RELEASED_OPACITY
+        self.button_color.rgba = (1, 1, 1, 1) if pressed else IDLE_TINT
         icon_size = self._icon_size()
         if not input_frames:
             self.falling.draw([], self.x, self.y, icon_size, 0, 1, offset, None)

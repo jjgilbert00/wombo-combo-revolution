@@ -147,7 +147,7 @@ class ArrowLanesLayout(FeedbackDisplay, RelativeLayout):
         self.button_columns = {}
         for i, name in enumerate(self.button_names):
             column = ButtonColumn(button_source=get_standard_button_icon(controller_type, button_icon_style, name),
-                                  size_hint=(0.07, 1), pos_hint={"x": 0.5 + i * (0.48 / 8), "y": 0})
+                                  size_hint=(0.052, 1), pos_hint={"x": 0.5 + i * (0.48 / 8), "y": 0})
             self.button_columns[name] = column
             self.add_widget(column)
         self._init_feedback()

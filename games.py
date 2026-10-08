@@ -118,7 +118,8 @@ def draw_action_icon(game, name, size, font_path):
     colour = _colour_of(game, name)
     profile = GAMES[game]
     if name in profile["actions"]:
-        draw.ellipse([s * 0.02, s * 0.02, s * 0.98, s * 0.98], fill=DARK, outline=colour + (255,),
+        draw.ellipse([s * 0.0, s * 0.0, s * 1.0, s * 1.0], fill=DARK)  # A dark rim around the coloured ring.
+        draw.ellipse([s * 0.07, s * 0.07, s * 0.93, s * 0.93], fill=DARK, outline=colour + (255,),
                      width=max(2, s // 16))
         (_fist if profile["actions"][name][0] == "punch" else _foot)(draw, s, colour + (255,))
     else:

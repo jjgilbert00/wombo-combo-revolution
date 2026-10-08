@@ -1145,6 +1145,8 @@ class WomboComboApp(App):
             self._overlay_origin = (left, top, width)
             self._overlay_full_height = height  # For the displays that use the whole window.
             self._overlay_note_rows = 0
+            # The window fits the list from here on, so the list keeps the size it has now.
+            self.input_list_layout.freeze_scale = True
             if self._normal_placement[1] == win32con.SW_SHOWMAXIMIZED:
                 win32gui.ShowWindow(hwnd, win32con.SW_RESTORE)  # A maximized window can't be resized.
             Window.borderless = True
@@ -1159,6 +1161,8 @@ class WomboComboApp(App):
             self.root_layout.add_widget(self.status_bar, index=0)
             self._set_on_top(False)
             self._overlay_origin = None
+            self.input_list_layout.freeze_scale = False
+            Clock.schedule_once(lambda dt: self.input_list_layout._rescale(), 0.3)
             # Put back exactly where it was. Again shortly after, as the border comes back after a delay
             # and would otherwise grow the window by its own size.
             placement = self._normal_placement
@@ -1193,7 +1197,11 @@ class WomboComboApp(App):
             self._overlay_note_rows = 0
         # Kivy measures in its own units; scale to pixels by the width, which doesn't change.
         pixels = width / Window.width if Window.width else 1
-        height = round((layout.content_height(self._overlay_note_rows) + Window.height - layout.height) * pixels)
+        # In overlay mode the list is the whole window (no bars), so its content is the window's
+        # height. (Window and list sizes can disagree for a frame while the style changes; going by
+        # the content alone keeps that from flinging the window to a huge size.)
+        height = round(layout.content_height(self._overlay_note_rows) * pixels)
+        height = max(dp(60), min(height, win32api.GetSystemMetrics(1)))
         self._keep_window(left, top, width, height)
 
     def _keep_window(self, left, top, width, height):

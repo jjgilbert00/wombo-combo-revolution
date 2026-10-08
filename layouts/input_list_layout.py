@@ -42,6 +42,21 @@ RUN_LANE_GAP = dp(3)
 LANE_GAP = dp(8)
 LINE_FRACTION = 0.25  # Position of the hit line, as a fraction of the track width.
 
+# The list scales up to use a tall window: icons and lanes grow (text stays its size). Sizes at
+# scale 1 are the ones above; set_scale() rescales them all.
+_BASE_SIZES = {name: globals()[name] for name in ("ICON_SIZE", "LABEL_PADDING", "METER_HEIGHT", "STRIP_HEIGHT",
+                                                  "KEYS_LANE_HEIGHT", "RUN_LANE_HEIGHT", "RUN_LANE_GAP", "LANE_GAP")}
+SCALE_HEIGHT = dp(600)  # The list is drawn at scale 1 in this much height, and grows with more...
+MAX_SCALE = 1.6  # ...up to this.
+
+
+def set_scale(scale):
+    """Rescales the list's sizes (module-wide: there's one list)."""
+    sizes = {name: value * scale for name, value in _BASE_SIZES.items()}
+    sizes["LABEL_WIDTH"] = sizes["ICON_SIZE"] + 2 * sizes["LABEL_PADDING"]
+    sizes["LANE_HEIGHT"] = dp(4) + dp(18) + (sizes["ICON_SIZE"] + dp(2)) * (1 + LANE_BUTTON_ROWS) + dp(4)
+    globals().update(sizes)
+
 # The scroll speed is set by how far ahead of the line inputs appear, in seconds: the space right of
 # the line holds that much time. 1.5 s is a comfortable pace to read and react to; rhythm games give
 # similar warning. Frames are as wide as that makes them, so short inputs can be narrower than
@@ -81,6 +96,14 @@ CLICK_SLOP = dp(4)  # A press that moves less than this is a click, not a drag.
 # Lanes that can be shown or hidden, top to bottom, with their names in the gutter.
 LANES = {"meter": "Frames", "target": "Target", "keys": "Key inputs", "attempt": "You", "saved": "Saved attempts",
          "recent": "Recent attempts"}
+# What each lane shows, as a tooltip on its name.
+LANE_TIPS = {
+    "meter": "Frame meter: one block per frame of the recording. White: a button is down. Slate: the stick is "
+             "off neutral. Grey: neutral. Drag here to select frames.",
+    "target": "The recording: each input as a box as long as it's held, with how many frames above it.",
+    "keys": "Key inputs: what must be pressed, each over the window it can be pressed in. Click one to edit it.",
+    "attempt": "Your inputs, under a strip that's green where they match the recording and red where they don't.",
+}
 
 
 _VIRTUAL_KEYS = {"shift": 0x10, "ctrl": 0x11}
@@ -451,6 +474,9 @@ class InputListLayout(StencilView):
         self.next_pool = _Pool(self.next_layer, self._make_strip)
         self.show_next = True  # The up-next panel, set by the app.
         self.card_up = False  # Set by the app while the getting-started card covers the list.
+        self.scale = 1.0
+        self.freeze_scale = False  # Set by the app in overlay mode, where the window fits the list instead.
+        self.bind(size=self._rescale)
         # The verdicts and pass banner, shared with the other displays.
         self.feedback = Feedback(self)
         self.banner = self.feedback.banner
@@ -548,7 +574,7 @@ class InputListLayout(StencilView):
                              else self.textures.lane_label(LANES[name]))
             label.size = label.texture.size
             label.pos = (self.x + MARGIN, y + (height - label.texture.height) / 2)
-            name_text = self._history[name[1]].label if is_run else LANES[name]
+            name_text = self._history[name[1]].label if is_run else LANE_TIPS.get(name, LANES[name])
             self._label_hits.append((self.x, y, left - self.x, height, name_text))
         hide = lambda item: setattr(item[0], "a", 0)
         self.panels.finish(hide)
@@ -588,6 +614,15 @@ class InputListLayout(StencilView):
         if note_rows:
             lowest -= dp(14) + BRACE_HEIGHT + min(note_rows, TOAST_ROWS) * self.toast_row_height
         return self.top - lowest + dp(8)
+
+    def _rescale(self, *args):
+        if self.freeze_scale or not self.height:
+            return
+        scale = max(1.0, min(MAX_SCALE, self.height / SCALE_HEIGHT))
+        if abs(scale - self.scale) > 0.01:
+            self.scale = scale
+            set_scale(scale)
+            self._apply_speed()
 
     def _apply_speed(self):
         """Frames as wide as the lookahead makes them, for the current size."""
@@ -1024,7 +1059,8 @@ class InputListLayout(StencilView):
         left = self._track_left()
         # Verdicts sit left of the line, at the foot of the up-next column, clear of the inputs
         # coming in: three rows of them, newest on top.
-        lowest_lane = min((y for y, _ in lanes.values()), default=bottom)
+        # Above the attempt rows (they're graded cells too; verdicts on them would be a muddle).
+        lowest_lane = min((y for name, (y, _) in lanes.items() if not isinstance(name, tuple)), default=bottom)
         self.feedback.place(verdicts=(left + dp(12), lowest_lane + dp(3 * 36 + 8)),
                             banner=(self._line_x() + ICON_SIZE * 5, bottom + dp(2), False))
         self.feedback.draw(snapshot.judgements, snapshot.last_pass)
