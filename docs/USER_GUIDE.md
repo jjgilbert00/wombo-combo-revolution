@@ -90,9 +90,12 @@ the timeline in `samples/build_samples.py` and run it again.
 
 You don't need to memorise anything in this guide. The app itself gives you:
 
-- **The hint line** under the input list, which always says what to do next for what you're doing.
-- **Tooltips** when you hover over any button on the menu bar for half a second.
-- **F1**, which shows the getting-started steps and every key.
+- **The hint line** at the bottom left of the window, which always says what to do next for what
+  you're doing.
+- **Tooltips** when you hover over any button on the menu bar for half a second, or over a lane's
+  name in the input list (which explains the lane, the frame meter's colours for one).
+- **F1**, which has two tabs: *Getting started* (the steps, and what every colour means) and
+  *Keys* (every key, grouped by task, with the ones that work in game marked).
 - **Menus** that show each item's shortcut next to it, including the right-click menu.
 
 ## The screen
@@ -105,18 +108,19 @@ You don't need to memorise anything in this guide. The app itself gives you:
 |---|---|
 | File, Edit, View | Menus. |
 | Settings | Opens the settings (see [Settings](#settings)). |
-| Record / Stop | Starts and stops recording. |
-| Play / Pause | Plays or pauses the recording. |
-| Restart | Goes back to the first frame. |
-| Loop on / Loop off | Whether playback repeats. |
-| Practice / Review | Whether playing scores you or replays your last attempt. |
+| ● (red dot) / ■ | Starts and stops recording. |
+| ▶ / ❚❚ | Plays or pauses the recording. |
+| ❙◀ | Goes back to the first frame. |
+| Loop | Whether playback repeats: gold when it's on. |
+| Practice \| Review | Whether playing scores you or replays your last attempt: the one that's gold is in use; click the other to switch. |
+| Demo | Plays the combo in game through a virtual controller. |
 
-The status bar on the right shows:
+**The status bar** runs along the bottom. On the left is the hint line. On the right:
 - the mode (PRACTICE, REVIEW, PAUSED, GET READY or REC) and the time;
 - your score;
-- messages;
+- messages (warnings, such as *No controller* or *Unsaved*, are pink);
 - the controller in use;
-- the input sampling rate, which should read about 60 Hz.
+- the input sampling rate, only if it's off (it should be about 60 Hz).
 
 **The input list** is where practice happens. Time runs left to right. Inputs slide leftwards and
 reach the **white line** on the frame they should be pressed. It works like a rhythm game, but you
@@ -124,17 +128,18 @@ read it like text. From the top, the lanes are:
 
 | Lane | What it shows |
 |---|---|
-| **Frames** | One block per frame of the recording: grey is neutral, blue a direction, orange a button. A white tick marks where the input changes. |
+| **Frames** | One block per frame of the recording: grey is neutral, slate a direction, white a button. A white tick marks where the input changes. |
 | **Target** | The recording. Each box is one input, as wide as it was held. Its label shows how many frames it lasts, the direction and the buttons. |
 | **Key inputs** | Only what's required, once you've [marked key inputs](#marking-what-matters-key-inputs). |
 | **You** | Your attempt, drawn the same way. The strip above it marks each frame green where you matched the recording and red where you didn't. |
-| **Saved attempts / Recent attempts** | One compact, colour-coded row per earlier attempt (see [Reviewing your attempts](#reviewing-your-attempts)). |
+| **Saved attempts / Recent attempts** | One compact, colour-coded row per earlier attempt, with a tick on each hit and a cross on each miss (see [Reviewing your attempts](#reviewing-your-attempts)). |
 
 Under the lanes, next to the line, is your controller's **live input** right now. The line turns
 green while you're matching the recording. **Notes** hang below that, pointing at the frames they
-describe. The **hint line** is at the bottom.
+describe.
 
 Every lane can be hidden from the **View** menu, which says whether each one is shown or hidden.
+In a tall window the list grows to fill it.
 
 ## Practising
 
@@ -148,11 +153,15 @@ Every lane can be hidden from the **View** menu, which says whether each one is 
 
 - **Practice and Review.** In **Practice** mode, playing records your controller against the
   recording and scores it. In **Review** mode, playing replays your last attempt next to the
-  recording, so you can watch where it went wrong. The button on the menu bar names the mode
-  you're in. **F4** switches.
-- **Up next.** The panel left of the line shows the next inputs to make, still and large, so you
-  don't have to read them on the move. The bar under the first fills as it approaches, then turns
-  gold while its window is open. *View > Hide up-next panel* turns it off.
+  recording, so you can watch where it went wrong. *Practice | Review* on the menu bar shows the
+  mode you're in. **F4** switches.
+- **Up next.** While playing, the space left of the line becomes a panel with the next inputs to
+  make, still and large, so you don't have to read them on the move. The bar under the first
+  fills as it approaches, then turns gold while its window is open. Verdicts (HIT, EARLY, LATE,
+  MISS) pop up at the panel's foot. *View > Hide up-next panel* turns it off.
+- **Feedback.** The line flares when you hit a key input, and a held arrow (arrow lanes) or a
+  pressed button turns green while it's what the recording wants. *Settings > Hit sound* adds a
+  soft tick for each hit, handy with the game in front.
 - **Scroll speed.** Inputs appear 1.5 seconds before they reach the line. If that's too fast or too
   slow, change *Settings > Scroll speed* (0.75 to 3 seconds), or zoom with **Ctrl+Wheel**. While
   playing, frame counts are hidden and inputs that aren't key inputs fade back.
@@ -288,10 +297,10 @@ game.
 
 Select some frames and press **N** (or right-click > Add note) to attach a note, for example
 "hit-confirm here". A note shows as a small card under the list. A brace points at its frames,
-and a yellow bar sits over them.
+and a pale bar sits over them.
 
 - To edit or delete a note, click it.
-- **Shift+F3** (View > Hide notes) hides the cards but keeps the yellow bars, once you know them.
+- **Shift+F3** (View > Hide notes) hides the cards but keeps the bars over their frames, once you know them.
 - Notes are included in exported videos. Each one appears half a second before its frames
   and stays up for a second after them.
 
@@ -418,9 +427,11 @@ frame. The window title shows the recording's name.
   the game's own input lag in the video.
 
 **Overlay mode (F2)** keeps Wombo Combo on top of the game, borderless and see-through, so you can
-practise over the game itself. Set how see-through it is with *Overlay opacity* in the View menu.
-With the input list, the overlay shrinks to what the list draws, so it covers as little of the
-game as possible; with the arrow lanes or ring it keeps its full height.
+practise over the game itself. Only what's drawn covers the game: the window's background is
+transparent, and the input list drops its lane names. Set how see-through the rest is with
+*Overlay opacity* in the View menu. *View > See-through overlay* turns the transparent background
+off, for the whole window at that opacity instead. With the input list, the overlay shrinks to what
+the list draws; with the arrow lanes or ring it keeps its full height.
 
 ## Displays
 
@@ -446,6 +457,8 @@ passed.
 
 ## Settings
 
+Settings are in groups: Practice, Controller and game, Sound and demo, and Recording and video.
+
 | Setting | What it does |
 |---|---|
 | Controller | Which controller to read (default: the first connected). |
@@ -456,7 +469,8 @@ passed.
 | Overlay input delay | Frames to delay drawn inputs in overlay videos. |
 | Export overlay on save | Also write `name_overlay.mp4` when saving a recording. |
 | Scroll speed | How far ahead of the line inputs appear: 0.75 s (fast) to 3 s (slow), 1.5 s by default. |
-| Lead-in before practice | The run-up before practice playback: off, 0.5 s, 1 s or 2 s. |
+| Lead-in | The run-up before practice playback: off, 0.5 s, 1 s or 2 s. |
+| Hit sound | A soft tick for each key input you hit while practising (off by default). |
 | Recent attempts shown | How many recent runs appear as rows. |
 | Game for new recordings | Which game's actions new recordings (and older ones that don't say) use. |
 | Demo countdown | How long a demo waits before playing, to switch to the game: 1, 2, 3 or 5 s. |
@@ -512,7 +526,7 @@ Settings are saved automatically.
   you have several, pick one in *Settings > Controller*.
 - **The F-keys don't work in game.** If the game runs as administrator, run Wombo Combo as
   administrator too. Windows doesn't pass keys from an elevated window to non-elevated apps.
-- **"late frames" while recording, or the rate isn't about 60 Hz.** The PC is too busy to sample
+- **"late frames" while recording, or "Input at ... Hz" in the status bar.** The PC is too busy to sample
   every frame on time. Close heavy programs, or turn off *Record video* or lower *Video size*.
 - **A demo hotkey seems to do nothing in game.** Listen for a low error beep: the reason is in the app's status bar (and its log). Usually vgamepad isn't installed yet, or no recording is open. When a demo starts, it ticks once a second through the countdown.
 - **Video capture failed.** The recording continues with inputs only, and the message says why.
