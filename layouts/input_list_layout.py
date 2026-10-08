@@ -197,27 +197,33 @@ class _NoteGraphic:
     """A note: a bar over its frames above the meter, a brace under the display spanning them, and a
     toast with the text hanging from the brace's tip."""
 
-    def __init__(self, layer):
+    def __init__(self, layer, connector_layer):
         self.group = InstructionGroup()
         self.tint_color = Color(*NOTE_COLOR, 0)
         self.tint = Rectangle()
         self.brace_color = Color(*NOTE_COLOR, 0)
         self.brace = Line(width=dp(1.3))
-        self.connector = Line(width=dp(1.3))  # From the brace's tip down to the toast.
+        # From the brace's tip down to the toast; on a layer under every toast, so one reaching past
+        # another note's toast doesn't cross its text.
+        self.connector_color = Color(*NOTE_COLOR, 0)
+        self.connector = Line(width=dp(1.3))
+        connector_layer.add(self.connector_color)
+        connector_layer.add(self.connector)
         self.toast_color = Color(*TOAST_COLOR, 0)
         self.toast = Rectangle()
         self.accent_color = Color(*NOTE_COLOR, 0)
         self.accent = Rectangle()
         self.text_color = Color(1, 1, 1, 0)
         self.text = Rectangle()
-        for instruction in (self.tint_color, self.tint, self.brace_color, self.brace, self.connector,
+        for instruction in (self.tint_color, self.tint, self.brace_color, self.brace,
                             self.toast_color, self.toast,
                             self.accent_color, self.accent, self.text_color, self.text):
             self.group.add(instruction)
         layer.add(self.group)
 
     def hide(self):
-        for color in (self.tint_color, self.brace_color, self.toast_color, self.accent_color, self.text_color):
+        for color in (self.tint_color, self.brace_color, self.connector_color, self.toast_color, self.accent_color,
+                      self.text_color):
             color.a = 0
 
 
@@ -453,6 +459,7 @@ class InputListLayout(StencilView):
             self.history_text_layer = InstructionGroup()  # Its own layer, so cells added later don't cover it.
             self.meter_layer = InstructionGroup()
             self.meter_divider_layer = InstructionGroup()
+            self.connector_layer = InstructionGroup()
             self.note_layer = InstructionGroup()
             self.selection_color = Color(*SELECTION_COLOR, 0)
             self.selection_fill = Rectangle()
@@ -475,7 +482,7 @@ class InputListLayout(StencilView):
         self.strips = _Pool(self.strip_layer, self._make_strip)
         self.meter_blocks = _Pool(self.meter_layer, self._make_strip)
         self.meter_dividers = _Pool(self.meter_divider_layer, self._make_strip)
-        self.note_graphics = _Pool(self.note_layer, _NoteGraphic)
+        self.note_graphics = _Pool(self.note_layer, lambda layer: _NoteGraphic(layer, self.connector_layer))
         self.key_graphics = _Pool(self.key_layer, _KeyGraphic)
         self.panels = _Pool(self.panel_layer, self._make_strip)
         self.next_layer = InstructionGroup()
@@ -845,13 +852,14 @@ class InputListLayout(StencilView):
             note.tint.pos = (x0 + dp(1), lanes_top + dp(2))
             note.tint.size = (x1 - x0 - dp(2), dp(3))
             if not self.show_notes:
-                note.brace_color.a = note.toast_color.a = note.accent_color.a = note.text_color.a = 0
+                note.brace_color.a = note.connector_color.a = note.toast_color.a = note.accent_color.a = 0
+                note.text_color.a = 0
                 continue
-            note.brace_color.a = alpha
+            note.brace_color.a = note.connector_color.a = alpha
             note.brace.points = _brace_points(x0, x1, notes_top, BRACE_HEIGHT)
             # Reaches down past other toasts when overlapping notes pushed this one to a lower row.
             note.connector.points = [middle, notes_top - BRACE_HEIGHT, middle, toast_top]
-            note.toast_color.a = 0.92 * alpha
+            note.toast_color.a = 0.97  # Solid, so a connector passing behind stays hidden.
             note.toast.pos = (toast_x, toast_top - height)
             note.toast.size = (width, height)
             note.accent_color.a = alpha
@@ -890,8 +898,10 @@ class InputListLayout(StencilView):
                 graphic.block_text.size = texture.size
                 graphic.block_result_color.rgba = (*KEY_RESULT_COLORS[outcome], 1)
                 graphic.block_result.pos, graphic.block_result.size = (x0, y), (x1 - x0, dp(4))
-                if x1 - x0 >= texture.width + dp(8) + height:
-                    self._mark(outcome, x1 - height, x1, y + dp(3), height - dp(3))
+                # Right after its label: a later key input's block can cover this one's right end.
+                mark_x = x0 + dp(4) + texture.width + dp(4)
+                if x1 - mark_x >= height:
+                    self._mark(outcome, mark_x, mark_x + height, y + dp(3), height - dp(3))
                 self._key_tag_hits.append((x0, y, x1 - x0, height, index))
             if not target:
                 self._draw_key_result(graphic, key_input, outcome, hold_run, is_hold, snapshot, x0, x1, strip)
