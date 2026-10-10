@@ -6,9 +6,13 @@
 python tools/check_all.py
 ```
 
-runs everything: the unit tests, then four UI checks that each open the app for a couple of minutes
+runs everything: the static checks, the unit tests, then four UI checks that each open the app for a couple of minutes
 (leave the mouse and keyboard alone while they run). It ends with "All checks passed." or a list
-of what failed. `--unit` runs just the unit tests, which take about a second.
+of what failed. `--unit` skips the UI checks, which leaves a few seconds' worth.
+
+**Static checks** (`tools/static_check.py`) read the source without running it: imports that
+don't resolve, unused imports, names used but never defined, and widget classes named like one of
+Kivy's built-in style rules (a class called `Switch` would be drawn as Kivy's switch).
 
 **Unit tests** (`tests/`) cover the rules with no UI: grading key inputs (`test_key_inputs.py`),
 runs, matching, button maps and game actions (`test_input_list.py`), and the playalong controller

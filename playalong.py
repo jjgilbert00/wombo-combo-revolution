@@ -6,7 +6,7 @@ from games import GAMES
 from button_map import full_map, inverse_map, map_state
 from key_inputs import GRADE_REACH, HIT, PENDING, describe, grade_all, normalized, result
 from playalong_state import PlayalongStatus, RunningState
-from playalong_views import PLAYALONG_FRAMELENGTH, PlayalongViews
+from playalong_views import PlayalongViews
 
 MAX_RUNS = 50  # Recent attempts kept in memory.
 
@@ -326,8 +326,6 @@ class PlayalongController(PlayalongViews):
         with self._lock:
             self._lead_in = frames
 
-    def get_lead_in(self):
-        return self._lead_in
 
     def set_show_actions(self, show):
         with self._lock:
@@ -563,16 +561,6 @@ class PlayalongController(PlayalongViews):
             self._fit_notes(notes or [])
             self._fit_key_inputs(key_inputs or [])
 
-    def get_playalong_frames(self):
-        playalong_frames = self._input_track[
-            self._current_frame : self._current_frame + PLAYALONG_FRAMELENGTH
-        ]
-        if len(playalong_frames) < PLAYALONG_FRAMELENGTH:
-            playalong_frames += [
-                get_neutral_controller_state()
-                for _ in range(PLAYALONG_FRAMELENGTH - len(playalong_frames))
-            ]
-        return playalong_frames
 
     def clear_track(self):
         self.set_input_track([])

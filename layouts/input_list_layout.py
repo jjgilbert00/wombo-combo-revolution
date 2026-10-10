@@ -1,22 +1,18 @@
 import ctypes
 import sys
-import time
 
 from kivy.core.image import Image as CoreImage
 from kivy.core.text import Label as CoreLabel
 from kivy.core.text.markup import MarkupLabel
 from kivy.core.window import Window
 from kivy.graphics import Color, InstructionGroup, Line, Rectangle
-from kivy.metrics import dp, sp
+from kivy.metrics import dp
 from kivy.resources import resource_find
-from kivy.uix.boxlayout import BoxLayout
-from kivy.uix.button import Button
-from kivy.uix.label import Label
 from kivy.uix.stencilview import StencilView
 
 from images import get_standard_button_icon
 from glyphs import draw_direction_glyph
-from input_list import LIST_BUTTON_ORDER, input_key
+from input_list import LIST_BUTTON_ORDER
 from games import GAMES, draw_action_icon
 from key_inputs import EARLY, LATE, PENDING, describe
 from layouts.drawing import texture_of
@@ -366,12 +362,6 @@ class _Textures:
             self.judgements[key] = label.texture
         return self.judgements[key]
 
-    def judgement(self, text):
-        if text not in self.judgements:
-            label = MarkupLabel(text=text, font_size=theme.TITLE, bold=True, outline_width=2, outline_color=(0, 0, 0))
-            label.refresh()
-            self.judgements[text] = label.texture
-        return self.judgements[text]
 
     def key_tag(self, text):
         if text not in self.key_tags:
@@ -652,9 +642,6 @@ class InputListLayout(StencilView):
     def frame_at(self, x):
         return int(self._frame + (x - self._line_x()) // self.px_per_frame)
 
-    def set_zoom(self, px_per_frame):
-        """Sets the speed by frame width instead (for the current size)."""
-        self.set_lookahead((self._track_right() - self._line_x()) / (px_per_frame * FPS))
 
     # ---- Scrolling ---------------------------------------------------------------------------
 
