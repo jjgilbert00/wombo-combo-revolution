@@ -17,25 +17,40 @@ Frame by frame, and attempt after attempt.
 - [Demoing a combo in game](#demoing-a-combo-in-game)
 - [Saving, opening and files](#saving-opening-and-files)
 - [Videos and overlay mode](#videos-and-overlay-mode)
+- [Displays](#displays)
 - [Settings](#settings)
 - [Keys and mouse reference](#keys-and-mouse-reference)
 - [Troubleshooting](#troubleshooting)
 
 ## Quick start
 
-Wombo Combo runs on Windows with an Xbox-style (XInput) controller. Other controllers are read
-through SDL. To start the app:
+Wombo Combo runs on Windows. Any controller works (Xbox-style ones directly, others through SDL),
+or the keyboard.
 
-```
-pip install -r requirements.txt
-python main.py
-```
+1. Download **WomboCombo-windows.zip** and unzip it anywhere.
+2. Run **WomboCombo.exe**. Nothing else to install.
+
+(Windows may warn that the app is from an unknown publisher, since it isn't signed: choose
+*More info > Run anyway*. To run from source instead: `pip install -r requirements.txt`, then
+`python main.py`. To build the download yourself, see [BUILDING.md](BUILDING.md).)
+
+**The first time it starts,** the app opens a short warm-up (light, medium and heavy punch, then a
+Hadoken) with generous timing. Press **Space**, or **Start** on your controller, and press each
+input as it reaches the white line. That's all there is to it. A verdict pops up for each input
+("HIT", "LATE +2"...) and the pass ends with your score.
+
+![The first go at the warm-up](images/first-go.png)
+
+![A pass's result](images/pass-result.png)
+
+No controller? Play on the keyboard with SF6's PC layout: **WASD** or the arrow keys to move,
+**U I O** for light, medium and heavy punch, **J K L** for kicks.
 
 **To practise a combo someone recorded:**
 
 1. Press **Ctrl+O** and pick the recording. Either its `.mp4` or its `.json` works. You can also
    drag the file onto the window.
-2. Press **Space** in the app, or **F6** while the game has focus.
+2. Press **Space** or **Start** on your controller in the app, or **F6** while the game has focus.
 3. Press each input as it reaches the white line. The first inputs scroll in over a one-second
    lead-in, so you have time to get ready.
 
@@ -46,7 +61,7 @@ python main.py
 3. Press **F8** again to stop.
 4. Press **F12** to save it.
 
-With nothing loaded, the app shows these steps too:
+With nothing loaded, the app offers these as buttons:
 
 ![The start screen](images/start-screen.png)
 
@@ -75,9 +90,12 @@ the timeline in `samples/build_samples.py` and run it again.
 
 You don't need to memorise anything in this guide. The app itself gives you:
 
-- **The hint line** under the input list, which always says what to do next for what you're doing.
-- **Tooltips** when you hover over any button on the menu bar for half a second.
-- **F1**, which shows the getting-started steps and every key.
+- **The hint line** at the bottom left of the window, which always says what to do next for what
+  you're doing.
+- **Tooltips** when you hover over any button on the menu bar for half a second, or over a lane's
+  name in the input list (which explains the lane, the frame meter's colours for one).
+- **F1**, which has two tabs: *Getting started* (the steps, and what every colour means) and
+  *Keys* (every key, grouped by task, with the ones that work in game marked).
 - **Menus** that show each item's shortcut next to it, including the right-click menu.
 
 ## The screen
@@ -90,18 +108,19 @@ You don't need to memorise anything in this guide. The app itself gives you:
 |---|---|
 | File, Edit, View | Menus. |
 | Settings | Opens the settings (see [Settings](#settings)). |
-| Record / Stop | Starts and stops recording. |
-| Play / Pause | Plays or pauses the recording. |
-| Restart | Goes back to the first frame. |
-| Loop on / Loop off | Whether playback repeats. |
-| Practice / Review | Whether playing scores you or replays your last attempt. |
+| ● (red dot) / ■ | Starts and stops recording. |
+| ▶ / ❚❚ | Plays or pauses the recording. |
+| ❙◀ | Goes back to the first frame. |
+| Loop | Whether playback repeats: gold when it's on. |
+| Practice \| Review | Whether playing scores you or replays your last attempt: the one that's gold is in use; click the other to switch. |
+| Demo | Plays the combo in game through a virtual controller. |
 
-The status bar on the right shows:
+**The status bar** runs along the bottom. On the left is the hint line. On the right:
 - the mode (PRACTICE, REVIEW, PAUSED, GET READY or REC) and the time;
 - your score;
-- messages;
+- messages (warnings, such as *No controller* or *Unsaved*, are pink);
 - the controller in use;
-- the input sampling rate, which should read about 60 Hz.
+- the input sampling rate, only if it's off (it should be about 60 Hz).
 
 **The input list** is where practice happens. Time runs left to right. Inputs slide leftwards and
 reach the **white line** on the frame they should be pressed. It works like a rhythm game, but you
@@ -109,35 +128,53 @@ read it like text. From the top, the lanes are:
 
 | Lane | What it shows |
 |---|---|
-| **Frames** | One block per frame of the recording: grey is neutral, blue a direction, orange a button. A white tick marks where the input changes. |
+| **Frames** | One block per frame of the recording: grey is neutral, slate a direction, white a button. A white tick marks where the input changes. |
 | **Target** | The recording. Each box is one input, as wide as it was held. Its label shows how many frames it lasts, the direction and the buttons. |
 | **Key inputs** | Only what's required, once you've [marked key inputs](#marking-what-matters-key-inputs). |
 | **You** | Your attempt, drawn the same way. The strip above it marks each frame green where you matched the recording and red where you didn't. |
-| **Saved attempts / Recent attempts** | One compact, colour-coded row per earlier attempt (see [Reviewing your attempts](#reviewing-your-attempts)). |
+| **Saved attempts / Recent attempts** | One compact, colour-coded row per earlier attempt, with a tick on each hit and a cross on each miss (see [Reviewing your attempts](#reviewing-your-attempts)). |
 
 Under the lanes, next to the line, is your controller's **live input** right now. The line turns
 green while you're matching the recording. **Notes** hang below that, pointing at the frames they
-describe. The **hint line** is at the bottom.
+describe.
 
 Every lane can be hidden from the **View** menu, which says whether each one is shown or hidden.
+In a tall window the list grows to fill it.
 
 ## Practising
 
 | To | Do this |
 |---|---|
-| Play / pause | **Space** (in the app) or **F6** / **F7** (in game), or the Play button |
-| Start over | **Home** (in the app) or **F5** (in game), or Restart |
+| Play / pause | **Start** on the controller or **Space** (in the app), **F6** / **F7** (in game), or the Play button |
+| Start over | **Back** (View) on the controller or **Home** (in the app), **F5** (in game), or Restart |
 | Practise one part | Right-click in the list and choose **Practise from here** |
 | Look back | Scroll the mouse wheel (one frame per notch) or drag the list sideways |
 | Zoom | **Ctrl+Wheel** |
 
 - **Practice and Review.** In **Practice** mode, playing records your controller against the
   recording and scores it. In **Review** mode, playing replays your last attempt next to the
-  recording, so you can watch where it went wrong. The button on the menu bar names the mode
-  you're in. **F4** switches.
+  recording, so you can watch where it went wrong. *Practice | Review* on the menu bar shows the
+  mode you're in. **F4** switches.
+- **Up next.** While playing, the space left of the line becomes a panel with the next inputs to
+  make, still and large, so you don't have to read them on the move. The bar under the first
+  fills as it approaches, then turns gold while its window is open. Verdicts (HIT, EARLY, LATE,
+  MISS) pop up at the panel's foot. *View > Hide up-next panel* turns it off.
+- **Feedback.** The line flares when you hit a key input, and a held arrow (arrow lanes) or a
+  pressed button turns green while it's what the recording wants. *Settings > Hit sound* adds a
+  soft tick for each hit, handy with the game in front.
+- **Scroll speed.** Inputs appear 1.5 seconds before they reach the line. If that's too fast or too
+  slow, change *Settings > Scroll speed* (0.75 to 3 seconds), or zoom with **Ctrl+Wheel**. While
+  playing, frame counts are hidden and inputs that aren't key inputs fade back.
 - **Lead-in.** When practice starts, and on every loop, the list scrolls in for a moment before
   the first frame (1 second by default). You can change or turn this off in
   [Settings](#settings).
+- **Verdicts.** Each key input is judged the moment it's settled, next to the line: **HIT**,
+  **EARLY -1** or **LATE +2** (frames outside the window), or **MISS**. When the pass ends, a
+  banner gives its score and what went wrong, or **PERFECT** and how many in a row, plus your
+  best for the recording.
+- **Keyboard.** Without a controller, **WASD** or the arrows move and **U I O / J K L** are the
+  punches and kicks. While a pass is playing the letters play; when paused they're the usual
+  shortcuts.
 - **Loop.** With **Loop on**, the recording repeats. Each pass starts fresh, and the pass you just
   finished is kept in [Recent attempts](#reviewing-your-attempts).
 
@@ -260,12 +297,11 @@ game.
 
 Select some frames and press **N** (or right-click > Add note) to attach a note, for example
 "hit-confirm here". A note shows as a small card under the list. A brace points at its frames,
-and a yellow bar sits over them.
+and a pale bar sits over them.
 
 - To edit or delete a note, click it.
-- **Shift+F3** (View > Hide notes) hides the cards but keeps the yellow bars, once you know them.
-- Notes are included in exported videos. Each one appears half a second before its frames
-  and stays up for a second after them.
+- **Shift+F3** (View > Hide notes) hides the cards but keeps the bars over their frames, once you know them.
+- Notes are included in videos exported from the input list, as they show in the app.
 
 ## Reviewing your attempts
 
@@ -383,17 +419,47 @@ frame. The window title shows the recording's name.
 
 ## Videos and overlay mode
 
-- **File > Export overlay video...** saves the recording's video with the inputs (and notes) drawn
-  over it. The recording must have video.
+- **File > Export overlay video...** saves the recording's video with the inputs drawn over it.
+  The recording must have video.
 - **File > Export input video...** saves just the inputs as a video.
+- Videos are drawn by the display that's showing, exactly as it looks in the app: the input list
+  (with its key inputs and notes, without your attempt), the arrow lanes or the ring. Switch
+  display (**F3**) before exporting to choose.
 - *Settings > Overlay input delay* shifts the drawn inputs later by a few frames to line up with
   the game's own input lag in the video.
 
 **Overlay mode (F2)** keeps Wombo Combo on top of the game, borderless and see-through, so you can
-practise with the input list over the game itself. Set how see-through it is with *Overlay
-opacity* in the View menu. **F3** switches to the older ring display, if you prefer it.
+practise over the game itself. Only what's drawn covers the game: the window's background is
+transparent, and the input list drops its lane names. Set how see-through the rest is with
+*Overlay opacity* in the View menu. *View > See-through overlay* turns the transparent background
+off, for the whole window at that opacity instead. With the input list, the overlay shrinks to what
+the list draws; with the arrow lanes or ring it keeps its full height.
+
+## Displays
+
+There are three ways to show the recording, and all of them do the same job, so pick whichever
+reads best for you. Choose one in *View > Display*, or press **F3** to cycle through them. Each
+display shows the practice feedback: the getting-started card, the hint line, a verdict (HIT,
+EARLY, LATE, MISS) as each key input is settled, and your score after each pass. Scroll speed
+(*Settings > Scroll speed*, or **Ctrl+Wheel**) and the lead-in apply to all three.
+
+- **Input list** (the default): inputs scroll right to left onto a line, with the frame meter,
+  key inputs, notes, the up-next panel and your recent and saved attempts.
+- **Arrow lanes**: like a dance game. Arrows fall down five lanes onto their outlines at the
+  bottom: left, down-left/up-left, down/up, down-right/up-right, right. An up arrow falls down the
+  down/up lane pointing up, and that lane's outline is a double-headed arrow that holds either.
+  The outline lights up with the direction you're holding. Buttons fall down their own columns on
+  the right.
+- **Ring**: the stick as a spiral of upcoming directions around a circle, with the buttons falling
+  down columns beside it.
+
+**Held inputs.** In every display a held input is one icon with a tail behind it as long as it's
+held, like a dance game's hold notes, rather than a stack of icons. Hold it until the tail has
+passed.
 
 ## Settings
+
+Settings are in groups: Practice, Controller and game, Sound and demo, and Recording and video.
 
 | Setting | What it does |
 |---|---|
@@ -404,7 +470,9 @@ opacity* in the View menu. **F3** switches to the older ring display, if you pre
 | Encoder | Video encoder: Auto, CPU (x264) or NVIDIA (NVENC). |
 | Overlay input delay | Frames to delay drawn inputs in overlay videos. |
 | Export overlay on save | Also write `name_overlay.mp4` when saving a recording. |
-| Lead-in before practice | The run-up before practice playback: off, 0.5 s, 1 s or 2 s. |
+| Scroll speed | How far ahead of the line inputs appear: 0.75 s (fast) to 3 s (slow), 1.5 s by default. |
+| Lead-in | The run-up before practice playback: off, 0.5 s, 1 s or 2 s. |
+| Hit sound | A soft tick for each key input you hit while practising (off by default). |
 | Recent attempts shown | How many recent runs appear as rows. |
 | Game for new recordings | Which game's actions new recordings (and older ones that don't say) use. |
 | Demo countdown | How long a demo waits before playing, to switch to the game: 1, 2, 3 or 5 s. |
@@ -419,7 +487,7 @@ Settings are saved automatically.
 |---|---|
 | F1 | Help and keys |
 | F2 | Overlay mode |
-| F3 | Switch between the input list and the ring display |
+| F3 | Next display: input list, arrow lanes, ring |
 | Shift+F3 | Show / hide notes |
 | F4 | Practice / Review |
 | F5 | Restart |
@@ -460,7 +528,7 @@ Settings are saved automatically.
   you have several, pick one in *Settings > Controller*.
 - **The F-keys don't work in game.** If the game runs as administrator, run Wombo Combo as
   administrator too. Windows doesn't pass keys from an elevated window to non-elevated apps.
-- **"late frames" while recording, or the rate isn't about 60 Hz.** The PC is too busy to sample
+- **"late frames" while recording, or "Input at ... Hz" in the status bar.** The PC is too busy to sample
   every frame on time. Close heavy programs, or turn off *Record video* or lower *Video size*.
 - **A demo hotkey seems to do nothing in game.** Listen for a low error beep: the reason is in the app's status bar (and its log). Usually vgamepad isn't installed yet, or no recording is open. When a demo starts, it ticks once a second through the countdown.
 - **Video capture failed.** The recording continues with inputs only, and the message says why.

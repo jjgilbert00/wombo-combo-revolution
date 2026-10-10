@@ -1,4 +1,5 @@
-"""Builds the sample Street Fighter 6 recordings in this folder.
+"""Builds the sample Street Fighter 6 recordings in this folder: a warm-up for a first try, then
+two real combos.
 
 Each sample is written out frame by frame (60 per second), as if performed on an Xbox pad with SF6's
 default Classic layout: X = LP, Y = MP, RB = HP, A = LK, B = MK, RT = HK. Directions are in numpad
@@ -120,6 +121,37 @@ def guile():
     })
 
 
+def warm_up():
+    """A first try: light, medium and heavy punch one at a time, then a fireball (236 HP). Slow,
+    with generous windows (a dozen frames each), so it can be hit on the first go."""
+    frames = track(
+        190,
+        (40, 45, 5, "X"),                # LP
+        (70, 75, 5, "Y"),                # MP
+        (100, 105, 5, "RB"),             # HP
+        (130, 133, 2, ""),               # down
+        (134, 137, 3, ""),               # down-forward
+        (138, 140, 6, ""),               # forward...
+        (141, 146, 6, "RB"),             # ...+ HP: Hadoken
+    )
+    save("Warm-up - LP, MP, HP, Hadoken", {
+        "inputs": frames,
+        "game": "sf6",
+        "key_inputs": [
+            key_input(34, 46, buttons=["X"]),
+            key_input(64, 76, buttons=["Y"]),
+            key_input(94, 106, buttons=["RB"]),
+            key_input(128, 150, motion=[2, 3, 6], buttons=["RB"]),
+        ],
+        "notes": [
+            {"start": 40, "end": 45, "text": "Light punch as it reaches the line"},
+            {"start": 100, "end": 105, "text": "Only the timing window counts: early or late shows up below"},
+            {"start": 130, "end": 146, "text": "Down, down-forward, forward + heavy punch"},
+        ],
+    })
+
+
 if __name__ == "__main__":
+    warm_up()
     ryu()
     guile()
