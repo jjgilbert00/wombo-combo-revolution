@@ -3,14 +3,10 @@
 This is the fighting-game training-mode style of showing inputs. A new run starts whenever the
 direction or any button changes.
 """
-import math
-
-from PIL import Image, ImageDraw, ImageFont
 
 # Order buttons appear in within a run.
 LIST_BUTTON_ORDER = ["X", "Y", "A", "B", "LB", "RB", "LT", "RT"]
 
-DIRECTION_ANGLES = {6: 0, 9: 45, 8: 90, 7: 135, 4: 180, 1: 225, 2: 270, 3: 315}
 
 # Runs are only followed this far past the visible range; longer holds are labelled "999+".
 MAX_COUNT = 999
@@ -59,77 +55,3 @@ def match_runs(target, attempt, lo, hi):
         else:
             runs.append((frame, 1, matched))
     return runs
-
-
-def draw_direction_glyph(direction, size, font_path):
-    """White arrow (or circled N for neutral) with a dark outline, as a PIL RGBA image."""
-    scale = 4  # Supersample, then shrink for smooth edges.
-    s = size * scale
-    image = Image.new("RGBA", (s, s), (0, 0, 0, 0))
-    draw = ImageDraw.Draw(image)
-    outline = max(2, s // 16)
-    if direction == 5:
-        inset = outline
-        draw.ellipse([inset, inset, s - inset, s - inset], fill=(40, 40, 44, 255), outline=(235, 235, 235, 255),
-                     width=outline)
-        font = ImageFont.truetype(font_path, int(s * 0.55))
-        draw.text((s / 2, s / 2), "N", font=font, fill=(235, 235, 235, 255), anchor="mm")
-    else:
-        # A right-pointing arrow (as offsets from the centre), turned to point its way. The outline is
-        # a stroke around the shape with rounded joins, so it stays even where the head meets the
-        # shaft, and the shape is a little smaller than the square to leave room for it.
-        m = s / 2
-        shaft, head, k = 0.15, 0.34, 0.93
-        shape = [(-0.42, -shaft), (0.0, -shaft), (0.0, -head), (0.44, 0.0), (0.0, head), (0.0, shaft), (-0.42, shaft)]
-        angle = math.radians(DIRECTION_ANGLES[direction])
-        cos, sin = math.cos(angle), math.sin(angle)
-        # Counter-clockwise on screen, where y runs down.
-        points = [(m + s * k * (x * cos + y * sin), m + s * k * (y * cos - x * sin)) for x, y in shape]
-        dark = (30, 30, 34, 255)
-        draw.polygon(points, fill=dark)
-        draw.line(points + [points[0]], fill=dark, width=outline * 2, joint="curve")
-        for x, y in points:  # Round the outer corners too.
-            draw.ellipse([x - outline, y - outline, x + outline, y + outline], fill=dark)
-        draw.polygon(points, fill=(245, 245, 245, 255))
-    return image.resize((size, size), Image.LANCZOS)
-
-
-# Button remapping: a recording's buttons shown and played in the player's own layout. A map is
-# {recorded button: player's button}, one-to-one; buttons it leaves out map to themselves.
-
-def full_map(mapping):
-    """The map for every button, with unmapped ones mapping to themselves."""
-    return {button: (mapping or {}).get(button, button) for button in LIST_BUTTON_ORDER}
-
-
-def inverse_map(mapping):
-    return {theirs: recorded for recorded, theirs in full_map(mapping).items()}
-
-
-def map_state(state, mapping):
-    """The state with its buttons renamed through mapping (None stays None)."""
-    if state is None or not mapping:
-        return state
-    mapped = {"direction": state["direction"], **{button: 0 for button in LIST_BUTTON_ORDER}}
-    for recorded, theirs in full_map(mapping).items():
-        if state.get(recorded):
-            mapped[theirs] = 1
-    return mapped
-
-
-def map_key(key, mapping):
-    """An input_key() (direction, pressed buttons) with its buttons renamed, in the usual order."""
-    if not mapping:
-        return key
-    direction, pressed = key
-    renamed = {full_map(mapping)[button] for button in pressed}
-    return direction, tuple(button for button in LIST_BUTTON_ORDER if button in renamed)
-
-
-def map_key_input(key_input, mapping):
-    """A key input with its required buttons renamed. (An exact span compares whole frames, which
-    are translated anyway.)"""
-    if not mapping:
-        return dict(key_input)
-    table = full_map(mapping)
-    return dict(key_input, buttons=[table[button] for button in key_input.get("buttons", [])])
