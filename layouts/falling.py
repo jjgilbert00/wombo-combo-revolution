@@ -28,24 +28,18 @@ class Prompt:
         self.silhouette = silhouette_of(image)
 
 
-_knockout_colors = []  # Every Knockout's colour, to follow the window's background.
-
-
-def set_background(rgb):
-    """The window's background changed (e.g. to the see-through overlay's): knockouts follow it."""
-    for color in _knockout_colors:
-        color.rgb = rgb
-
-
 class Knockout:
     """Keeps hold tails behind everything: each thing drawn over the tails gets a rectangle of its
-    silhouette in the background colour, in group, which goes between the tails and the things."""
+    silhouette in the background colour, in group, which goes between the tails and the things.
+    Whoever owns one passes on changes to the window's background (set_background)."""
 
     def __init__(self):
         self.group = InstructionGroup()
-        color = Color(*theme.BACKGROUND, 1)
-        _knockout_colors.append(color)
-        self.group.add(color)
+        self.color = Color(*theme.BACKGROUND, 1)
+        self.group.add(self.color)
+
+    def set_background(self, rgb):
+        self.color.rgb = rgb
 
     def add(self, silhouette):
         """A rectangle for one covering thing; keep its pos and size in step with the thing's."""
@@ -118,7 +112,7 @@ class ButtonColumn(Widget):
         super().__init__(**kwargs)
         self.prompt = Prompt(PILImage.open(button_source))
         self.texture = self.prompt.texture
-        knockout = Knockout()
+        self.knockout = knockout = Knockout()
         self.falling = FallingRuns(knockout)
         # Tails first, then everything else over them with the tails knocked out underneath.
         self.canvas.add(Color(*HOLD_TAIL_COLOR))
@@ -131,6 +125,10 @@ class ButtonColumn(Widget):
         self.canvas.add(Color(1, 1, 1, BUTTON_PROMPT_OPACITY))
         self.canvas.add(self.falling.head_group)
         self.bind(pos=self._layout_button, size=self._layout_button)
+
+    def set_background(self, rgb):
+        """The window's background colour, which hides hold lines under the icons."""
+        self.knockout.set_background(rgb)
 
     def _icon_size(self):
         return self.width, self.width * self.texture.height / self.texture.width

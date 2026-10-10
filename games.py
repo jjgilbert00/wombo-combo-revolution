@@ -35,13 +35,6 @@ GAMES = {
     },
 }
 
-COMBO_NAMES = {name for game in GAMES.values() for _, name, _ in game["combos"]} | {
-    alt for game in GAMES.values() for alt, _ in game["after_normal"].values()}
-
-
-def action_names(game):
-    return list(GAMES[game]["actions"])
-
 
 def to_actions(game, layout, buttons, after_normal=False):
     """The actions for recorded buttons pressed together: combinations first (each button used

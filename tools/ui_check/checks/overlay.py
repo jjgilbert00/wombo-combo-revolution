@@ -6,6 +6,8 @@ from ctypes import wintypes
 import win32gui
 from kivy.core.window import Window
 
+import theme
+
 
 def rect():
     left, top, right, bottom = win32gui.GetWindowRect(Window.get_window_info().window)
@@ -26,6 +28,9 @@ def steps(h):
     full = rect()
     h.check("with the card up, the overlay keeps the full height", full[3] > 500, full)
     h.check("the overlay is see-through (colour key)", layered_flags() & 1, layered_flags())
+    knockout = h.app.arrow_lanes_layout.lanes[0].knockout.color
+    h.check("hold lines are hidden in the see-through background", tuple(knockout.rgb) == theme.OVERLAY_KEY,
+            tuple(knockout.rgb))
     h.app.coaching = False; yield 0.6
     fitted = rect()
     h.check("without it, the list's overlay fits its content", 200 < fitted[3] < full[3], fitted)
@@ -37,3 +42,5 @@ def steps(h):
     h.app.toggle_overlay(); yield 0.6
     h.check("leaving overlay puts the window back", rect() == normal, (rect(), normal))
     h.check("and it's no longer see-through", not layered_flags() & 1, layered_flags())
+    h.check("hold lines are hidden in the usual background again", tuple(knockout.rgb) == theme.BACKGROUND,
+            tuple(knockout.rgb))

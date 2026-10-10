@@ -219,6 +219,11 @@ class RingLayout(FeedbackDisplay, RelativeLayout):
             self.add_widget(display)
         self._init_feedback()
 
+    def set_background(self, rgb):
+        """The window's background colour, which hides hold lines under the button icons."""
+        for name in self.button_names:
+            self.button_displays[name].set_background(rgb)
+
     def verdict_spot(self):
         # Up and to the right of the stick's middle, where inputs arrive.
         return self.width * 0.25 + dp(110), self.height * 0.62

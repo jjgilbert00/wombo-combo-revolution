@@ -78,7 +78,7 @@ class ArrowLane(Widget):
         self.directions = directions
         self.arrows = arrows
         self.receptors = receptors
-        knockout = Knockout()
+        self.knockout = knockout = Knockout()
         self.falling = FallingRuns(knockout)
         # Tails first, then everything else over them with the tails knocked out underneath.
         self.canvas.add(Color(*HOLD_TAIL_COLOR))
@@ -94,6 +94,9 @@ class ArrowLane(Widget):
         self.canvas.add(Color(1, 1, 1, 1))  # Falling arrows are solid.
         self.canvas.add(self.falling.head_group)
         self.bind(pos=self._layout, size=self._layout)
+
+    def set_background(self, rgb):
+        self.knockout.set_background(rgb)
 
     def _icon(self):
         return self.width, self.width
@@ -155,6 +158,11 @@ class ArrowLanesLayout(FeedbackDisplay, RelativeLayout):
             self.button_columns[name] = column
             self.add_widget(column)
         self._init_feedback()
+
+    def set_background(self, rgb):
+        """The window's background colour, which hides hold lines under what's drawn over them."""
+        for part in self.lanes + list(self.button_columns.values()):
+            part.set_background(rgb)
 
     def verdict_spot(self):
         receptor_top = self.lanes[0].width if self.lanes else 0
