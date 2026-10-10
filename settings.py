@@ -36,6 +36,7 @@ DEFAULTS = {
     "recent_attempts": (5, "Recent runs shown in the input list."),
     "lead_in": (60, "Frames of run-up before practice playback, to get ready."),
     "demo_countdown": (180, "Frames before a demo starts, to switch to the game."),
+    "keys": ("", "Keys changed from the defaults: hotkey.play=F9,shortcut.save= (see keys.Bindings)."),
 }
 
 

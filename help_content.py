@@ -1,18 +1,22 @@
 """What the Help dialog (F1) says: the getting-started steps, the colour legends, and the keys
-grouped by task. Hotkeys are named from keys.HOTKEYS, so a key changed there changes here too."""
+grouped by task. Keys are named as they are now (keys.current), so changing one changes it here too."""
+import keys
 import theme
-from keys import HOTKEYS
 
 STEPS = [
-    "Open a recording with [b]Ctrl+O[/b] (or drop its .json / .mp4 on the window), or record one with "
-    "[b]F8[/b] and save it with [b]F12[/b]. The File menu has samples to try.",
-    "Press [b]Space[/b] or [b]Start[/b] and play along: press each input as it reaches the line. No "
+    "Open a recording with [b]{open_track}[/b] (or drop its .json / .mp4 on the window), or record one with "
+    "[b]{toggle_recording}[/b] and save it with [b]{save_recording}[/b]. The File menu has samples to try.",
+    "Press [b]{toggle_playback}[/b] or [b]Start[/b] and play along: press each input as it reaches the line. No "
     "controller? [b]WASD[/b] + [b]U I O[/b] / [b]J K L[/b].",
-    "Mark what matters: select frames (drag in the frame meter) and press [b]K[/b]. Runs are graded "
-    "below your attempt.",
-    "Look back: scroll or drag the list, [b]S[/b] saves an attempt, [b]A[/b] lists and replays attempts. "
-    "[b]F3[/b] tries another display.",
+    "Mark what matters: select frames (drag in the frame meter) and press [b]{mark_key_input}[/b]. Runs are "
+    "graded below your attempt.",
+    "Look back: scroll or drag the list, [b]{save_attempt}[/b] saves an attempt, [b]{open_attempts}[/b] lists "
+    "and replays attempts. [b]{toggle_display}[/b] tries another display.",
 ]
+
+
+def steps():
+    return [keys.fill(step) for step in STEPS]
 
 LEGENDS = [
     ("How an input went", [
@@ -33,40 +37,25 @@ LEGENDS = [
 
 
 def key_columns():
-    """[[(group title, [(key, what it does, works in game)])]], in two columns."""
-    hotkey = {method: key for key, _, method in HOTKEYS}
-    practise = [
-        ("Space / Start", "Play or pause", False),
-        (hotkey["play"] + " / " + hotkey["pause"], "Play / pause", True),
-        ("Home / Back", "Restart: a fresh attempt while practising", False),
-        (hotkey["restart_playback"], "Restart", True),
-        (hotkey["toggle_practice"], "Practice or review (replay your attempt)", True),
-        ("S", "Save the attempt with the recording", False),
-        ("A", "Attempts: rename, show, replay, delete", False),
-    ]
-    edit = [
-        ("Click", "Select a frame (Shift+click extends)", False),
-        ("Drag in Frames", "Select a range of frames", False),
-        ("Right-click", "Menu for the selection", False),
-        ("K", "Mark the selection as a key input", False),
-        ("N", "Add a note to the selection", False),
-        ("Click a tag", "Edit a note or key input", False),
-        ("Esc", "Clear the selection", False),
-    ]
-    record = [
-        (hotkey["toggle_recording"], "Start / stop recording", True),
-        ("Ctrl+O / " + hotkey["open_track"], "Open a recording", True),
-        ("Ctrl+S", "Save changes to the recording", False),
-        (hotkey["save_recording"], "Save recording as (with its video)", True),
-        (hotkey["demo_recording"], "Demo the recording in game", True),
-        (hotkey["demo_key_inputs"], "Demo just the key inputs in game", True),
-    ]
-    view = [
-        (hotkey["show_help"], "This help", True),
-        (hotkey["toggle_overlay"], "Overlay mode: on top of the game", True),
-        (hotkey["toggle_display"], "Next display: input list, arrow lanes, ring", True),
-        (hotkey["toggle_notes"], "Show / hide notes", True),
-        ("Wheel / drag", "Move through the list, a frame per notch", False),
-        ("Ctrl+Wheel", "Scroll speed (zoom)", False),
-    ]
-    return [[("Practise", practise), ("Edit", edit)], [("Record, files and demos", record), ("View", view)]]
+    """[[(group title, [(key, what it does, works in game)])]], in two columns: every action with a
+    key (both, if it has a hotkey and a shortcut), and the mouse."""
+    groups = []
+    for title, actions in keys.ACTION_GROUPS:
+        rows = []
+        for method, description, _, _ in actions:
+            hotkey, shortcut = keys.hotkey(method), keys.shortcut(method)
+            if method == "toggle_playback":
+                shortcut = " / ".join(filter(None, (shortcut, "Start")))
+            if method == "restart_playback":
+                shortcut = " / ".join(filter(None, (shortcut, "Back")))
+            if shortcut or hotkey:
+                rows.append((" / ".join(filter(None, (shortcut, hotkey))), description, bool(hotkey)))
+        groups.append((title, rows))
+    practise, edit, record, view = groups
+    edit[1].insert(0, ("Click", "Select a frame (Shift+click extends)", False))
+    edit[1].insert(1, ("Drag in Frames", "Select a range of frames", False))
+    edit[1].insert(2, ("Right-click", "Menu for the selection", False))
+    edit[1].append(("Click a tag", "Edit a note or key input", False))
+    view[1].append(("Wheel / drag", "Move through the list, a frame per notch", False))
+    view[1].append(("Ctrl+Wheel", "Scroll speed (zoom)", False))
+    return [[practise, edit], [record, view]]

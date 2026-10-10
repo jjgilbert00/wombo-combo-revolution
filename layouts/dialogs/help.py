@@ -18,11 +18,11 @@ class HelpPopup(Dialog):
     """Help in two tabs. Getting started: the steps, then legends for what the colours mean. Keys:
     groups of (key, what it does, works in game) in columns. on_manual opens the user guide."""
 
-    KEY_WIDTH = dp(110)
+    KEY_WIDTH = dp(130)
     COLUMN_WIDTH = dp(440)
     ROW = dp(26)
 
-    def __init__(self, steps, legends, key_columns, on_manual, **kwargs):
+    def __init__(self, steps, legends, key_columns, on_manual, on_keys, **kwargs):
         rows = max(sum(len(group) + 1.5 for _, group in column) for column in key_columns)
         super().__init__(size_hint=(None, None), size=(dp(960), dp(150) + self.ROW * rows),
                          background="", background_color=(0, 0, 0, 0.5), **kwargs)
@@ -43,6 +43,7 @@ class HelpPopup(Dialog):
         actions = BoxLayout(size_hint_y=None, height=dp(34), spacing=dp(8))
         actions.add_widget(self._label("Hover over any button for a tip. The user guide covers everything in detail.",
                                        theme.CAPTION, DIM_TEXT_COLOR, dp(34)))
+        actions.add_widget(button("Change keys...", lambda: (self.dismiss(), on_keys())))
         actions.add_widget(button("Open user guide", lambda: (self.dismiss(), on_manual())))
         actions.add_widget(button("Close", self.dismiss, "primary"))
         panel.add_widget(actions)

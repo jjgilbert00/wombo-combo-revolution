@@ -481,9 +481,20 @@ Settings are in groups: Practice, Feedback, Demo, Recording and video, and Contr
 | Game for new recordings | Which game's actions new recordings (and older ones that don't say) use. |
 | Demo countdown | How long a demo waits before playing, to switch to the game: 1, 2, 3 or 5 s. |
 
-Settings are saved automatically.
+Settings are saved automatically. *Change keys...* at the foot of the dialog changes the keys (see
+[Keys and mouse reference](#keys-and-mouse-reference)).
 
 ## Keys and mouse reference
+
+These are the default keys. Every one can be changed: *View > Change keys...* (also in Settings and
+Help). Click a key, then press the new one, with Ctrl, Shift or Alt if you like. A key another action
+had moves over, and the menus, Help and hints follow the keys you've set. *Reset all to defaults*
+puts them back.
+
+Each action can have a **hotkey**, which works even while the game has focus, and a **shortcut**,
+which works in the app's window. Hotkeys need an F key, Ctrl or Alt, so they don't go off while you
+type or play. Keys used to play on the keyboard (W A S D, U I O, J K L) still play while you practise
+on the keyboard; as shortcuts, they work when you aren't.
 
 **In game.** These work even while the game window has focus:
 

@@ -72,6 +72,42 @@ def steps(h):
     feedback[0].draw([("hit", 0, "5LP", 0.1)], None)
     h.check("and on shows them again", h.app.settings.show_verdicts and feedback[0].verdicts[0][0].a > 0)
     p.dismiss(); yield 0.2
+    # Changing keys: click a key, press the new one.
+    import keys
+    from kivy.core.window import Window
+    h.app.open_keys(); yield 0.4
+    k = popup(h, "KeysPopup")
+    h.check("Change keys opens", k is not None)
+    k.cells[(keys.SHORTCUT, "add_note")].dispatch("on_release"); yield 0.1
+    h.check("clicking a key waits for the new one, holding the hotkeys",
+            k.waiting == (keys.SHORTCUT, "add_note") and h.app.waiting_for_key)
+    Window.dispatch("on_key_down", 109, 0, "m", []); yield 0.1  # M
+    h.check("pressing a key makes it the shortcut, saved and used",
+            keys.window_shortcut(109, []) == "add_note" and keys.window_shortcut(110, []) is None
+            and "shortcut.add_note=M" in h.app.settings.keys and not h.app.waiting_for_key,
+            h.app.settings.keys)
+    k.cells[(keys.HOTKEY, "play")].dispatch("on_release"); yield 0.1
+    Window.dispatch("on_key_down", 112, 0, "p", []); yield 0.1  # A plain P
+    h.check("a plain letter is refused as a hotkey, and it keeps waiting",
+            keys.hotkey("play") == "F6" and k.waiting == (keys.HOTKEY, "play") and "F key" in k.message.text,
+            k.message.text)
+    Window.dispatch("on_key_down", 27, 0, None, []); yield 0.1  # Esc: a key like any other while waiting.
+    h.check("Esc can be taken while waiting (it doesn't close the dialog)", k.parent is not None)
+    Window.dispatch("on_key_down", 112, 0, "p", ["ctrl"]); yield 0.1
+    h.check("Ctrl+P is a fine hotkey", keys.hotkey("play") == "Ctrl+P", keys.hotkey("play"))
+    k.cells[(keys.SHORTCUT, "add_note")].dispatch("on_release"); yield 0.1
+    Window.dispatch("on_key_down", 107, 0, "k", []); yield 0.1  # K, which Mark key input had
+    h.check("a key another action had moves over",
+            keys.shortcut("add_note") == "K" and keys.shortcut("mark_key_input") == ""
+            and "Mark the selection" in k.message.text, k.message.text)
+    h.check("the menus and help follow the keys",
+            "Ctrl+P" in keys.fill("{hot_play}") and any(row[0] == "K" and "note" in row[1]
+                                                        for column in __import__("help_content").key_columns()
+                                                        for _, rows in column for row in rows))
+    reset = next(w for w in k.walk() if getattr(w, "text", "") == "Reset all to defaults")
+    reset.dispatch("on_release"); reset.dispatch("on_release"); yield 0.1
+    h.check("Reset puts every key back", keys.current.keys == keys.Bindings().keys and h.app.settings.keys == "")
+    k.dismiss(); yield 0.3
     # Hovering over a lane's name shows what the lane is.
     from kivy.core.window import Window
     from layouts.ui_kit import Tooltip
