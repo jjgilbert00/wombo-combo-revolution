@@ -12,7 +12,8 @@ from collections import namedtuple
 
 from controller import get_neutral_controller_state
 from games import GAMES, normal_window, to_actions
-from input_list import LIST_BUTTON_ORDER, input_key, map_key, map_key_input, map_state, match_runs, runs_in_range
+from button_map import map_key, map_key_input, map_state
+from input_list import LIST_BUTTON_ORDER, input_key, match_runs, runs_in_range
 from key_inputs import best_hold, describe, grade_all, result
 from playalong_state import RunningState
 from sampler import FPS

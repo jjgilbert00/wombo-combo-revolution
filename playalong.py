@@ -3,7 +3,7 @@ import time
 
 from controller import get_neutral_controller_state
 from games import GAMES
-from input_list import full_map, inverse_map, map_state
+from button_map import full_map, inverse_map, map_state
 from key_inputs import GRADE_REACH, HIT, PENDING, describe, grade_all, normalized, result
 from playalong_state import PlayalongStatus, RunningState
 from playalong_views import PLAYALONG_FRAMELENGTH, PlayalongViews

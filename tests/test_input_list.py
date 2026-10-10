@@ -4,7 +4,8 @@ import unittest
 from helpers import key_input, state, track
 
 from games import to_actions
-from input_list import full_map, input_key, inverse_map, map_key, map_key_input, map_state, match_runs, runs_in_range
+from button_map import full_map, inverse_map, map_key, map_key_input, map_state
+from input_list import input_key, match_runs, runs_in_range
 
 
 class Runs(unittest.TestCase):

@@ -7,19 +7,19 @@ from kivy.core.text import Label as CoreLabel
 from kivy.core.text.markup import MarkupLabel
 from kivy.core.window import Window
 from kivy.graphics import Color, InstructionGroup, Line, Rectangle
-from kivy.graphics.texture import Texture
 from kivy.metrics import dp, sp
 from kivy.resources import resource_find
 from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.button import Button
 from kivy.uix.label import Label
 from kivy.uix.stencilview import StencilView
-from PIL import Image
 
 from images import get_standard_button_icon
-from input_list import LIST_BUTTON_ORDER, draw_direction_glyph, input_key
+from glyphs import draw_direction_glyph
+from input_list import LIST_BUTTON_ORDER, input_key
 from games import GAMES, draw_action_icon
 from key_inputs import EARLY, LATE, PENDING, describe
+from layouts.drawing import texture_of
 from layouts.feedback import Feedback
 from sampler import FPS
 import theme
@@ -115,12 +115,6 @@ def _modifier_held(name):
     if sys.platform == "win32":
         return bool(ctypes.windll.user32.GetKeyState(_VIRTUAL_KEYS[name]) & 0x8000)
     return name in Window.modifiers
-
-
-def _texture_from_pil(image):
-    texture = Texture.create(size=image.size, colorfmt="rgba")
-    texture.blit_buffer(image.transpose(Image.FLIP_TOP_BOTTOM).tobytes(), colorfmt="rgba", bufferfmt="ubyte")
-    return texture
 
 
 def _text_texture(text, font_size, bold=True):
@@ -323,7 +317,7 @@ class _ButtonTextures(dict):
 
     def __missing__(self, name):
         game = self.game if self.game in GAMES else next(iter(GAMES))
-        texture = _texture_from_pil(draw_action_icon(game, name, int(ICON_SIZE * 2), self.font))
+        texture = texture_of(draw_action_icon(game, name, int(ICON_SIZE * 2), self.font))
         self[name] = texture
         return texture
 
@@ -332,7 +326,7 @@ class _Textures:
     def __init__(self, controller_type, button_icon_style):
         font = resource_find("data/fonts/Roboto-Bold.ttf")
         glyph_pixels = int(ICON_SIZE * 2)  # Render larger than shown so scaling stays crisp.
-        self.directions = {d: _texture_from_pil(draw_direction_glyph(d, glyph_pixels, font)) for d in range(1, 10)}
+        self.directions = {d: texture_of(draw_direction_glyph(d, glyph_pixels, font)) for d in range(1, 10)}
         self.buttons = _ButtonTextures({
             name: CoreImage(get_standard_button_icon(controller_type, button_icon_style, name)).texture
             for name in LIST_BUTTON_ORDER

@@ -30,9 +30,10 @@ from kivy.uix.modalview import ModalView
 from kivy.uix.widget import Widget
 import win32api
 
-import dialogs
+import file_dialogs
 from controller import find_controllers
-from input_list import LIST_BUTTON_ORDER, full_map, inverse_map, map_key_input, map_state
+from button_map import full_map, inverse_map, map_key_input, map_state
+from input_list import LIST_BUTTON_ORDER
 from key_inputs import demo_track, derive, derive_hold, describe, normalized
 from layouts.input_list_layout import LANES, InputListLayout
 from games import GAMES
@@ -42,15 +43,18 @@ import keys
 import track_file
 from overlay import Overlay
 from settings import Settings, dialog_columns
-from layouts.menu_layout import StatusBar, AttemptsPopup, ButtonMapPopup, GameActionsPopup, HelpPopup, KeyInputPopup, Menu, MenuBar, NotePopup, SettingsPopup
+from layouts.dialogs import AttemptsPopup, ButtonMapPopup, GameActionsPopup, HelpPopup, KeyInputPopup, NotePopup, SettingsPopup
+from layouts.menu_bar import MenuBar
+from layouts.ui_kit import Menu, StatusBar
 from layouts.arrow_lanes_layout import ArrowLanesLayout
 from layouts.feedback import CardLayer
-from layouts.playalong_layout import PlayAlongLayout
+from layouts.ring_layout import RingLayout
 from playalong import PlayalongController
 from sampler import FPS, InputSampler
 from screen_capture import ScreenRecorder, list_displays, prepare_capture
 from virtual_pad import VirtualPad, VirtualPadError
-from widgets import BACKGROUND, set_background
+from layouts.falling import set_background
+import theme
 import theme
 from theme import markup
 from video_writer import nvenc_available, resolve_encoder, write_capture_and_overlay, write_input_video
@@ -117,7 +121,7 @@ class WomboComboApp(App):
         self.settings = Settings(self.config)
         keys.check_hotkeys(self)
         self.icon = os.path.join(os.path.dirname(os.path.abspath(__file__)), "images", "app_icon.png")
-        Window.clearcolor = (*BACKGROUND, 0.5)
+        Window.clearcolor = (*theme.BACKGROUND, 0.5)
         # Up to 1920x1080, but never bigger than the screen (with room for the taskbar).
         screen_width, screen_height = win32api.GetSystemMetrics(0), win32api.GetSystemMetrics(1)
         Window.size = (min(1920, int(screen_width * 0.9)), min(1080, int(screen_height * 0.85)))
@@ -125,10 +129,10 @@ class WomboComboApp(App):
         Window.fullscreen = False
 
         self.playalong_controller.set_looping(self.settings.loop)
-        self.playalong_layout = PlayAlongLayout()
+        self.ring_layout = RingLayout()
         self.arrow_lanes_layout = ArrowLanesLayout()
         self.input_list_layout = InputListLayout()
-        self.displays = {"list": self.input_list_layout, "lanes": self.arrow_lanes_layout, "ring": self.playalong_layout}
+        self.displays = {"list": self.input_list_layout, "lanes": self.arrow_lanes_layout, "ring": self.ring_layout}
         self.input_list_layout.set_lookahead(self.settings.lookahead)
         self.input_list_layout.on_scrub = self.scrub
         self.input_list_layout.on_zoom = self.set_list_zoom
@@ -318,7 +322,7 @@ class WomboComboApp(App):
         # Over the game, the overlay shows the displays only; the hints are for the app window.
         hint = "" if self.overlay.active or card else guidance.hint(self)  # The card says it all when shown.
         self.card_layer.set_card(card, buttons)
-        self.status_bar.set(hint, guidance.status(self))
+        self.status_bar.set(hint, guidance.status_text(self))
         for display in self.displays.values():
             display.card_up = bool(card)
 
@@ -740,7 +744,7 @@ class WomboComboApp(App):
             return
         self.playalong_controller.stop_demo()
         if path is None:
-            path = dialogs.open_file("Open recording", "Recordings (*.json, *.mp4)", "*.json;*.mp4")
+            path = file_dialogs.open_file("Open recording", "Recordings (*.json, *.mp4)", "*.json;*.mp4")
         if not path:
             return
         if path.lower().endswith(".mp4"):
@@ -804,7 +808,7 @@ class WomboComboApp(App):
         unsaved = self.unsaved_edits or (self.unsaved_take and not edits_only)
         if not unsaved or not self.playalong_controller.track_length():
             return True
-        answer = dialogs.ask_save("Unsaved changes", f"Save the current recording before {doing}?")
+        answer = file_dialogs.ask_save("Unsaved changes", f"Save the current recording before {doing}?")
         if answer == "save":
             return self.save()
         return answer == "discard"
@@ -822,7 +826,7 @@ class WomboComboApp(App):
         if not inputs:
             self.flash("Nothing to save", "warning")
             return False
-        path = dialogs.save_file("Save recording", "Recordings (*.mp4)", "*.mp4", "mp4")
+        path = file_dialogs.save_file("Save recording", "Recordings (*.mp4)", "*.mp4", "mp4")
         if not path:
             return False
         base = os.path.splitext(path)[0]
@@ -853,7 +857,7 @@ class WomboComboApp(App):
         if not self.capture_path:
             self.flash("No video for this track. Record with video capture on, or open a saved recording.", "warning", 6)
             return
-        path = dialogs.save_file("Export overlay video", "Videos (*.mp4)", "*.mp4", "mp4")
+        path = file_dialogs.save_file("Export overlay video", "Videos (*.mp4)", "*.mp4", "mp4")
         if path:
             inputs = self.playalong_controller.get_input_track()
             notes = self.playalong_controller.get_notes()
@@ -872,7 +876,7 @@ class WomboComboApp(App):
         if not inputs:
             self.flash("Nothing to export", "warning")
             return
-        path = dialogs.save_file("Export input video", "Videos (*.mp4)", "*.mp4", "mp4")
+        path = file_dialogs.save_file("Export input video", "Videos (*.mp4)", "*.mp4", "mp4")
         if path:
             encoder = resolve_encoder(self.settings.encoder)
             self.run_job(

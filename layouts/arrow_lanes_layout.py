@@ -19,8 +19,9 @@ from PIL import Image, ImageChops, ImageFilter
 from images import get_standard_button_icon
 from layouts.feedback import FeedbackDisplay
 import theme
-from input_list import draw_direction_glyph
-from widgets import HOLD_TAIL_COLOR, OFFSCREEN, ButtonColumn, FallingRuns, Knockout, Prompt, runs_of
+from glyphs import draw_direction_glyph
+from layouts.drawing import OFFSCREEN
+from layouts.falling import ButtonColumn, FallingRuns, HOLD_TAIL_COLOR, Knockout, Prompt, runs_of
 
 DEFAULT_LANES = ((4,), (1, 7), (2, 8), (3, 9), (6,))  # Left to right.
 GLYPH_PIXELS = 128
