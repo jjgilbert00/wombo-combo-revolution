@@ -89,11 +89,15 @@ class PlayalongController(PlayalongViews):
         self._grades_version = 0  # Bumped when key inputs or the target change, invalidating cached grades.
 
     def _fit_key_inputs(self, key_inputs):
-        """Drops key inputs that start past the end of the track and trims ones that run off it."""
+        """Drops key inputs that start past the end of the track and trims ones that run off it.
+        Every change to the key inputs comes through here: it invalidates cached grades, and verdicts
+        and judged key inputs (which refer to key inputs by position) start afresh."""
         last = len(self._input_track) - 1
         fitted = [normalized(dict(k, end=min(k["end"], last))) for k in key_inputs if k["start"] <= last]
         self._key_inputs = sorted(fitted, key=lambda k: (k["start"], k["end"]))
         self._grades_version += 1
+        self._judgements = []
+        self._judged = set()
 
     def _fit_notes(self, notes):
         """Drops notes that start past the end of the track and trims ones that run off it."""
@@ -273,7 +277,6 @@ class PlayalongController(PlayalongViews):
                 self._running_state = RunningState.STOPPED
                 self._archive_attempt()  # Kept on screen to review, and in the history.
 
-
     # ---- Reading the state (all under the lock) -------------------------------------------------
 
     def status(self):
@@ -295,10 +298,12 @@ class PlayalongController(PlayalongViews):
             return len(self._input_track)
 
     def is_practicing(self):
-        return self._practice
+        with self._lock:
+            return self._practice
 
     def is_looping(self):
-        return self._loop
+        with self._lock:
+            return self._loop
 
     def get_game(self):
         """(the recording's game or None, its action layout)."""
@@ -326,13 +331,13 @@ class PlayalongController(PlayalongViews):
         with self._lock:
             self._lead_in = frames
 
-
     def set_show_actions(self, show):
         with self._lock:
             self._show_actions = show
 
     def is_showing_actions(self):
-        return self._show_actions
+        with self._lock:
+            return self._show_actions
 
     def set_game(self, game, action_layout=None):
         """The recording's game (or None) and which recorded button is which action (default: the
@@ -437,11 +442,12 @@ class PlayalongController(PlayalongViews):
             else:
                 key_inputs[index] = key_input
             self._fit_key_inputs(key_inputs)
+            key_input = normalized(key_input)
             return self._key_inputs.index(key_input) if key_input in self._key_inputs else None
 
     def remove_key_input(self, index):
         with self._lock:
-            del self._key_inputs[index]
+            self._fit_key_inputs(self._key_inputs[:index] + self._key_inputs[index + 1:])
 
     def key_input_score(self):
         """(hits, total) for the attempt against the key inputs."""
@@ -485,11 +491,13 @@ class PlayalongController(PlayalongViews):
         self.set_attempt_track(None)
 
     def set_practice(self, practice):
-        self._practice = practice
+        with self._lock:
+            self._practice = practice
 
     def get_lead(self):
         """Run-up frames left before practice playback starts."""
-        return self._lead
+        with self._lock:
+            return self._lead
 
     def set_frame(self, frame):
         with self._lock:
@@ -528,14 +536,16 @@ class PlayalongController(PlayalongViews):
             return self._running_state == RunningState.RECORDING
 
     def get_current_frame(self):
-        return self._current_frame
+        with self._lock:
+            return self._current_frame
 
     def get_input_track(self):
         with self._lock:
             return list(self._input_track)
 
     def get_button_map(self):
-        return dict(self._button_map)
+        with self._lock:
+            return dict(self._button_map)
 
     def set_button_map(self, mapping):
         """Sets {recorded button: player's button}; it must be one-to-one."""
@@ -560,7 +570,6 @@ class PlayalongController(PlayalongViews):
             self._set_saved(saved_attempts or [])
             self._fit_notes(notes or [])
             self._fit_key_inputs(key_inputs or [])
-
 
     def clear_track(self):
         self.set_input_track([])
