@@ -12,12 +12,14 @@ from collections import namedtuple
 
 from controller import get_neutral_controller_state
 from games import GAMES, normal_window, to_actions
-from input_list import LIST_BUTTON_ORDER, input_key, map_key, map_key_input, map_state, match_runs, runs_in_range
+from button_map import map_key, map_key_input, map_state
+from input_list import LIST_BUTTON_ORDER, input_key, match_runs, runs_in_range
 from key_inputs import best_hold, describe, grade_all, result
-from playalong_state import RunningState
 from sampler import FPS
+from playalong_state import RunningState
 
 PLAYALONG_FRAMELENGTH = 120
+UPCOMING_LOOKAHEAD = 10 * FPS  # How far ahead the up-next panel looks for inputs.
 
 ListSnapshot = namedtuple(
     "ListSnapshot",
@@ -28,7 +30,6 @@ ListSnapshot = namedtuple(
 # One earlier attempt in the input list: its label, its key input grades as (start, end, grade, offset),
 # when the track has no key inputs its per-frame match runs instead, and whether it's a saved attempt.
 HistoryRow = namedtuple("HistoryRow", "label grades match_runs saved")
-
 
 
 class PlayalongViews:
@@ -71,7 +72,9 @@ class PlayalongViews:
                 return tuple((describe(self._shown_key_input(k)), k["start"], k["end"])
                              for k in self._key_inputs if k["end"] >= frame)[:count]
             upcoming = []
-            for start, length, key in runs_in_range(self._input_track, max(frame, 0), len(self._input_track)):
+            # A few seconds ahead is plenty to find the next few inputs (and keeps a long recording cheap).
+            ahead = min(len(self._input_track), max(frame, 0) + UPCOMING_LOOKAHEAD)
+            for start, length, key in runs_in_range(self._input_track, max(frame, 0), ahead):
                 direction, buttons = self._shown_key(key, self._input_track, start)
                 if (direction, buttons) == (5, ()) or start + length <= frame:
                     continue

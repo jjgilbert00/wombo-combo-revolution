@@ -11,7 +11,7 @@ import time
 from kivy.animation import Animation
 from kivy.core.text.markup import MarkupLabel
 from kivy.graphics import Color, InstructionGroup, Rectangle
-from kivy.metrics import dp, sp
+from kivy.metrics import dp
 from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.button import Button
 from kivy.uix.floatlayout import FloatLayout

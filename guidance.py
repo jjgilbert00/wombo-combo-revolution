@@ -94,7 +94,7 @@ def hint(app):
             "reach the line.")
 
 
-def status(app):
+def status_text(app):
     """The status bar's right side: the mode and time, the score, flags, messages and the controller."""
     status = app.playalong_controller.status()
     frames = status.length

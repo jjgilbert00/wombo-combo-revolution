@@ -24,6 +24,14 @@ def steps(h):
     p = popup(h, "KeyInputPopup")
     h.check("K opens the key input editor on the selection", p is not None and p.key_input["buttons"] == ["X"])
     p.dismiss(); yield 0.2
+    notes_before = len(c.get_notes())
+    h.app.set_selection(70, 72); h.key(110, "n"); yield 0.4
+    p = popup(h, "NotePopup")
+    h.check("N opens the note editor", p is not None)
+    p.input.text = "smoke test note"
+    next(w for w in p.walk() if getattr(w, "text", None) == "Save").dispatch("on_release"); yield 0.2
+    h.check("saving it adds the note", len(c.get_notes()) == notes_before + 1, len(c.get_notes()))
+    h.app.set_selection(None)
     h.app.remap_buttons(); yield 0.3
     p = popup(h, "ButtonMapPopup")
     p.spinners["X"].text = "LB"; yield 0.1
@@ -46,7 +54,7 @@ def steps(h):
     h.app.open_settings_popup(); yield 0.4
     p = popup(h, "SettingsPopup")
     h.check("Settings opens", p is not None)
-    stepper = next(w for w in p.walk() if type(w).__name__ == "_Stepper" and "ahead" in w.label.text)
+    stepper = next(w for w in p.walk() if type(w).__name__ == "Stepper" and "ahead" in w.label.text)
     stepper._step(1); yield 0.1
     h.check("a setting changed there is saved and applied",
             h.app.settings.lookahead == 2.0 and h.app.input_list_layout.lookahead == 2.0,
@@ -59,5 +67,5 @@ def steps(h):
     for _ in range(3):
         h.app.toggle_display(); yield 0.2
         order.append(type(h.app.display).__name__)
-    h.check("F3 cycles the three displays", order == ["ArrowLanesLayout", "PlayAlongLayout", "InputListLayout"],
+    h.check("F3 cycles the three displays", order == ["ArrowLanesLayout", "RingLayout", "InputListLayout"],
             order)
