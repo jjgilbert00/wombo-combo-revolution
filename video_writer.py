@@ -7,8 +7,6 @@ import cv2
 import imageio_ffmpeg
 import numpy as np
 
-from controller import get_neutral_controller_state
-from input_drawer import InputDrawer
 
 logger = logging.getLogger(__name__)
 
@@ -131,56 +129,51 @@ class AsyncFrameWriter:
             raise RuntimeError(str(self.error))
 
 
-def _padded(inputs, before, after):
-    return (
-        [get_neutral_controller_state() for _ in range(before)]
-        + list(inputs)
-        + [get_neutral_controller_state() for _ in range(after)]
-    )
-
-
-def write_input_video(inputs, output_path, playalong_length=120, width=1600, height=800, encoder="libx264", progress=None):
-    if not inputs:
-        return
-    drawer = InputDrawer(width, height)
-    writer = FfmpegWriter(output_path, width, height, "rgba", encoder=encoder)
-    extended_inputs = _padded(inputs, 0, playalong_length)
+def video_size(path):
+    """(width, height) of a video file."""
+    capture = cv2.VideoCapture(path)
     try:
-        for i in range(len(inputs)):
-            writer.write(np.asarray(drawer.draw(extended_inputs[i : i + playalong_length])))
+        width, height = int(capture.get(cv2.CAP_PROP_FRAME_WIDTH)), int(capture.get(cv2.CAP_PROP_FRAME_HEIGHT))
+    finally:
+        capture.release()
+    if not width or not height:
+        raise RuntimeError(f"Couldn't read {path}")
+    return width, height
+
+
+def write_input_video(frames, count, size, output_path, encoder="libx264", progress=None):
+    """Encodes count RGBA frames (size (width, height)) as a video: the inputs on their own."""
+    width, height = size
+    writer = FfmpegWriter(output_path, width, height, "rgba", encoder=encoder)
+    try:
+        for i, frame in enumerate(frames):
+            writer.write(frame)
             if progress and i % 30 == 0:
-                progress(i / len(inputs))
+                progress(i / count)
     finally:
         writer.close()
 
 
-def write_capture_and_overlay(capture_path, inputs, output_path, playalong_length=120, delay_frames=4, opacity=0.8, encoder="libx264", progress=None):
-    """Draws the input display over a captured video, frame for frame.
-
-    delay_frames shifts the inputs later to line them up with what the game shows on screen.
-    """
-    if not inputs:
-        return
+def write_capture_and_overlay(capture_path, frames, count, output_path, opacity=0.8, encoder="libx264", progress=None):
+    """Draws RGBA overlay frames (the inputs, drawn over a transparent background) over a captured
+    video, frame for frame. Any delay to line the inputs up with the game is in the frames."""
     capture = cv2.VideoCapture(capture_path)
     width = int(capture.get(cv2.CAP_PROP_FRAME_WIDTH))
     height = int(capture.get(cv2.CAP_PROP_FRAME_HEIGHT))
     if not width or not height:
         raise RuntimeError(f"Couldn't read {capture_path}")
-    drawer = InputDrawer(width, height)
     writer = FfmpegWriter(output_path, width, height, "bgr24", encoder=encoder)
-    extended_inputs = _padded(inputs, delay_frames, playalong_length)
     try:
-        for i in range(len(inputs)):
+        for i, overlay in enumerate(frames):
             ok, frame = capture.read()
             if not ok:
                 break
-            overlay = np.asarray(drawer.draw(extended_inputs[i : i + playalong_length]))
             # Alpha-blend using the overlay's own alpha channel so only the drawn inputs cover the video.
             weight = overlay[:, :, 3].astype(np.float32) * (opacity / 255)
-            overlay_bgr = cv2.cvtColor(overlay, cv2.COLOR_RGBA2BGR)
+            overlay_bgr = cv2.cvtColor(np.ascontiguousarray(overlay), cv2.COLOR_RGBA2BGR)
             writer.write(cv2.blendLinear(overlay_bgr, frame, weight, 1.0 - weight))
             if progress and i % 30 == 0:
-                progress(i / len(inputs))
+                progress(i / count)
     finally:
         capture.release()
         writer.close()

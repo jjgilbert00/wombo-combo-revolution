@@ -4,3 +4,9 @@
 *.log
 *__pycache__*
 *.mp4
+build/
+dist/
+
+# UI check output
+tools/ui_check/shots/
+tools/ui_check/harness.ini
