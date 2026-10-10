@@ -34,7 +34,7 @@ exe = EXE(
     exclude_binaries=True,
     name="WomboCombo",
     console=False,  # A windowed app; logs go to %USERPROFILE%\.kivy\logs.
-    icon=None,
+    icon="images/app_icon.ico",
 )
 coll = COLLECT(
     exe,
