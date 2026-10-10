@@ -82,7 +82,13 @@ class ScreenRecorder:
         with self._lock:
             if self.writer is None:
                 return
-            frame = self.camera.grab()
+            try:
+                frame = self.camera.grab()
+            except Exception:
+                # Repeat the last frame rather than fall behind the inputs (which are trimmed to the
+                # video's length when recording stops).
+                logger.exception("Screen capture failed; repeating the last frame")
+                frame = None
             if frame is not None:
                 self._last_frame = frame
             for _ in range(ticks):

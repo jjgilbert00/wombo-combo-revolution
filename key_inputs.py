@@ -275,3 +275,51 @@ def describe(key_input):
     # The press direction is usually the motion's last step, so don't repeat it.
     held = "" if direction is None or (motion and motion[-1] == str(direction)) else str(direction)
     return (motion + held + "+".join(key_input["buttons"])) or "any"
+
+
+DEMO_PRESS_FRAMES = 3  # How long a demo holds each press; a 1-frame tap can slip between game polls.
+DEMO_MOTION_STEP_FRAMES = 2  # How long a demo holds each direction of a motion.
+
+
+def demo_track(key_inputs, target):
+    """The recording cleaned down to its key inputs: a track (as long as the target) that does only
+    what's required, for demoing the combo without the stray and over-held inputs.
+
+    Everything else is neutral. Holds are held over the recording's own longest hold in the window
+    (so a charge lasts right up to its release); exact spans are copied frame for frame; presses
+    come on the first frame the recording completed them, held briefly, with any motion laid out
+    just before. Presses go on last, so they add their buttons to a hold underneath.
+    """
+    track = [{"direction": 5, **{button: 0 for button in LIST_BUTTON_ORDER}} for _ in target]
+
+    def put(frame, direction=None, buttons=()):
+        if 0 <= frame < len(track):
+            if direction is not None:
+                track[frame]["direction"] = direction
+            for button in buttons:
+                track[frame][button] = 1
+
+    key_inputs = sorted((normalized(k) for k in key_inputs), key=lambda k: (k["start"], k["end"]))
+    is_hold = lambda k: k["hold"] and not k["exact"]
+    for key_input in filter(is_hold, key_inputs):
+        start, length = best_hold(key_input, target) or (key_input["start"], key_input["hold"])
+        for frame in range(start, start + max(length, key_input["hold"])):
+            put(frame, key_input["direction"], key_input["buttons"])
+    for key_input in (k for k in key_inputs if k["exact"]):
+        for frame in range(key_input["start"], min(key_input["end"], len(target) - 1) + 1):
+            track[frame] = dict(target[frame])
+    for key_input in (k for k in key_inputs if not is_hold(k) and not k["exact"]):
+        frame = next((f for f in range(key_input["start"], min(key_input["end"], len(target) - 1) + 1)
+                      if satisfied_at(key_input, target, f)), key_input["start"])
+        motion = list(key_input["motion"])
+        direction = key_input["direction"] if key_input["direction"] is not None else (motion[-1] if motion else None)
+        if motion and motion[-1] == direction:
+            motion.pop()  # The motion's last direction is the one held on the press.
+        step_frame = frame - len(motion) * DEMO_MOTION_STEP_FRAMES
+        for step in motion:
+            for _ in range(DEMO_MOTION_STEP_FRAMES):
+                put(step_frame, step)
+                step_frame += 1
+        for offset in range(DEMO_PRESS_FRAMES):
+            put(frame + offset, direction, key_input["buttons"])
+    return track
