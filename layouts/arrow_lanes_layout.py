@@ -18,8 +18,10 @@ from PIL import Image, ImageChops, ImageFilter
 
 from images import get_standard_button_icon
 from layouts.feedback import FeedbackDisplay
-from input_list import draw_direction_glyph
-from widgets import HOLD_TAIL_COLOR, OFFSCREEN, ButtonColumn, FallingRuns, Knockout, Prompt, runs_of
+import theme
+from glyphs import draw_direction_glyph
+from layouts.drawing import OFFSCREEN
+from layouts.falling import ButtonColumn, FallingRuns, HOLD_TAIL_COLOR, Knockout, Prompt, runs_of
 
 DEFAULT_LANES = ((4,), (1, 7), (2, 8), (3, 9), (6,))  # Left to right.
 GLYPH_PIXELS = 128
@@ -76,7 +78,7 @@ class ArrowLane(Widget):
         self.directions = directions
         self.arrows = arrows
         self.receptors = receptors
-        knockout = Knockout()
+        self.knockout = knockout = Knockout()
         self.falling = FallingRuns(knockout)
         # Tails first, then everything else over them with the tails knocked out underneath.
         self.canvas.add(Color(*HOLD_TAIL_COLOR))
@@ -93,6 +95,9 @@ class ArrowLane(Widget):
         self.canvas.add(self.falling.head_group)
         self.bind(pos=self._layout, size=self._layout)
 
+    def set_background(self, rgb):
+        self.knockout.set_background(rgb)
+
     def _icon(self):
         return self.width, self.width
 
@@ -106,7 +111,9 @@ class ArrowLane(Widget):
         if direction in self.directions:
             self.held.texture = self.arrows[direction].texture
             self.held_knock.texture = self.arrows[direction].silhouette
-            self.held_color.a = 1
+            # Green while it's the direction the recording wants now: holding it right.
+            on_time = bool(input_frames) and input_frames[0] == direction
+            self.held_color.rgba = (*theme.HIT, 1) if on_time else (1, 1, 1, 1)
             self.held_knock.pos, self.held_knock.size = self.pos, self._icon()
         else:
             self.held_color.a = 0
@@ -147,10 +154,15 @@ class ArrowLanesLayout(FeedbackDisplay, RelativeLayout):
         self.button_columns = {}
         for i, name in enumerate(self.button_names):
             column = ButtonColumn(button_source=get_standard_button_icon(controller_type, button_icon_style, name),
-                                  size_hint=(0.07, 1), pos_hint={"x": 0.5 + i * (0.48 / 8), "y": 0})
+                                  size_hint=(0.052, 1), pos_hint={"x": 0.5 + i * (0.48 / 8), "y": 0})
             self.button_columns[name] = column
             self.add_widget(column)
         self._init_feedback()
+
+    def set_background(self, rgb):
+        """The window's background colour, which hides hold lines under what's drawn over them."""
+        for part in self.lanes + list(self.button_columns.values()):
+            part.set_background(rgb)
 
     def verdict_spot(self):
         receptor_top = self.lanes[0].width if self.lanes else 0
