@@ -13,7 +13,7 @@ press them as they arrive, and it shows exactly how early or late you were.
 - **Demos**: a virtual controller plays the combo in game, as recorded or cleaned down to its key
   inputs.
 - **Videos**: export the inputs on their own, or drawn over the recording's video.
-- Notes, button remapping per recording, Street Fighter 6 actions (Drive Impact, Drive Parry...),
+- Notes, button remapping per recording, customisable keys, Street Fighter 6 actions (Drive Impact, Drive Parry...),
   sample combos, and keyboard play when there's no controller.
 
 ## Getting it

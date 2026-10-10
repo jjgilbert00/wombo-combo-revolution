@@ -161,7 +161,8 @@ In a tall window the list grows to fill it.
   MISS) pop up at the panel's foot. *View > Hide up-next panel* turns it off.
 - **Feedback.** The line flares when you hit a key input, and a held arrow (arrow lanes) or a
   pressed button turns green while it's what the recording wants. *Settings > Hit sound* adds a
-  soft tick for each hit, handy with the game in front.
+  soft tick for each hit, handy with the game in front. The grades and the score banner (below)
+  can each be turned off in *Settings > Feedback*, as can the hints in the status bar.
 - **Scroll speed.** Inputs appear 1.5 seconds before they reach the line. If that's too fast or too
   slow, change *Settings > Scroll speed* (0.75 to 3 seconds), or zoom with **Ctrl+Wheel**. While
   playing, frame counts are hidden and inputs that aren't key inputs fade back.
@@ -459,7 +460,7 @@ passed.
 
 ## Settings
 
-Settings are in groups: Practice, Controller and game, Sound and demo, and Recording and video.
+Settings are in groups: Practice, Feedback, Demo, Recording and video, and Controller and game.
 
 | Setting | What it does |
 |---|---|
@@ -472,14 +473,28 @@ Settings are in groups: Practice, Controller and game, Sound and demo, and Recor
 | Export overlay on save | Also write `name_overlay.mp4` when saving a recording. |
 | Scroll speed | How far ahead of the line inputs appear: 0.75 s (fast) to 3 s (slow), 1.5 s by default. |
 | Lead-in | The run-up before practice playback: off, 0.5 s, 1 s or 2 s. |
+| Grade popups | HIT, EARLY -1, LATE +2 or MISS pops up as each key input is judged (on by default). |
+| Score after each run | The banner with a run's score and what went wrong (on by default). |
 | Hit sound | A soft tick for each key input you hit while practising (off by default). |
+| Hints in the status bar | One line in the status bar on what to do next (on by default). |
 | Recent attempts shown | How many recent runs appear as rows. |
 | Game for new recordings | Which game's actions new recordings (and older ones that don't say) use. |
 | Demo countdown | How long a demo waits before playing, to switch to the game: 1, 2, 3 or 5 s. |
 
-Settings are saved automatically.
+Settings are saved automatically. *Change keys...* at the foot of the dialog changes the keys (see
+[Keys and mouse reference](#keys-and-mouse-reference)).
 
 ## Keys and mouse reference
+
+These are the default keys. Every one can be changed: *View > Change keys...* (also in Settings and
+Help). Click a key, then press the new one, with Ctrl, Shift or Alt if you like. A key another action
+had moves over, and the menus, Help and hints follow the keys you've set. *Reset all to defaults*
+puts them back.
+
+Each action can have a **hotkey**, which works even while the game has focus, and a **shortcut**,
+which works in the app's window. Hotkeys need an F key, Ctrl or Alt, so they don't go off while you
+type or play. Keys used to play on the keyboard (W A S D, U I O, J K L) still play while you practise
+on the keyboard; as shortcuts, they work when you aren't.
 
 **In game.** These work even while the game window has focus:
 

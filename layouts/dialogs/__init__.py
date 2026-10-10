@@ -4,8 +4,9 @@ from layouts.dialogs.button_map import ButtonMapPopup
 from layouts.dialogs.game_actions import GameActionsPopup
 from layouts.dialogs.help import HelpPopup
 from layouts.dialogs.key_input import KeyInputPopup
+from layouts.dialogs.keys import KeysPopup
 from layouts.dialogs.note import NotePopup
 from layouts.dialogs.settings import SettingsPopup
 
-__all__ = ["AttemptsPopup", "ButtonMapPopup", "GameActionsPopup", "HelpPopup", "KeyInputPopup", "NotePopup",
+__all__ = ["AttemptsPopup", "ButtonMapPopup", "GameActionsPopup", "HelpPopup", "KeyInputPopup", "KeysPopup", "NotePopup",
            "SettingsPopup"]

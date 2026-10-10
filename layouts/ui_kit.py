@@ -200,13 +200,15 @@ def button(text, callback, kind="secondary", **kwargs):
 
 
 def confirm_button(text, callback, **kwargs):
-    """A destructive button that asks first: the first click turns it red ("Sure?"), the second acts."""
+    """A destructive button that asks first: the first click turns it red ("Sure?"), the second acts
+    (and it asks again next time)."""
     widget = BarButton(text=text, kind="danger", **kwargs)
 
     def click(*_):
         if widget.kind == "danger":
             widget.text, widget.kind = "Sure?", "confirm"
         else:
+            widget.text, widget.kind = text, "danger"
             callback()
 
     widget.bind(on_release=click)
@@ -309,11 +311,21 @@ class MenuItem(HoverBehavior, ButtonBehavior, BoxLayout):
         self.add_widget(self.label)
         self.shortcut = Label(text=shortcut, font_size=FONT_SIZE, color=DIM_TEXT_COLOR, halign="right",
                               size_hint_x=None, width=dp(64), text_size=(dp(64), None))
+        self.shortcut.bind(text=self._fit_shortcut)
+        self._fit_shortcut()
         self.add_widget(self.shortcut)
         self.bind(hovered=self._refresh_color, state=self._refresh_color)
 
     def _refresh_color(self, *args):
         self._bg_color.rgba = ACTIVE_COLOR if self.state == "down" else HOVER_COLOR if self.hovered else (0, 0, 0, 0)
+
+    def _fit_shortcut(self, *args):
+        """Wide enough for a long key ("Ctrl+Shift+F12"), right-aligned."""
+        label = self.shortcut
+        label.text_size = (None, None)
+        label.texture_update()
+        label.width = max(dp(64), label.texture_size[0])
+        label.text_size = (label.width, None)
 
 
 class Menu(DropDown):
@@ -325,11 +337,23 @@ class Menu(DropDown):
     MAX_WIDTH = dp(380)
 
     def add_item(self, text, callback, shortcut=""):
-        item = MenuItem(text, shortcut)
+        """shortcut: the key shown on the right, or a function giving it, asked each time the menu
+        opens (for keys the player can change)."""
+        item = MenuItem(text, "" if callable(shortcut) else shortcut)
+        item.shortcut_of = shortcut if callable(shortcut) else None
         item.bind(on_release=lambda *_: (self.dismiss(), callback()))
         self.add_widget(item)
         self.fit(item)
         return item
+
+    def open(self, *args):
+        # Shortcuts follow the keys, and items may have been renamed since they were added.
+        for item in self.container.children:
+            if getattr(item, "shortcut_of", None):
+                item.shortcut.text = item.shortcut_of()
+            if isinstance(item, MenuItem):
+                self.fit(item)
+        super().open(*args)
 
     def fit(self, item):
         """Widens the menu to fit an item's text on one line (up to MAX_WIDTH; longer is cut short)."""

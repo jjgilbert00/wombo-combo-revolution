@@ -44,7 +44,9 @@ import keys
 import track_file
 from overlay import Overlay
 from settings import Settings, dialog_columns
-from layouts.dialogs import AttemptsPopup, ButtonMapPopup, GameActionsPopup, HelpPopup, KeyInputPopup, NotePopup, SettingsPopup
+from layouts.dialogs import (
+    AttemptsPopup, ButtonMapPopup, GameActionsPopup, HelpPopup, KeyInputPopup, KeysPopup, NotePopup, SettingsPopup
+)
 from layouts.menu_bar import MenuBar
 from layouts.ui_kit import Menu, StatusBar
 from layouts.arrow_lanes_layout import ArrowLanesLayout
@@ -54,7 +56,6 @@ from playalong import PlayalongController
 from sampler import FPS, InputSampler
 from screen_capture import ScreenRecorder, list_displays, prepare_capture
 from virtual_pad import VirtualPad, VirtualPadError
-import theme
 import theme
 from theme import markup
 from video_writer import nvenc_available, resolve_encoder, video_size, write_capture_and_overlay, write_input_video
@@ -136,7 +137,9 @@ class WomboComboApp(App):
     def build(self):
         ExceptionManager.add_handler(KeepRunning())
         self.settings = Settings(self.config)
-        keys.check_hotkeys(self)
+        keys.check_actions(self)
+        keys.use(keys.Bindings.from_setting(self.settings.keys))
+        self.waiting_for_key = False  # The Keys dialog is waiting for a new key: hotkeys hold off.
         self.icon = os.path.join(os.path.dirname(os.path.abspath(__file__)), "images", "app_icon.png")
         Window.clearcolor = (*theme.BACKGROUND, 0.5)
         # Up to 1920x1080, centred in the screen's work area (clear of the taskbar). Windows places a
@@ -184,6 +187,7 @@ class WomboComboApp(App):
         self.set_game(self.default_game(), None, mark_edited=False)
         self.set_actions_visible(self.settings.show_actions)
         self.set_up_next_visible(self.settings.show_next)
+        self.apply_feedback_settings()
         self.menu_bar.set_see_through(self.settings.see_through)
         self.set_lanes_shown(set(filter(None, self.settings.lanes.split(","))))
         self.menu_bar.set_recent(self.recent_recordings())
@@ -211,11 +215,14 @@ class WomboComboApp(App):
 
         # Hotkeys work while the game has focus. The listener runs inside a system-wide keyboard hook,
         # so it only hands the call to the UI thread.
-        self.listener = keys.listen_for_hotkeys(
-            lambda method: Clock.schedule_once(lambda dt: getattr(self, method)()))
+        self.listener = keys.listen_for_hotkeys(lambda method: Clock.schedule_once(lambda dt: self._on_hotkey(method)))
         Window.bind(on_key_down=self.on_key_down)
         Window.bind(on_request_close=lambda *args: not self._keep_unsaved_work("quitting"))
         Window.bind(on_drop_file=lambda window, filename, *args: self.open_track(filename.decode("utf-8")))
+
+    def _on_hotkey(self, method):
+        if not self.waiting_for_key:
+            getattr(self, method)()
 
     def on_menu_button(self, name):
         """Start plays or pauses and Back restarts, so practice never needs the keyboard. Only while
@@ -249,7 +256,7 @@ class WomboComboApp(App):
             self.keys_down = self.keys_down - {name}
 
     def on_key_down(self, window, key, scancode, codepoint, modifiers):
-        """Shortcuts that only apply while the app window is focused (keys.WINDOW_KEYS), and the game
+        """Shortcuts that only apply while the app window is focused (keys.shortcut), and the game
         keys for playing without a controller."""
         if any(isinstance(child, ModalView) for child in Window.children):
             return False  # A popup is open; let it have the keys.
@@ -260,7 +267,7 @@ class WomboComboApp(App):
             # The arrows always play. While practising the letters do too; when paused, they're shortcuts.
             if key in keys.ARROW_KEYS or self._playing_by_keyboard():
                 return True
-        method = keys.window_shortcut(key, codepoint, modifiers)
+        method = keys.window_shortcut(key, modifiers)
         if method:
             getattr(self, method)()
             return True
@@ -348,7 +355,8 @@ class WomboComboApp(App):
                              demoing=bool(controller.demo_kind()))
         card, buttons = guidance.card(self)
         # Over the game, the overlay shows the displays only; the hints are for the app window.
-        hint = "" if self.overlay.active or card else guidance.hint(self)  # The card says it all when shown.
+        # The card says it all when shown.
+        hint = "" if self.overlay.active or card or not self.settings.show_hints else guidance.hint(self)
         self.card_layer.set_card(card, buttons)
         self.status_bar.set(hint, guidance.status_text(self))
         for display in self.displays.values():
@@ -400,7 +408,8 @@ class WomboComboApp(App):
             return
         if kind == "key inputs":
             if not controller.has_key_inputs():
-                self.flash("No key inputs to demo: select frames and press K to mark them", "warning", 6)
+                self.flash(keys.fill("No key inputs to demo: select frames and press {mark_key_input} to mark them"),
+                           "warning", 6)
                 self.beep(False)
                 return
             track = demo_track(controller.get_key_inputs(), controller.get_input_track())
@@ -454,13 +463,13 @@ class WomboComboApp(App):
             self.set_selection(frame, frame)
         start = self.selection[0]
         menu = Menu()
-        menu.add_item("Add note", self.add_note, "N")
-        menu.add_item("Mark key input", self.mark_key_input, "K")
+        menu.add_item("Add note", self.add_note, keys.either("add_note", ""))
+        menu.add_item("Mark key input", self.mark_key_input, keys.either("mark_key_input", ""))
         menu.add_item("Practise from here", lambda: (controller.set_frame(start), self.play()))
-        menu.add_item("Clear selection", lambda: self.set_selection(None), "Esc")
+        menu.add_item("Clear selection", lambda: self.set_selection(None), keys.either("clear_selection", ""))
         menu.add_separator()
-        menu.add_item("Save attempt", self.save_attempt, "S")
-        menu.add_item("Attempts...", self.open_attempts, "A")
+        menu.add_item("Save attempt", self.save_attempt, keys.either("save_attempt", ""))
+        menu.add_item("Attempts...", self.open_attempts, keys.either("open_attempts", ""))
         # A dropdown opens from a widget, so a one-pixel anchor stands in for the cursor.
         anchor = Widget(size_hint=(None, None), size=(1, 1), pos=pos)
         self.input_list_layout.add_widget(anchor)
@@ -583,7 +592,7 @@ class WomboComboApp(App):
             return
         saved = controller.save_attempt()
         if not saved:
-            self.flash("No attempt to save yet: turn on Practice (F4) and play", "warning")
+            self.flash(keys.fill("No attempt to save yet: turn on Practice ({toggle_practice}) and play"), "warning")
             return
         self.store_saved_attempts(f"Saved attempt as \"{saved['name']}\"")
 
@@ -592,7 +601,8 @@ class WomboComboApp(App):
         recording. A track that hasn't been saved yet keeps them until it is. The write queues
         behind any save still running, so it can't be overwritten by an older list."""
         if not self.track_path:
-            self.flash(f"{message}; it's kept with the track when you save the recording (F12)")
+            self.flash(f"{message}; it's kept with the track when you save the recording "
+                       f"({keys.either('save_recording')})")
             return
         path, saved_attempts = self.track_path, self.playalong_controller.get_saved()
 
@@ -656,7 +666,8 @@ class WomboComboApp(App):
         controller.set_attempt_track(item["attempt"])
         controller.set_frame(0)
         controller.play()
-        self.flash(f"Replaying {item.get('name') or 'Run ' + str(attempt_id)}; F4 to practice again")
+        self.flash(f"Replaying {item.get('name') or 'Run ' + str(attempt_id)}; "
+                   f"{keys.either('toggle_practice')} to practice again")
 
     def clear_attempt(self):
         self.playalong_controller.clear_attempt()
@@ -1062,6 +1073,12 @@ class WomboComboApp(App):
                          {key: game["default_layout"] for key, game in GAMES.items()}, used,
                          lambda game, layout: self.set_game(game, layout)).open()
 
+    def apply_feedback_settings(self):
+        """The grade popups and the score banner, on or off in every display."""
+        for display in self.displays.values():
+            display.feedback.show_verdicts = self.settings.show_verdicts
+            display.feedback.show_score = self.settings.show_score
+
     def set_notes_visible(self, visible):
         self.input_list_layout.show_notes = visible
         self.settings.set("show_notes", int(visible))
@@ -1087,7 +1104,16 @@ class WomboComboApp(App):
         self.show_display(modes[(modes.index(current) + 1) % len(modes)])
 
     def show_help(self):
-        HelpPopup(help_content.STEPS, help_content.LEGENDS, help_content.key_columns(), self.open_user_guide).open()
+        HelpPopup(help_content.steps(), help_content.LEGENDS, help_content.key_columns(), self.open_user_guide,
+                  self.open_keys).open()
+
+    def open_keys(self):
+        KeysPopup(keys.current, self.set_key_bindings, lambda waiting: setattr(self, "waiting_for_key", waiting)).open()
+
+    def set_key_bindings(self, bindings):
+        keys.use(bindings)
+        self.settings.set("keys", bindings.to_setting(), write=True)
+        self.menu_bar.refresh_keys()
 
     def open_user_guide(self):
         path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "docs", "USER_GUIDE.md")
@@ -1098,7 +1124,8 @@ class WomboComboApp(App):
 
     def open_settings_popup(self):
         readers = self.select_controller()
-        SettingsPopup(dialog_columns(self, readers, list_displays() or [(0, "")], GAMES)).open()
+        SettingsPopup(dialog_columns(self, readers, list_displays() or [(0, "")], GAMES),
+                      [("Change keys...", self.open_keys)]).open()
 
 if __name__ == "__main__":
     # Kivy owns the root logger, so module logs (including late sampler ticks) go to ~/.kivy/logs.

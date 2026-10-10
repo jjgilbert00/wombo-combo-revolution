@@ -7,6 +7,7 @@ from kivy.uix.scrollview import ScrollView
 from kivy.uix.textinput import TextInput
 from kivy.uix.widget import Widget
 
+import keys
 import theme
 from layouts.ui_kit import (
     DIM_TEXT_COLOR, FONT_SIZE, PANEL_COLOR, TEXT_COLOR, Dialog, Toggle, button, confirm_button,
@@ -30,8 +31,8 @@ class AttemptsPopup(Dialog):
         header = BoxLayout(size_hint_y=None, height=dp(24))
         header.add_widget(Label(text="Attempts", font_size=theme.TITLE, bold=True, color=TEXT_COLOR, halign="left",
                                 valign="middle", size_hint_x=None, width=dp(120), text_size=(dp(120), dp(24))))
-        header.add_widget(Label(text="Saved attempts are kept in the track's file. Replay plays one against the "
-                                     "recording; F4 goes back to practice.", font_size=theme.CAPTION, color=DIM_TEXT_COLOR,
+        header.add_widget(Label(text=keys.fill("Saved attempts are kept in the track's file. Replay plays one "
+                                               "against the recording; {toggle_practice} goes back to practice."), font_size=theme.CAPTION, color=DIM_TEXT_COLOR,
                                 halign="right", valign="middle", text_size=(dp(600), dp(24))))
         panel.add_widget(header)
         self.rows = GridLayout(cols=1, size_hint_y=None, spacing=dp(4))
@@ -49,9 +50,10 @@ class AttemptsPopup(Dialog):
     def refresh(self):
         self.rows.clear_widgets()
         overview = self.app.attempts_overview()
-        self._section("Saved", overview["saved"], "Nothing saved yet: press S to save the attempt on screen.")
+        self._section("Saved", overview["saved"],
+                      keys.fill("Nothing saved yet: press {save_attempt} to save the attempt on screen."))
         self._section("Recent (this session, newest first)", overview["recent"],
-                      "No runs yet: practice (F4) and play; each pass is kept here.")
+                      keys.fill("No runs yet: practice ({toggle_practice}) and play; each pass is kept here."))
 
     def _section(self, title, attempts, empty_text):
         self.rows.add_widget(Label(text=title, font_size=FONT_SIZE, bold=True, color=TEXT_COLOR, halign="left",
