@@ -11,7 +11,7 @@ import subprocess
 import sys
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-UI_CHECKS = ("smoke", "displays", "overlay")
+UI_CHECKS = ("smoke", "displays", "overlay", "export")
 
 
 def main():

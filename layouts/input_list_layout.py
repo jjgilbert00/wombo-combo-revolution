@@ -482,6 +482,7 @@ class InputListLayout(StencilView):
         self.card_up = False  # Set by the app while the getting-started card covers the list.
         self.freeze_scale = False  # Set by the app in overlay mode, where the window fits the list instead.
         self.minimal = False  # A see-through overlay: no lane names or lane backgrounds, just the inputs.
+        self.show_live = True  # The player's live input under the line (not in exported videos).
         self.bind(size=self.rescale)
         # The verdicts and pass banner, shared with the other displays.
         self.feedback = Feedback(self)
@@ -1103,6 +1104,6 @@ class InputListLayout(StencilView):
         if flare:
             self.line_color.rgba = (*MATCH_COLOR, 1)
         self._draw_placeholder(snapshot, lanes)
-        self.live_color.a = 0 if snapshot.recording else 1
+        self.live_color.a = 0 if snapshot.recording or not self.show_live else 1
         self.live.set_row(self._line_x() - self.sizes.icon / 2, live_y - dp(4), self.sizes.icon,
                           live_key, self.textures)
