@@ -200,13 +200,15 @@ def button(text, callback, kind="secondary", **kwargs):
 
 
 def confirm_button(text, callback, **kwargs):
-    """A destructive button that asks first: the first click turns it red ("Sure?"), the second acts."""
+    """A destructive button that asks first: the first click turns it red ("Sure?"), the second acts
+    (and it asks again next time)."""
     widget = BarButton(text=text, kind="danger", **kwargs)
 
     def click(*_):
         if widget.kind == "danger":
             widget.text, widget.kind = "Sure?", "confirm"
         else:
+            widget.text, widget.kind = text, "danger"
             callback()
 
     widget.bind(on_release=click)

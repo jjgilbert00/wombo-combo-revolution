@@ -122,6 +122,7 @@ class Keys(unittest.TestCase):
         self.assertEqual(keys.key_name(27, []), "Esc")
         self.assertIsNone(keys.key_name(304, ["shift"]))  # Shift on its own.
         self.assertIsNone(keys.key_name(273, []))  # The arrows play the game.
+        self.assertIsNone(keys.key_name(115, ["meta"]))  # Win+S is Windows' own.
 
     def test_hotkeys_need_an_f_key_ctrl_or_alt(self):
         self.assertEqual(keys.problem(keys.HOTKEY, "Ctrl+P"), "")

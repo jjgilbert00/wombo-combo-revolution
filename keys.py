@@ -75,9 +75,10 @@ LOCKS = ("numlock", "capslock", "scrolllock")  # Come through as modifiers, but 
 
 def key_name(key, modifiers):
     """The name of a key pressed in the window ("Ctrl+O"), from Kivy's key code and modifiers; None
-    for a key actions can't use (or a modifier on its own)."""
+    for a key actions can't use (or a modifier on its own, or with the Windows key, which Windows
+    keeps for itself)."""
     name = _BY_KIVY.get(key)
-    if name is None:
+    if name is None or "meta" in modifiers:
         return None
     held = [m for m in MODIFIERS if m.lower() in modifiers]
     return "+".join(held + [name])

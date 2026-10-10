@@ -106,7 +106,8 @@ def steps(h):
                                                         for _, rows in column for row in rows))
     reset = next(w for w in k.walk() if getattr(w, "text", "") == "Reset all to defaults")
     reset.dispatch("on_release"); reset.dispatch("on_release"); yield 0.1
-    h.check("Reset puts every key back", keys.current.keys == keys.Bindings().keys and h.app.settings.keys == "")
+    h.check("Reset puts every key back, and asks again next time",
+            keys.current.keys == keys.Bindings().keys and h.app.settings.keys == "" and reset.text == "Reset all to defaults")
     k.dismiss(); yield 0.3
     # Hovering over a lane's name shows what the lane is.
     from kivy.core.window import Window
