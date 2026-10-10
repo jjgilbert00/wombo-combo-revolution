@@ -78,7 +78,12 @@ class InputSampler:
                 sleeper.sleep_until(start + next_frame * period)
                 now = time.perf_counter()
                 due_frame = int((now - start) / period)
-                state = self._poll()
+                try:
+                    state = self._poll()
+                except Exception:
+                    # A reader that fails (e.g. a pad unplugged mid-read) mustn't stop sampling.
+                    logger.exception("Polling input failed")
+                    state = get_neutral_controller_state()
                 ticks = due_frame - next_frame + 1
                 if ticks > 1:
                     self.stats.late_ticks += ticks - 1
