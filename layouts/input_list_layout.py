@@ -1,61 +1,54 @@
 import ctypes
 import sys
-import time
 
 from kivy.core.image import Image as CoreImage
 from kivy.core.text import Label as CoreLabel
 from kivy.core.text.markup import MarkupLabel
 from kivy.core.window import Window
 from kivy.graphics import Color, InstructionGroup, Line, Rectangle
-from kivy.graphics.texture import Texture
-from kivy.metrics import dp, sp
+from kivy.metrics import dp
 from kivy.resources import resource_find
-from kivy.uix.boxlayout import BoxLayout
-from kivy.uix.button import Button
-from kivy.uix.label import Label
 from kivy.uix.stencilview import StencilView
-from PIL import Image
 
 from images import get_standard_button_icon
-from input_list import LIST_BUTTON_ORDER, draw_direction_glyph, input_key
+from glyphs import draw_direction_glyph
+from input_list import LIST_BUTTON_ORDER
 from games import GAMES, draw_action_icon
 from key_inputs import EARLY, LATE, PENDING, describe
+from layouts.drawing import texture_of
 from layouts.feedback import Feedback
 from sampler import FPS
 import theme
 
-ICON_SIZE = dp(26)
-# A label is one icon wide: frame count on top, then the direction, then pressed buttons in a column.
-LABEL_PADDING = dp(2)
-LABEL_WIDTH = ICON_SIZE + 2 * LABEL_PADDING
 COUNT_FONT_SIZE = theme.BODY
 DISPLAY_COUNT_LIMIT = 99  # Longer holds show "99+", like training-mode input displays.
 LANE_BUTTON_ROWS = 3  # Lanes are tall enough for this many buttons; more overflow the lane.
 MARGIN = dp(24)
 GUTTER_WIDTH = dp(104)  # Lane names, left of the track.
-METER_HEIGHT = dp(18)  # Frame meter: one block per target frame, above the target lane.
-LANE_HEIGHT = dp(4) + dp(18) + (ICON_SIZE + dp(2)) * (1 + LANE_BUTTON_ROWS) + dp(4)
-STRIP_HEIGHT = dp(8)  # Per-frame match indicator between the two lanes.
-KEYS_LANE_HEIGHT = dp(26)  # Key inputs lane: just each requirement's window, notation and result.
-RUN_LANE_HEIGHT = dp(16)  # Each earlier attempt is a compact row of graded key inputs.
-RUN_LANE_GAP = dp(3)
-LANE_GAP = dp(8)
 LINE_FRACTION = 0.25  # Position of the hit line, as a fraction of the track width.
-
-# The list scales up to use a tall window: icons and lanes grow (text stays its size). Sizes at
-# scale 1 are the ones above; set_scale() rescales them all.
-_BASE_SIZES = {name: globals()[name] for name in ("ICON_SIZE", "LABEL_PADDING", "METER_HEIGHT", "STRIP_HEIGHT",
-                                                  "KEYS_LANE_HEIGHT", "RUN_LANE_HEIGHT", "RUN_LANE_GAP", "LANE_GAP")}
+ICON_PIXELS = int(dp(26) * 2)  # Icons are drawn this many pixels across and scaled, so they stay crisp.
 SCALE_HEIGHT = dp(600)  # The list is drawn at scale 1 in this much height, and grows with more...
 MAX_SCALE = 1.6  # ...up to this.
 
 
-def set_scale(scale):
-    """Rescales the list's sizes (module-wide: there's one list)."""
-    sizes = {name: value * scale for name, value in _BASE_SIZES.items()}
-    sizes["LABEL_WIDTH"] = sizes["ICON_SIZE"] + 2 * sizes["LABEL_PADDING"]
-    sizes["LANE_HEIGHT"] = dp(4) + dp(18) + (sizes["ICON_SIZE"] + dp(2)) * (1 + LANE_BUTTON_ROWS) + dp(4)
-    globals().update(sizes)
+class ListSizes:
+    """The list's sizes at a scale: it grows to use a tall window (icons and lanes do; text stays its
+    size). Each list has its own (InputListLayout.sizes)."""
+
+    def __init__(self, scale=1.0):
+        self.scale = scale
+        self.icon = dp(26) * scale
+        # A label is one icon wide: frame count on top, then the direction, then pressed buttons in a column.
+        self.label_padding = dp(2) * scale
+        self.label_width = self.icon + 2 * self.label_padding
+        self.meter = dp(18) * scale  # Frame meter: one block per target frame, above the target lane.
+        self.lane = dp(4) + dp(18) + (self.icon + dp(2)) * (1 + LANE_BUTTON_ROWS) + dp(4)
+        self.strip = dp(8) * scale  # Per-frame match indicator between the two lanes.
+        self.keys_lane = dp(26) * scale  # Key inputs lane: each requirement's window, notation and result.
+        self.run_lane = dp(16) * scale  # Each earlier attempt is a compact row of graded key inputs.
+        self.run_gap = dp(3) * scale
+        self.lane_gap = dp(8) * scale
+
 
 # The scroll speed is set by how far ahead of the line inputs appear, in seconds: the space right of
 # the line holds that much time. 1.5 s is a comfortable pace to read and react to; rhythm games give
@@ -63,7 +56,6 @@ def set_scale(scale):
 # their labels (see _draw_runs).
 DEFAULT_LOOKAHEAD = 1.5
 MIN_LOOKAHEAD, MAX_LOOKAHEAD = 0.4, 8.0
-DEFAULT_PX_PER_FRAME = LABEL_WIDTH  # Until the list has a size to work it out from.
 
 PANEL_COLOR = (0, 0, 0, 0.35)
 GUTTER_COLOR = (*theme.GUTTER, 1)
@@ -117,12 +109,6 @@ def _modifier_held(name):
     return name in Window.modifiers
 
 
-def _texture_from_pil(image):
-    texture = Texture.create(size=image.size, colorfmt="rgba")
-    texture.blit_buffer(image.transpose(Image.FLIP_TOP_BOTTOM).tobytes(), colorfmt="rgba", bufferfmt="ubyte")
-    return texture
-
-
 def _text_texture(text, font_size, bold=True):
     label = CoreLabel(text=text, font_size=font_size, bold=bold)
     label.refresh()
@@ -139,21 +125,21 @@ class _InputLabel:
         for rect in ([self.count] if with_count else []) + [self.direction] + self.buttons:
             group.add(rect)
 
-    def set_stacked(self, x, top, key, textures, count_texture):
-        """Count on top, direction glyph under it, then button icons in a column, all one icon wide."""
+    def set_stacked(self, x, top, key, textures, count_texture, icon):
+        """Count on top, direction glyph under it, then button icons in a column, all icon wide."""
         direction, pressed = key
         self.count.texture = count_texture
         self.count.size = count_texture.size
-        self.count.pos = (x + (ICON_SIZE - count_texture.width) / 2, top - dp(18) + (dp(18) - count_texture.height) / 2)
-        y = top - dp(18) - dp(2) - ICON_SIZE
+        self.count.pos = (x + (icon - count_texture.width) / 2, top - dp(18) + (dp(18) - count_texture.height) / 2)
+        y = top - dp(18) - dp(2) - icon
         self.direction.texture = textures.directions[direction]
         self.direction.pos = (x, y)
-        self.direction.size = (ICON_SIZE, ICON_SIZE)
+        self.direction.size = (icon, icon)
         for i, rect in enumerate(self.buttons):
             if i < len(pressed):
                 rect.texture = textures.buttons[pressed[i]]
-                rect.pos = (x, y - (i + 1) * (ICON_SIZE + dp(2)))
-                rect.size = (ICON_SIZE, ICON_SIZE)
+                rect.pos = (x, y - (i + 1) * (icon + dp(2)))
+                rect.size = (icon, icon)
             else:
                 rect.size = (0, 0)
 
@@ -323,7 +309,7 @@ class _ButtonTextures(dict):
 
     def __missing__(self, name):
         game = self.game if self.game in GAMES else next(iter(GAMES))
-        texture = _texture_from_pil(draw_action_icon(game, name, int(ICON_SIZE * 2), self.font))
+        texture = texture_of(draw_action_icon(game, name, ICON_PIXELS, self.font))
         self[name] = texture
         return texture
 
@@ -331,8 +317,7 @@ class _ButtonTextures(dict):
 class _Textures:
     def __init__(self, controller_type, button_icon_style):
         font = resource_find("data/fonts/Roboto-Bold.ttf")
-        glyph_pixels = int(ICON_SIZE * 2)  # Render larger than shown so scaling stays crisp.
-        self.directions = {d: _texture_from_pil(draw_direction_glyph(d, glyph_pixels, font)) for d in range(1, 10)}
+        self.directions = {d: texture_of(draw_direction_glyph(d, ICON_PIXELS, font)) for d in range(1, 10)}
         self.buttons = _ButtonTextures({
             name: CoreImage(get_standard_button_icon(controller_type, button_icon_style, name)).texture
             for name in LIST_BUTTON_ORDER
@@ -377,12 +362,6 @@ class _Textures:
             self.judgements[key] = label.texture
         return self.judgements[key]
 
-    def judgement(self, text):
-        if text not in self.judgements:
-            label = MarkupLabel(text=text, font_size=theme.TITLE, bold=True, outline_width=2, outline_color=(0, 0, 0))
-            label.refresh()
-            self.judgements[text] = label.texture
-        return self.judgements[text]
 
     def key_tag(self, text):
         if text not in self.key_tags:
@@ -429,7 +408,8 @@ class InputListLayout(StencilView):
     def __init__(self, controller_type="XGamepad", button_icon_style="Alt", **kwargs):
         super().__init__(**kwargs)
         self.textures = _Textures(controller_type, button_icon_style)
-        self.px_per_frame = DEFAULT_PX_PER_FRAME
+        self.sizes = ListSizes()
+        self.px_per_frame = self.sizes.label_width  # Until the list has a size to work it out from.
         self.lookahead = DEFAULT_LOOKAHEAD  # Seconds of input shown ahead of the line.
         self.show_notes = True  # When off, notes only show as bars over their frames.
         self.dim_non_key = False  # Set by the app while the track has key inputs.
@@ -490,9 +470,9 @@ class InputListLayout(StencilView):
         self.next_pool = _Pool(self.next_layer, self._make_strip)
         self.show_next = True  # The up-next panel, set by the app.
         self.card_up = False  # Set by the app while the getting-started card covers the list.
-        self.scale = 1.0
         self.freeze_scale = False  # Set by the app in overlay mode, where the window fits the list instead.
         self.minimal = False  # A see-through overlay: no lane names or lane backgrounds, just the inputs.
+        self.show_live = True  # The player's live input under the line (not in exported videos).
         self.bind(size=self.rescale)
         # The verdicts and pass banner, shared with the other displays.
         self.feedback = Feedback(self)
@@ -554,24 +534,25 @@ class InputListLayout(StencilView):
         "strip" is the match strip over the attempt lane."""
         lanes, y = {}, self.top - MARGIN
 
-        def stack(name, height, gap=LANE_GAP):
+        def stack(name, height, gap=None):
             nonlocal y
+            gap = self.sizes.lane_gap if gap is None else gap
             lanes[name] = (y - height, height)
             y -= height + gap
 
         if "meter" in self.lanes_shown:
-            stack("meter", METER_HEIGHT)
+            stack("meter", self.sizes.meter)
         if "target" in self.lanes_shown:
-            stack("target", LANE_HEIGHT)
+            stack("target", self.sizes.lane)
         if "keys" in self.lanes_shown and self.dim_non_key:
-            stack("keys", KEYS_LANE_HEIGHT)
+            stack("keys", self.sizes.keys_lane)
         if "attempt" in self.lanes_shown:
-            stack("strip", STRIP_HEIGHT, LANE_GAP / 2)
-            stack("attempt", LANE_HEIGHT)
+            stack("strip", self.sizes.strip, self.sizes.lane_gap / 2)
+            stack("attempt", self.sizes.lane)
         for i, _ in enumerate(self._history):
-            stack(("run", i), RUN_LANE_HEIGHT, RUN_LANE_GAP)
+            stack(("run", i), self.sizes.run_lane, self.sizes.run_gap)
         if self._history:
-            y -= LANE_GAP - RUN_LANE_GAP
+            y -= self.sizes.lane_gap - self.sizes.run_gap
         return lanes, y
 
     def _arrange(self, lanes, bottom):
@@ -597,14 +578,14 @@ class InputListLayout(StencilView):
         hide = lambda item: setattr(item[0], "a", 0)
         self.panels.finish(hide)
         self.labels.finish(hide)
-        live_y = bottom - ICON_SIZE
+        live_y = bottom - self.sizes.icon
         # The gutter ends with the last lane it names.
         lowest = min((y for y, _ in lanes.values()), default=bottom)
         self.gutter.pos = (self.x, lowest - dp(4))
         self.gutter.size = (left - self.x, self.top - lowest + dp(4))
         self.line.pos = (self._line_x() - dp(1), live_y - dp(4))
         self.line.size = (dp(2), self.top - MARGIN - live_y + dp(4))
-        self._select_bands = [(y - LANE_GAP / 2, y + height + (MARGIN if name == "meter" else LANE_GAP / 2))
+        self._select_bands = [(y - self.sizes.lane_gap / 2, y + height + (MARGIN if name == "meter" else self.sizes.lane_gap / 2))
                               for name, (y, height) in lanes.items() if name in ("meter", "keys")]
 
     def _on_mouse_pos(self, window, pos):
@@ -628,7 +609,7 @@ class InputListLayout(StencilView):
         if self.card_up:
             return None
         _, bottom = self._lanes()
-        lowest = bottom - ICON_SIZE - dp(4)  # The live input row.
+        lowest = bottom - self.sizes.icon - dp(4)  # The live input row.
         if note_rows:
             lowest -= dp(14) + BRACE_HEIGHT + min(note_rows, TOAST_ROWS) * self.toast_row_height
         return self.top - lowest + dp(8)
@@ -637,9 +618,8 @@ class InputListLayout(StencilView):
         if self.freeze_scale or not self.height:
             return
         scale = max(1.0, min(MAX_SCALE, self.height / SCALE_HEIGHT))
-        if abs(scale - self.scale) > 0.01:
-            self.scale = scale
-            set_scale(scale)
+        if abs(scale - self.sizes.scale) > 0.01:
+            self.sizes = ListSizes(scale)
             self._apply_speed()
 
     def _apply_speed(self):
@@ -662,9 +642,6 @@ class InputListLayout(StencilView):
     def frame_at(self, x):
         return int(self._frame + (x - self._line_x()) // self.px_per_frame)
 
-    def set_zoom(self, px_per_frame):
-        """Sets the speed by frame width instead (for the current size)."""
-        self.set_lookahead((self._track_right() - self._line_x()) / (px_per_frame * FPS))
 
     # ---- Scrolling ---------------------------------------------------------------------------
 
@@ -757,18 +734,18 @@ class InputListLayout(StencilView):
                 alpha *= NON_KEY_ALPHA_PLAYING if snapshot.playing else NON_KEY_ALPHA
             box.fill_color.rgba = (*color, (0.05 if neutral else 0.16 if not active else 0.28) * alpha)
             box.fill.pos = (x0, lane_y)
-            box.fill.size = (x1 - x0, LANE_HEIGHT)
+            box.fill.size = (x1 - x0, self.sizes.lane)
             box.edge_color.rgba = (*color, 0.6 * alpha)
             box.edge.pos = (x0, lane_y)
-            box.edge.size = (dp(1), LANE_HEIGHT)
+            box.edge.size = (dp(1), self.sizes.lane)
             # Labels are all the same size, anchored to the edge where the input starts. A held run
             # keeps its label just right of the line, and a long run's label stays in view. A run
             # too short for its label (a quick tap) still gets one if there's room before it's
             # covered by the next, so it reads like a rhythm-game note; neutral ones give way.
-            wide = x1 - x0 >= LABEL_WIDTH
+            wide = x1 - x0 >= self.sizes.label_width
             in_key = key_windows is None or any(s <= start + length - 1 and start <= e for s, e in key_windows)
             priority = (not neutral, in_key, bool(key[1]), wide)
-            if not wide and (neutral or x0 + LABEL_PADDING < label_edge):
+            if not wide and (neutral or x0 + self.sizes.label_padding < label_edge):
                 # Where labels clash, the input that matters more keeps its label: one a key input
                 # needs, then one with buttons, over a brief stray direction.
                 if neutral or not last_label or priority <= last_label[1]:
@@ -776,16 +753,16 @@ class InputListLayout(StencilView):
                     continue
                 last_label[0].content_color.a = 0
             box.content_color.a = alpha
-            label_x = x0 + LABEL_PADDING
+            label_x = x0 + self.sizes.label_padding
             if wide:
-                label_right = x1 - ICON_SIZE - LABEL_PADDING
-                label_x = max(label_x, min(track_left + LABEL_PADDING, label_right))
+                label_right = x1 - self.sizes.icon - self.sizes.label_padding
+                label_x = max(label_x, min(track_left + self.sizes.label_padding, label_right))
                 if active:
-                    label_x = max(label_x, min(line_x + LABEL_PADDING, label_right))
-            label_edge = label_x + LABEL_WIDTH
+                    label_x = max(label_x, min(line_x + self.sizes.label_padding, label_right))
+            label_edge = label_x + self.sizes.label_width
             last_label = (box, priority)
-            box.label.set_stacked(label_x, lane_y + LANE_HEIGHT - dp(4), key, self.textures,
-                                  self.textures.count(length))
+            box.label.set_stacked(label_x, lane_y + self.sizes.lane - dp(4), key, self.textures,
+                                  self.textures.count(length), self.sizes.icon)
             if snapshot.playing:
                 box.label.count.size = (0, 0)  # Frame counts are for studying, not for reading on the move.
         pool.finish(_Box.hide)
@@ -797,7 +774,7 @@ class InputListLayout(StencilView):
             color, rect = self.strips.next()
             color.rgba = (*(MATCH_COLOR if matched else MISS_COLOR), alpha)
             rect.pos = (self._frame_x(start, snapshot.position), strip_y)
-            rect.size = (length * self.px_per_frame, STRIP_HEIGHT)
+            rect.size = (length * self.px_per_frame, self.sizes.strip)
         self.strips.finish(lambda strip: setattr(strip[0], "a", 0))
 
     def _draw_meter(self, runs, snapshot, meter_y):
@@ -815,12 +792,12 @@ class InputListLayout(StencilView):
                 block_color, block = self.meter_blocks.next()
                 block_color.rgba = (*color, HISTORY_ALPHA if past else 0.95)
                 block.pos = (self._frame_x(frame, snapshot.position) + gap, meter_y)
-                block.size = (ppf - gap, METER_HEIGHT)
+                block.size = (ppf - gap, self.sizes.meter)
             if first_visible <= start <= last_visible:
                 divider_color, divider = self.meter_dividers.next()
                 divider_color.rgba = (1, 1, 1, 0.9)
                 divider.pos = (self._frame_x(start, snapshot.position) - dp(1), meter_y - dp(3))
-                divider.size = (dp(2), METER_HEIGHT + dp(6))
+                divider.size = (dp(2), self.sizes.meter + dp(6))
         hide = lambda item: setattr(item[0], "a", 0)
         self.meter_blocks.finish(hide)
         self.meter_dividers.finish(hide)
@@ -941,13 +918,13 @@ class InputListLayout(StencilView):
         strip_y = strip[0]
         graphic.result_color.rgba = (*KEY_RESULT_COLORS[outcome], 0.35 if is_hold else 1)
         graphic.result.pos = (x0, strip_y - dp(2))
-        graphic.result.size = (x1 - x0, STRIP_HEIGHT + dp(4))
+        graphic.result.size = (x1 - x0, self.sizes.strip + dp(4))
         if is_hold and hold_run:
             run_start, run_length = hold_run
             run_x = self._frame_x(run_start, snapshot.position)
             graphic.run_color.rgba = (*KEY_RESULT_COLORS[outcome], 1)
             graphic.run.pos = (run_x, strip_y - dp(2))
-            graphic.run.size = (self._frame_x(run_start + run_length, snapshot.position) - run_x, STRIP_HEIGHT + dp(4))
+            graphic.run.size = (self._frame_x(run_start + run_length, snapshot.position) - run_x, self.sizes.strip + dp(4))
 
     def _draw_history(self, snapshot, lanes):
         track_left, track_right = self._track_left(), self._track_right()
@@ -1086,7 +1063,7 @@ class InputListLayout(StencilView):
         self._draw_history(snapshot, lanes)
         self.marks.finish(lambda item: setattr(item[0], "a", 0))
         lanes_top = self.top - MARGIN
-        live_y = bottom - ICON_SIZE
+        live_y = bottom - self.sizes.icon
         self._draw_notes(snapshot.notes, snapshot, lanes_top, live_y - dp(14))
         left = self._track_left()
         # Verdicts sit left of the line, at the foot of the up-next column, clear of the inputs
@@ -1094,9 +1071,9 @@ class InputListLayout(StencilView):
         # Above the attempt rows (they're graded cells too; verdicts on them would be a muddle).
         lowest_lane = min((y for name, (y, _) in lanes.items() if not isinstance(name, tuple)), default=bottom)
         self.feedback.place(verdicts=(left + dp(12), lowest_lane + dp(3 * 36 + 8)),
-                            banner=(self._line_x() + ICON_SIZE * 5, bottom + dp(2), False))
+                            banner=(self._line_x() + self.sizes.icon * 5, bottom + dp(2), False))
         self.feedback.draw(snapshot.judgements, snapshot.last_pass)
-        self._draw_selection(snapshot, lanes_top, bottom + LANE_GAP)
+        self._draw_selection(snapshot, lanes_top, bottom + self.sizes.lane_gap)
         self._draw_up_next(snapshot, lanes, lanes_top)
 
         # The player's live input sits under the line, which turns green when it matches.
@@ -1114,6 +1091,6 @@ class InputListLayout(StencilView):
         if flare:
             self.line_color.rgba = (*MATCH_COLOR, 1)
         self._draw_placeholder(snapshot, lanes)
-        self.live_color.a = 0 if snapshot.recording else 1
-        self.live.set_row(self._line_x() - ICON_SIZE / 2, live_y - dp(4), ICON_SIZE,
+        self.live_color.a = 0 if snapshot.recording or not self.show_live else 1
+        self.live.set_row(self._line_x() - self.sizes.icon / 2, live_y - dp(4), self.sizes.icon,
                           live_key, self.textures)

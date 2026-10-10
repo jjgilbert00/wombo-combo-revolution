@@ -12,13 +12,13 @@ def steps(h):
     for mode in ("lanes", "ring", "list"):
         h.app.show_display(mode); yield 0.2
         h.app.restart_playback(); h.app.play()
-        run = c.last_pass["run"] if c.last_pass else 0
+        run = c.get_last_pass()["run"] if c.get_last_pass() else 0
         widest_line = 0
         while c.get_lead() or c.get_current_frame() < 75:
             widest_line = max(widest_line, h.app.input_list_layout.line.size[0])
             yield 0.01
         h.shot(f"{mode}_playing")
-        while not c.last_pass or c.last_pass["run"] == run:
+        while not c.get_last_pass() or c.get_last_pass()["run"] == run:
             yield 0.02
         yield 0.1
         h.shot(f"{mode}_result")

@@ -8,7 +8,7 @@ from pynput import keyboard
 
 from controller import direction_from_axes
 from games import GAMES
-from input_list import full_map
+from button_map import full_map
 
 # (key, what it does, app method). These work while the game has focus.
 HOTKEYS = [

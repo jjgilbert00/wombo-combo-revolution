@@ -47,8 +47,8 @@ def steps(h):
         yield 0.005
     L = h.app.input_list_layout
     save(h, "first-go", (0, H, W * 0.62, H - 520))
-    run = c.last_pass["run"] if c.last_pass else 0
-    while not c.last_pass or c.last_pass["run"] == run:
+    run = c.get_last_pass()["run"] if c.get_last_pass() else 0
+    while not c.get_last_pass() or c.get_last_pass()["run"] == run:
         yield 0.005
     h.app.pause(); yield 0.3
     banner = L.banner
