@@ -15,10 +15,10 @@ def steps(h):
     h.app.open_track(path); yield 0.3
     use_pad(h.app, WarmUpPad(c))
     h.app.play()
-    while c.last_pass is None:
+    while c.get_last_pass() is None:
         yield 0.05
-    h.check("a perfect pass scores 4/4", (c.last_pass["hits"], c.last_pass["total"]) == (4, 4),
-            (c.last_pass["hits"], c.last_pass["total"]))
+    h.check("a perfect pass scores 4/4", (c.get_last_pass()["hits"], c.get_last_pass()["total"]) == (4, 4),
+            (c.get_last_pass()["hits"], c.get_last_pass()["total"]))
     h.app.pause(); yield 0.2
     h.app.set_selection(40, 46); h.key(107, "k"); yield 0.4
     p = popup(h, "KeyInputPopup")

@@ -138,7 +138,7 @@ class WomboComboApp(App):
         self.input_list_layout.on_context_menu = self.open_context_menu
         self.playalong_controller.set_practice(self.settings.practice)
         self.playalong_controller.set_history_count(self.settings.recent_attempts)
-        self.playalong_controller.lead_in = self.settings.lead_in
+        self.playalong_controller.set_lead_in(self.settings.lead_in)
         self.menu_bar = MenuBar(self)
         self.root_layout = BoxLayout(orientation="vertical")
         self.root_layout.add_widget(self.menu_bar)
@@ -204,12 +204,12 @@ class WomboComboApp(App):
 
     def _playing_by_keyboard(self):
         controller = self.playalong_controller
-        return controller.is_playing() and controller.practice and not controller.demo_kind()
+        return controller.is_playing() and controller.is_practicing() and not controller.demo_kind()
 
     def keyboard_state(self):
         """The keyboard as a controller (called from the sampler thread), in the player's buttons."""
         controller = self.playalong_controller
-        return keys.keyboard_state(set(self.keys_down), controller.action_layout, controller.get_button_map())
+        return keys.keyboard_state(set(self.keys_down), controller.get_game()[1], controller.get_button_map())
 
     def on_key_up(self, window, key, scancode):
         name = keys.GAME_KEYS.get(key)
@@ -255,7 +255,7 @@ class WomboComboApp(App):
     def refresh(self, dt):
         self._tick_on_hits()  # Every frame, so the tick comes with the hit.
         if self.display is self.input_list_layout:
-            self.input_list_layout.dim_non_key = bool(self.playalong_controller.key_inputs)
+            self.input_list_layout.dim_non_key = self.playalong_controller.has_key_inputs()
             frames_before, frames_after = self.input_list_layout.frames_needed()
             self.input_list_layout.update_state(self.playalong_controller.list_snapshot(frames_before, frames_after))
             if self.overlay.active:
@@ -296,7 +296,7 @@ class WomboComboApp(App):
     def _tick_on_hits(self):
         """With Hit sound on, a short tick for each key input hit (heard even with the game in front)."""
         controller = self.playalong_controller
-        hits, _ = controller.key_input_score() if controller.is_playing() and controller.practice else (0, 0)
+        hits, _ = controller.key_input_score() if controller.is_playing() and controller.is_practicing() else (0, 0)
         if hits > self._hits_heard and self.settings.hit_sound:
             path = os.path.join(self.temp_dir, "tick.wav")
             if not os.path.exists(path):
@@ -312,7 +312,7 @@ class WomboComboApp(App):
             if second != self._countdown_second:
                 self._countdown_second = second
                 self.beep()
-        self.menu_bar.update(controller.is_recording(), controller.is_playing(), controller.loop, controller.practice,
+        self.menu_bar.update(controller.is_recording(), controller.is_playing(), controller.is_looping(), controller.is_practicing(),
                              demoing=bool(controller.demo_kind()))
         card, buttons = guidance.card(self)
         # Over the game, the overlay shows the displays only; the hints are for the app window.
@@ -362,12 +362,12 @@ class WomboComboApp(App):
 
     def _demo(self, kind):
         controller = self.playalong_controller
-        if controller.is_recording() or not controller.input_track:
+        if controller.is_recording() or not controller.track_length():
             self.flash("Open or record something to demo first", "warning")
             self.beep(False)
             return
         if kind == "key inputs":
-            if not controller.key_inputs:
+            if not controller.has_key_inputs():
                 self.flash("No key inputs to demo: select frames and press K to mark them", "warning", 6)
                 self.beep(False)
                 return
@@ -403,7 +403,7 @@ class WomboComboApp(App):
     def set_selection(self, start, end=None):
         """Selects frames start..end (inclusive, either order) of the track, or clears with None."""
         if start is not None:
-            last = len(self.playalong_controller.input_track) - 1
+            last = self.playalong_controller.track_length() - 1
             start, end = sorted((start, start if end is None else end))
             start, end = max(0, start), min(end, last)
             if start > end:
@@ -415,9 +415,9 @@ class WomboComboApp(App):
         """Right-click menu in the input list, for the selection (or the frame clicked, if it's
         outside the selection)."""
         controller = self.playalong_controller
-        if controller.is_recording() or not controller.input_track:
+        if controller.is_recording() or not controller.track_length():
             return
-        frame = max(0, min(frame, len(controller.input_track) - 1))
+        frame = max(0, min(frame, controller.track_length() - 1))
         if not self.selection or not self.selection[0] <= frame <= self.selection[1]:
             self.set_selection(frame, frame)
         start = self.selection[0]
@@ -439,7 +439,7 @@ class WomboComboApp(App):
     def add_note(self):
         """Opens the note editor for the selected frames, or the frame on the line if none are selected."""
         controller = self.playalong_controller
-        if controller.is_recording() or not controller.input_track:
+        if controller.is_recording() or not controller.track_length():
             return
         start, end = self.selection or (controller.get_current_frame(),) * 2
         existing = next((i for i, note in enumerate(controller.get_notes())
@@ -475,7 +475,7 @@ class WomboComboApp(App):
         """Marks the selected frames (or the frame on the line) as a key input, guessing the
         requirement from the target, and opens it for review. Edits an overlapping one instead."""
         controller = self.playalong_controller
-        if controller.is_recording() or not controller.input_track:
+        if controller.is_recording() or not controller.track_length():
             return
         start, end = self.selection or (controller.get_current_frame(),) * 2
         existing = next((i for i, k in enumerate(controller.get_key_inputs())
@@ -526,7 +526,7 @@ class WomboComboApp(App):
         """Opens the button map for this recording: which of the player's buttons does what each
         recorded button did."""
         controller = self.playalong_controller
-        if controller.is_recording() or not controller.input_track:
+        if controller.is_recording() or not controller.track_length():
             self.flash("Open a recording to remap its buttons", "warning")
             return
         track = controller.get_input_track()
@@ -539,7 +539,7 @@ class WomboComboApp(App):
         self.unsaved_edits = True
 
     def toggle_practice(self):
-        practice = not self.playalong_controller.practice
+        practice = not self.playalong_controller.is_practicing()
         self.playalong_controller.set_practice(practice)
         self.settings.set("practice", int(practice))
         self.flash("Practice: playing records your attempt" if practice else "Review: playing replays your attempt")
@@ -575,7 +575,7 @@ class WomboComboApp(App):
 
         def describe(kind, item, name):
             done, total = controller.score(item["attempt"])
-            if controller.key_inputs:
+            if controller.has_key_inputs():
                 score = f"Key inputs {done}/{total}"
             else:
                 score = f"Match {done / total:.0%}" if total else "Not played"
@@ -618,7 +618,7 @@ class WomboComboApp(App):
         item = next((item for item in items if item["id"] == attempt_id), None)
         if item is None or controller.is_recording():
             return
-        if controller.practice:
+        if controller.is_practicing():
             self.toggle_practice()
         controller.pause()
         controller.set_attempt_track(item["attempt"])
@@ -630,7 +630,7 @@ class WomboComboApp(App):
         self.playalong_controller.clear_attempt()
 
     def toggle_loop(self):
-        loop = not self.playalong_controller.loop
+        loop = not self.playalong_controller.is_looping()
         self.playalong_controller.set_looping(loop)
         self.settings.set("loop", int(loop))
 
@@ -669,7 +669,7 @@ class WomboComboApp(App):
 
     def stop_recording(self):
         self.playalong_controller.stop_recording()
-        self.unsaved_take = bool(self.playalong_controller.input_track)
+        self.unsaved_take = bool(self.playalong_controller.track_length())
         recorder, self.screen_recorder = self.screen_recorder, None
         if recorder:
             recorder.stop()
@@ -726,7 +726,7 @@ class WomboComboApp(App):
             self.flash("The warm-up sample is missing from the samples folder", "error", 6)
             return
         self.open_track(warm_up)
-        self.coaching = bool(self.playalong_controller.input_track)
+        self.coaching = bool(self.playalong_controller.track_length())
 
     def _remember_recent(self, path):
         recent = [path] + [p for p in self.recent_recordings() if os.path.normcase(p) != os.path.normcase(path)]
@@ -770,7 +770,7 @@ class WomboComboApp(App):
         self._remember_recent(path)
         # Straight into practice: the input list, practice on, from the first frame.
         self.show_display("list")
-        if not self.playalong_controller.practice:
+        if not self.playalong_controller.is_practicing():
             self.toggle_practice()
         Window.set_title(f"{TITLE} - {os.path.splitext(os.path.basename(path))[0]}")
         self.flash(f"Opened {os.path.basename(path)}", "info", 6)
@@ -779,11 +779,12 @@ class WomboComboApp(App):
         """The track and everything made for it, for track_file.save()."""
         controller = self.playalong_controller
         attempt = controller.get_attempt_track()
+        game, action_layout = controller.get_game()
         return {"inputs": controller.get_input_track(),
                 "attempt": attempt if any(frame is not None for frame in attempt) else None,
                 "notes": controller.get_notes(), "key_inputs": controller.get_key_inputs(),
                 "saved_attempts": controller.get_saved(), "button_map": controller.get_button_map(),
-                "game": controller.game, "action_layout": controller.action_layout if controller.game else None}
+                "game": game, "action_layout": action_layout if game else None}
 
     def save(self):
         """Saves into the open recording's file, or for a new take asks where to save it (with its
@@ -801,7 +802,7 @@ class WomboComboApp(App):
     def _keep_unsaved_work(self, doing, edits_only=False):
         """Before something replaces the track, offers to save unsaved work. Returns False to stop."""
         unsaved = self.unsaved_edits or (self.unsaved_take and not edits_only)
-        if not unsaved or not self.playalong_controller.input_track:
+        if not unsaved or not self.playalong_controller.track_length():
             return True
         answer = dialogs.ask_save("Unsaved changes", f"Save the current recording before {doing}?")
         if answer == "save":
@@ -967,24 +968,25 @@ class WomboComboApp(App):
         self.set_up_next_visible(not self.input_list_layout.show_next)
 
     def set_actions_visible(self, visible):
-        self.playalong_controller.show_actions = visible
+        self.playalong_controller.set_show_actions(visible)
         self.settings.set("show_actions", int(visible))
         self.menu_bar.set_actions_visible(visible)
 
     def toggle_actions(self):
-        self.set_actions_visible(not self.playalong_controller.show_actions)
-        if self.playalong_controller.show_actions and not self.playalong_controller.game:
+        self.set_actions_visible(not self.playalong_controller.is_showing_actions())
+        if self.playalong_controller.is_showing_actions() and not self.playalong_controller.get_game()[0]:
             self.flash("This recording has no game: choose one in Edit > Game actions...", "warning", 6)
 
     def edit_game_actions(self):
         controller = self.playalong_controller
-        if controller.is_recording() or not controller.input_track:
+        if controller.is_recording() or not controller.track_length():
             self.flash("Open a recording to set its game actions", "warning")
             return
         track = controller.get_input_track()
         used = {button: sum(1 for i, frame in enumerate(track) if frame[button] and (i == 0 or not track[i - 1][button]))
                 for button in LIST_BUTTON_ORDER}
-        GameActionsPopup({key: game["name"] for key, game in GAMES.items()}, controller.game, controller.action_layout,
+        current_game, current_layout = controller.get_game()
+        GameActionsPopup({key: game["name"] for key, game in GAMES.items()}, current_game, current_layout,
                          {key: list(game["actions"]) for key, game in GAMES.items()},
                          {key: game["default_layout"] for key, game in GAMES.items()}, used,
                          lambda game, layout: self.set_game(game, layout)).open()

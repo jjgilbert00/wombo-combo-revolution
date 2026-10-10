@@ -157,7 +157,7 @@ class Overlay:
         # notes, more only if overlapping notes stack up. It doesn't shrink back, so the window
         # doesn't jump as notes scroll by.
         if layout.show_notes:
-            wanted = 1 if self.app.playalong_controller.notes else 0
+            wanted = 1 if self.app.playalong_controller.has_notes() else 0
             self._note_rows = max(self._note_rows, wanted, layout.note_rows_used)
         else:
             self._note_rows = 0

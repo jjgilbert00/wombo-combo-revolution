@@ -41,14 +41,14 @@ def card(app):
     """The card over the display: getting started with nothing loaded, or a first go at the warm-up
     until the player starts playing. Returns (text, buttons) with buttons as (label, callback,
     primary); ("", ()) for no card."""
-    controller = app.playalong_controller
-    if controller.is_recording():
+    status = app.playalong_controller.status()
+    if status.recording:
         return "", ()
-    if not len(controller.input_track):
+    if not status.length:
         return WELCOME, (("Try the warm-up", app.try_warm_up, True),
                          ("Open a recording...", app.open_track, False),
                          ("Record your own (F8)", app.toggle_recording, False))
-    if app.coaching and not controller.is_playing():
+    if app.coaching and not status.playing:
         if _has_controller(app):
             note = f"Using [b]{app.sampler.reader.name}[/b]: press a button and it shows up under the line."
         else:
@@ -60,13 +60,13 @@ def card(app):
 
 def hint(app):
     """One line on what to do next, for where the player is right now."""
-    controller = app.playalong_controller
-    if controller.is_recording():
+    status = app.playalong_controller.status()
+    if status.recording:
         return ("[b]Recording.[/b] Perform the combo, then press [b]F8[/b] (or Stop) to finish. "
                 "F-key hotkeys work while the game has focus.")
-    if not len(controller.input_track):
+    if not status.length:
         return ""
-    demo, lead = controller.demo_kind(), controller.get_lead()
+    demo, lead = status.demo, status.lead
     if demo:
         if lead:
             return (f"[b]Demo of the {demo}[/b] starts in {lead / FPS:.1f}s. Switch to the game: the virtual "
@@ -78,16 +78,16 @@ def hint(app):
                 "(a key input), right-click for more, [b]Esc[/b] clears.")
     if lead:
         return f"[b]Get ready.[/b] The first input reaches the line in {lead / FPS:.1f}s."
-    if controller.is_playing():
-        if controller.practice:
+    if status.playing:
+        if status.practice:
             keys = "" if _has_controller(app) else f" No controller: {KEYBOARD_HINT}."
             return ("[b]Practising.[/b] Press each input as it reaches the line. [b]Start[/b] / [b]Space[/b] "
                     "pauses, [b]Back[/b] / [b]Home[/b] starts over." + keys)
         return "[b]Reviewing[/b] your attempt against the recording. [b]F4[/b] goes back to practice."
-    if controller.attempted_frames:
+    if status.attempted:
         return ("Scroll or drag to look back at your attempt. [b]S[/b] saves it, [b]A[/b] lists all "
                 "attempts, [b]Space[/b] practises again.")
-    if not controller.key_inputs:
+    if not status.key_inputs:
         return ("Press [b]Space[/b] (or [b]F6[/b] in game) to practise. Tip: drag in the frame meter to select "
                 "frames and press [b]K[/b] to mark what really matters; only those are scored then.")
     return ("Press [b]Space[/b] (or [b]F6[/b] in game) to practise. Hit the key inputs (outlined) as they "
@@ -96,34 +96,34 @@ def hint(app):
 
 def status(app):
     """The status bar's right side: the mode and time, the score, flags, messages and the controller."""
-    controller = app.playalong_controller
-    frames = len(controller.input_track)
+    status = app.playalong_controller.status()
+    frames = status.length
     parts = []
-    if controller.is_recording():
+    if status.recording:
         parts.append(f"{markup('REC', theme.DANGER, bold=True)} {format_time(frames)}")
-        if controller.filled_frames:
-            parts.append(markup(f"{controller.filled_frames} late frames", theme.WARNING))
+        if status.filled:
+            parts.append(markup(f"{status.filled} late frames", theme.WARNING))
         backlog = app.screen_recorder.backlog() if app.screen_recorder else 0
         if backlog > FPS // 2:
             parts.append(markup(f"encoder {backlog / FPS:.1f}s behind", theme.WARNING))
     elif frames:
-        demo, lead = controller.demo_kind(), controller.get_lead()
+        demo, lead = status.demo, status.lead
         if demo:
             state = f"DEMO IN {lead / FPS:.1f}s" if lead else f"DEMO ({demo})"
         elif lead:
             state = "GET READY"
-        elif controller.is_playing():
-            state = "PRACTICE" if controller.practice else "REVIEW"
+        elif status.playing:
+            state = "PRACTICE" if status.practice else "REVIEW"
         else:
             state = "PAUSED"
-        parts.append(f"{state} {format_time(controller.get_current_frame())} / {format_time(frames)}")
-        hits, total = controller.key_input_score()
-        attempted, matched = controller.attempted_frames, controller.matched_frames
+        parts.append(f"{state} {format_time(status.frame)} / {format_time(frames)}")
+        hits, total = status.hits, status.key_inputs
+        attempted, matched = status.attempted, status.matched
         if total:
             parts.append(f"Key inputs {hits}/{total}")  # With key inputs marked, only they count.
         elif attempted:
             parts.append(f"Match {matched / attempted:.0%} of {attempted}f")
-        if controller.button_map:
+        if status.remapped:
             parts.append(markup("Buttons remapped", theme.INFO))
         if app.unsaved_take or app.unsaved_edits:
             parts.append(markup("Unsaved", theme.WARNING))
