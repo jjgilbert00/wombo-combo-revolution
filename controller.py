@@ -1,9 +1,6 @@
 import ctypes
 import math
-import random
 import sys
-
-BUTTON_NAMES = ["A", "B", "X", "Y", "LB", "RB", "LT", "RT"]
 
 
 def get_neutral_controller_state():
@@ -18,41 +15,6 @@ def get_neutral_controller_state():
         "LT": 0,
         "LB": 0,
     }
-
-
-def get_random_controller_state():
-    return {
-        "direction": math.floor(random.random() * 9) + 1,
-        "A": round(0.51*random.random()),
-        "B": round(0.51*random.random()),
-        "X": round(0.51*random.random()),
-        "Y": round(0.51*random.random()),
-        "RT": round(0.51*random.random()),
-        "RB": round(0.51*random.random()),
-        "LT": round(0.51*random.random()),
-        "LB": round(0.51*random.random())
-    }
-
-
-def get_cool_controller_pattern(frames = 180):
-    circles = [1,2,3,6,9,8,7,4]
-    inputs = [get_random_controller_state() for _ in range(frames)]
-    for i, input in enumerate(inputs[0:len(inputs)//2]):
-        if i % 10 != 1:
-            input["direction"] = inputs[i-1]["direction"]
-            continue
-        curdir = circles.pop()
-        circles.insert(0, curdir)
-        input["direction"] = curdir
-
-    for i, input in enumerate(inputs[len(inputs)//2 :]):
-        if i % 10 != 1:
-            input["direction"] = inputs[len(inputs)//2 + i-1]["direction"]
-            continue
-        curdir = circles.pop(0)
-        circles.append(curdir)
-        input["direction"] = curdir
-    return inputs
 
 
 def direction_from_axes(x, y):
@@ -112,6 +74,7 @@ class XInputReader:
     """
 
     DPAD_UP, DPAD_DOWN, DPAD_LEFT, DPAD_RIGHT = 0x0001, 0x0002, 0x0004, 0x0008
+    START, BACK = 0x0010, 0x0020
     BUTTON_MASKS = {"LB": 0x0100, "RB": 0x0200, "A": 0x1000, "B": 0x2000, "X": 0x4000, "Y": 0x8000}
     TRIGGER_THRESHOLD = 128
 
@@ -119,6 +82,7 @@ class XInputReader:
         self.slot = slot
         self.name = f"XInput controller {slot + 1}"
         self.connected = True
+        self.menu = (False, False)  # Start and Back as last polled; not part of the recorded state.
         self._state = _XInputState()
 
     @staticmethod
@@ -136,6 +100,7 @@ class XInputReader:
         self.connected = True
         pad = self._state.Gamepad
         buttons = pad.wButtons
+        self.menu = (bool(buttons & self.START), bool(buttons & self.BACK))
         x = bool(buttons & self.DPAD_RIGHT) - bool(buttons & self.DPAD_LEFT)
         y = bool(buttons & self.DPAD_UP) - bool(buttons & self.DPAD_DOWN)
         direction = direction_from_axes(x, y)
@@ -160,9 +125,12 @@ class PygameReader:
         self.joystick.init()
         self.name = f"{joystick.get_name()} (pygame)"
         self.connected = True
+        self.menu = (False, False)
 
     def poll(self):
         try:
+            count = self.joystick.get_numbuttons()
+            self.menu = (count > 7 and bool(self.joystick.get_button(7)), count > 6 and bool(self.joystick.get_button(6)))
             hat = self.joystick.get_hat(0) if self.joystick.get_numhats() else (0, 0)
             return {
                 "direction": direction_from_axes(hat[0], hat[1]),
