@@ -3,12 +3,10 @@
 This is the fighting-game training-mode style of showing inputs. A new run starts whenever the
 direction or any button changes.
 """
-from PIL import Image, ImageDraw, ImageFont
 
 # Order buttons appear in within a run.
 LIST_BUTTON_ORDER = ["X", "Y", "A", "B", "LB", "RB", "LT", "RT"]
 
-DIRECTION_ANGLES = {6: 0, 9: 45, 8: 90, 7: 135, 4: 180, 1: 225, 2: 270, 3: 315}
 
 # Runs are only followed this far past the visible range; longer holds are labelled "999+".
 MAX_COUNT = 999
@@ -57,29 +55,3 @@ def match_runs(target, attempt, lo, hi):
         else:
             runs.append((frame, 1, matched))
     return runs
-
-
-def draw_direction_glyph(direction, size, font_path):
-    """White arrow (or circled N for neutral) with a dark outline, as a PIL RGBA image."""
-    scale = 4  # Supersample, then shrink for smooth edges.
-    s = size * scale
-    image = Image.new("RGBA", (s, s), (0, 0, 0, 0))
-    draw = ImageDraw.Draw(image)
-    outline = max(2, s // 16)
-    if direction == 5:
-        inset = outline
-        draw.ellipse([inset, inset, s - inset, s - inset], fill=(40, 40, 44, 255), outline=(235, 235, 235, 255),
-                     width=outline)
-        font = ImageFont.truetype(font_path, int(s * 0.55))
-        draw.text((s / 2, s / 2), "N", font=font, fill=(235, 235, 235, 255), anchor="mm")
-    else:
-        # Right-pointing arrow, rotated into place.
-        m = s / 2
-        shaft, head = s * 0.15, s * 0.34
-        points = [
-            (s * 0.08, m - shaft), (s * 0.5, m - shaft), (s * 0.5, m - head), (s * 0.94, m),
-            (s * 0.5, m + head), (s * 0.5, m + shaft), (s * 0.08, m + shaft),
-        ]
-        draw.polygon(points, fill=(245, 245, 245, 255), outline=(30, 30, 34, 255), width=outline)
-        image = image.rotate(DIRECTION_ANGLES[direction], resample=Image.BICUBIC)
-    return image.resize((size, size), Image.LANCZOS)
