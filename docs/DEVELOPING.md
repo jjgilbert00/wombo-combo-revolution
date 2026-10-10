@@ -63,7 +63,7 @@ encoding video; exports are drawn by the displays themselves, see `layouts/expor
 |---|---|
 | `main.py` | The app: builds the window and wires everything together; actions the menus, keys and dialogs call |
 | `settings.py` | Every setting with its default and type, and the Settings dialog's contents |
-| `keys.py` | Hotkeys, the window's shortcuts, and playing on the keyboard |
+| `keys.py` | Every action's keys (hotkeys and window shortcuts, which the player can change) and playing on the keyboard |
 | `overlay.py` | Overlay mode's window: on top, opacity, see-through, fitting, putting it back |
 | `guidance.py` | What the card, hint line and status bar say |
 | `help_content.py` | What the Help dialog says |

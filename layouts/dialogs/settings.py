@@ -23,7 +23,8 @@ class SettingsPopup(Dialog):
     COLUMN_WIDTH = dp(400)
     LABEL_WIDTH = dp(170)
 
-    def __init__(self, columns, **kwargs):
+    def __init__(self, columns, extra_buttons=(), **kwargs):
+        """extra_buttons: (text, callback) for buttons beside Done, each closing the dialog first."""
         rows_height = max(sum(dp(30) + self.ROW * len(rows) for _, rows in column) for column in columns)
         super().__init__(size_hint=(None, None),
                          size=(self.COLUMN_WIDTH * len(columns) + dp(32) * len(columns) + dp(8),
@@ -48,6 +49,8 @@ class SettingsPopup(Dialog):
                                  halign="left", valign="middle", size_hint_x=None, width=dp(300),
                                  text_size=(dp(300), dp(34))))
         actions.add_widget(Widget())
+        for text, callback in extra_buttons:
+            actions.add_widget(button(text, lambda callback=callback: (self.dismiss(), callback())))
         actions.add_widget(button("Done", self.dismiss, "primary"))
         panel.add_widget(actions)
         self.add_widget(panel)

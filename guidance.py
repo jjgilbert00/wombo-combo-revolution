@@ -7,6 +7,7 @@ code that does things.
 import time
 
 import theme
+from keys import fill
 from sampler import FPS
 from theme import markup
 
@@ -19,7 +20,7 @@ WELCOME = (
 
 COACH = (
     "[size=20sp][b]Ready when you are[/b][/size]\n\n"
-    "Press [b]Space[/b] (or [b]Start[/b] on your controller). After a second to get ready, press each input "
+    "Press [b]{{toggle_playback}}[/b] (or [b]Start[/b] on your controller). After a second to get ready, press each input "
     "as it reaches the white line.\n\n"
     "{controller}"
 )
@@ -47,14 +48,14 @@ def card(app):
     if not status.length:
         return WELCOME, (("Try the warm-up", app.try_warm_up, True),
                          ("Open a recording...", app.open_track, False),
-                         ("Record your own (F8)", app.toggle_recording, False))
+                         (fill("Record your own ({toggle_recording})"), app.toggle_recording, False))
     if app.coaching and not status.playing:
         if _has_controller(app):
             note = f"Using [b]{app.sampler.reader.name}[/b]: press a button and it shows up under the line."
         else:
             note = (f"{markup('No controller found.', theme.WARNING, bold=True)} Plug one in (it's picked up by "
                     "itself), or play on the keyboard: [b]WASD[/b] to move, [b]U I O[/b] punches, [b]J K L[/b] kicks.")
-        return COACH.format(controller=note), (("Start", app.play, True), ("Not now", app.skip_coaching, False))
+        return fill(COACH.format(controller=note.replace("{", "{{").replace("}", "}}"))), (("Start", app.play, True), ("Not now", app.skip_coaching, False))
     return "", ()
 
 
@@ -62,35 +63,38 @@ def hint(app):
     """One line on what to do next, for where the player is right now."""
     status = app.playalong_controller.status()
     if status.recording:
-        return ("[b]Recording.[/b] Perform the combo, then press [b]F8[/b] (or Stop) to finish. "
-                "F-key hotkeys work while the game has focus.")
+        return fill("[b]Recording.[/b] Perform the combo, then press [b]{toggle_recording}[/b] (or Stop) to finish. "
+                    "Hotkeys work while the game has focus.")
     if not status.length:
         return ""
     demo, lead = status.demo, status.lead
     if demo:
         if lead:
             return (f"[b]Demo of the {demo}[/b] starts in {lead / FPS:.1f}s. Switch to the game: the virtual "
-                    "controller has to be the one playing your character. [b]Space[/b] / [b]F7[/b] stops.")
+                    "controller has to be the one playing your character. "
+                    + fill("[b]{toggle_playback}[/b] / [b]{hot_pause}[/b] stops."))
         return (f"[b]Demo:[/b] the virtual controller is playing the {demo}; the You lane shows what it presses. "
-                "[b]Space[/b] / [b]F7[/b] stops.")
+                + fill("[b]{toggle_playback}[/b] / [b]{hot_pause}[/b] stops."))
     if app.selection:
-        return ("[b]Frames selected.[/b] [b]N[/b] adds a note, [b]K[/b] marks what must be pressed there "
-                "(a key input), right-click for more, [b]Esc[/b] clears.")
+        return fill("[b]Frames selected.[/b] [b]{add_note}[/b] adds a note, [b]{mark_key_input}[/b] marks what "
+                    "must be pressed there (a key input), right-click for more, [b]{clear_selection}[/b] clears.")
     if lead:
         return f"[b]Get ready.[/b] The first input reaches the line in {lead / FPS:.1f}s."
     if status.playing:
         if status.practice:
             keys = "" if _has_controller(app) else f" No controller: {KEYBOARD_HINT}."
-            return ("[b]Practising.[/b] Press each input as it reaches the line. [b]Start[/b] / [b]Space[/b] "
-                    "pauses, [b]Back[/b] / [b]Home[/b] starts over." + keys)
-        return "[b]Reviewing[/b] your attempt against the recording. [b]F4[/b] goes back to practice."
+            return fill("[b]Practising.[/b] Press each input as it reaches the line. [b]Start[/b] / "
+                        "[b]{toggle_playback}[/b] pauses, [b]Back[/b] / [b]{restart_playback}[/b] starts over.") + keys
+        return fill("[b]Reviewing[/b] your attempt against the recording. [b]{toggle_practice}[/b] goes back to "
+                    "practice.")
     if status.attempted:
-        return ("Scroll or drag to look back at your attempt. [b]S[/b] saves it, [b]A[/b] lists all "
-                "attempts, [b]Space[/b] practises again.")
+        return fill("Scroll or drag to look back at your attempt. [b]{save_attempt}[/b] saves it, "
+                    "[b]{open_attempts}[/b] lists all attempts, [b]{toggle_playback}[/b] practises again.")
     if not status.key_inputs:
-        return ("Press [b]Space[/b] (or [b]F6[/b] in game) to practise. Tip: drag in the frame meter to select "
-                "frames and press [b]K[/b] to mark what really matters; only those are scored then.")
-    return ("Press [b]Space[/b] (or [b]F6[/b] in game) to practise. Hit the key inputs (outlined) as they "
+        return fill("Press [b]{toggle_playback}[/b] (or [b]{hot_play}[/b] in game) to practise. Tip: drag in the "
+                    "frame meter to select frames and press [b]{mark_key_input}[/b] to mark what really matters; "
+                    "only those are scored then.")
+    return fill("Press [b]{toggle_playback}[/b] (or [b]{hot_play}[/b] in game) to practise. Hit the key inputs (outlined) as they "
             "reach the line.")
 
 
