@@ -93,7 +93,9 @@ class WomboComboApp(App):
         self.track_path = None  # The current track's .json file, once it's been opened or saved.
         self.virtual_pad = None  # Plugged in the first time a demo plays.
         self.coaching = False  # Showing the "press Space" card until the player first plays.
-        self.keys_down = set()  # Game keys held on the keyboard, for playing without a controller.
+        # Game keys held on the keyboard, for playing without a controller. The sampler thread reads it,
+        # so it's replaced rather than changed in place (a set changing while it's copied raises).
+        self.keys_down = frozenset()
         self.unsaved_take = False  # A new take that hasn't been saved anywhere yet.
         self.unsaved_edits = False  # Notes, key inputs or cleaning not yet saved.
         self.temp_dir = tempfile.mkdtemp(prefix="wombo_")
@@ -169,7 +171,7 @@ class WomboComboApp(App):
         self.select_controller()
         self.sampler.extra = self.keyboard_state
         self.sampler.on_menu = lambda name: Clock.schedule_once(lambda dt: self.on_menu_button(name))
-        Window.bind(on_key_up=self.on_key_up, focus=lambda window, focused: focused or self.keys_down.clear())
+        Window.bind(on_key_up=self.on_key_up, focus=lambda window, focused: focused or self._release_keys())
         self.sampler.start()
         if self.settings.first_run:
             # Straight into something to try: nothing to find, open or set up first.
@@ -214,12 +216,15 @@ class WomboComboApp(App):
     def keyboard_state(self):
         """The keyboard as a controller (called from the sampler thread), in the player's buttons."""
         controller = self.playalong_controller
-        return keys.keyboard_state(set(self.keys_down), controller.get_game()[1], controller.get_button_map())
+        return keys.keyboard_state(self.keys_down, controller.get_game()[1], controller.get_button_map())
+
+    def _release_keys(self):
+        self.keys_down = frozenset()
 
     def on_key_up(self, window, key, scancode):
         name = keys.GAME_KEYS.get(key)
         if name:
-            self.keys_down.discard(name)
+            self.keys_down = self.keys_down - {name}
 
     def on_key_down(self, window, key, scancode, codepoint, modifiers):
         """Shortcuts that only apply while the app window is focused (keys.WINDOW_KEYS), and the game
@@ -229,7 +234,7 @@ class WomboComboApp(App):
         held = [modifier for modifier in modifiers if modifier not in keys.LOCKS]
         name = keys.GAME_KEYS.get(key)
         if name and not held:
-            self.keys_down.add(name)
+            self.keys_down = self.keys_down | {name}
             # The arrows always play. While practising the letters do too; when paused, they're shortcuts.
             if key in keys.ARROW_KEYS or self._playing_by_keyboard():
                 return True
