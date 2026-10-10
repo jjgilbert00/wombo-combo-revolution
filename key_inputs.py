@@ -26,6 +26,8 @@ exact diagonal. The motion is ignored.
 from input_list import LIST_BUTTON_ORDER
 
 HIT, MISS, PENDING = "hit", "miss", "pending"
+EARLY, LATE = "early", "late"  # Grades for a miss that was done just outside the window.
+GRADE_REACH = 12  # How many frames outside a window to look for an early or late input.
 
 
 def normalized(key_input):
@@ -58,6 +60,19 @@ def best_hold(key_input, track):
         else:
             length = 0
     return best
+
+
+def _hold_runs(key_input, track, first, last):
+    """(start, length) of every contiguous hold in track frames first..last."""
+    runs, start = [], None
+    for frame in range(first, last + 2):
+        state = track[frame] if frame <= last else None
+        if state is not None and _held_at(key_input, state):
+            start = frame if start is None else start
+        elif start is not None:
+            runs.append((start, frame - start))
+            start = None
+    return runs
 
 
 def _hold_result(key_input, attempt):
@@ -136,6 +151,71 @@ def result(key_input, attempt, target):
     return PENDING
 
 
+def _nearest(offsets):
+    """The offset closest to the window, preferring early on a tie; None if there are none."""
+    return min(offsets, key=lambda offset: (abs(offset), offset)) if offsets else None
+
+
+def _missed_by(key_input, attempt, target, lo, hi):
+    """How many frames outside the window a missed key input was done: negative for early,
+    positive for late, None if it wasn't done within lo..hi at all."""
+    start, end = key_input["start"], key_input["end"]
+    if key_input["exact"]:
+        # The whole span played exactly, just shifted in time.
+        shifts = [d for d in range(lo - start, hi - end + 1) if d and all(
+            attempt[frame + d] is not None and attempt[frame + d] == target[frame] for frame in range(start, end + 1))]
+        return _nearest(shifts)
+    if key_input["hold"]:
+        # A long enough hold that sits partly outside the window: it started too soon or ended too late.
+        offsets = []
+        for run_start, length in _hold_runs(key_input, attempt, lo, hi):
+            if length >= key_input["hold"]:
+                offsets.append(run_start - start if run_start < start else run_start + length - 1 - end)
+        return _nearest(offsets)
+    early = next((frame - start for frame in range(start - 1, lo - 1, -1)
+                  if satisfied_at(dict(key_input, start=lo), attempt, frame)), None)
+    late = next((frame - end for frame in range(end + 1, hi + 1) if satisfied_at(key_input, attempt, frame)), None)
+    return _nearest([offset for offset in (early, late) if offset is not None])
+
+
+def grade(key_input, attempt, target, lo=None, hi=None):
+    """(grade, offset): HIT/PENDING with offset 0, EARLY or LATE with how many frames outside the
+    window it was done (-3 = three frames early), or MISS. Early and late are looked for in frames
+    lo..hi, by default GRADE_REACH frames either side of the window."""
+    key_input = normalized(key_input)
+    outcome = result(key_input, attempt, target)
+    if outcome != MISS:
+        return outcome, 0
+    lo = max(0, key_input["start"] - GRADE_REACH if lo is None else lo)
+    hi = min(len(attempt) - 1, key_input["end"] + GRADE_REACH if hi is None else hi)
+    offset = _missed_by(key_input, attempt, target, lo, hi)
+    if offset is None:
+        return MISS, 0
+    return (EARLY if offset < 0 else LATE), offset
+
+
+def grade_all(key_inputs, attempt, target):
+    """Grades each key input (sorted by start), looking for early and late inputs only up to the
+    neighbouring key inputs' windows, so an input that belongs to the next one isn't counted as
+    this one done late. Holds are left out of that both ways: other inputs are done during a
+    charge, and a charge started late runs on into the next input."""
+    grades = []
+    for i, key_input in enumerate(key_inputs):
+        key_input = normalized(key_input)
+        lo = key_input["start"] - GRADE_REACH
+        hi = key_input["end"] + GRADE_REACH
+        is_hold = lambda k: k["hold"] and not k["exact"]
+        bounding = [normalized(k) for k in key_inputs]
+        bounding = [] if is_hold(key_input) else [(j, k) for j, k in enumerate(bounding) if j != i and not is_hold(k)]
+        for j, other in bounding:
+            if j < i:
+                lo = max(lo, other["end"] + 1)
+            else:
+                hi = min(hi, other["start"] - 1)
+        grades.append(grade(key_input, attempt, target, lo, hi))
+    return grades
+
+
 def derive(track, start, end):
     """Guesses the key input over track frames start..end, keeping everything the recording shows
     (the editor makes it easy to drop stray parts).
@@ -195,3 +275,51 @@ def describe(key_input):
     # The press direction is usually the motion's last step, so don't repeat it.
     held = "" if direction is None or (motion and motion[-1] == str(direction)) else str(direction)
     return (motion + held + "+".join(key_input["buttons"])) or "any"
+
+
+DEMO_PRESS_FRAMES = 3  # How long a demo holds each press; a 1-frame tap can slip between game polls.
+DEMO_MOTION_STEP_FRAMES = 2  # How long a demo holds each direction of a motion.
+
+
+def demo_track(key_inputs, target):
+    """The recording cleaned down to its key inputs: a track (as long as the target) that does only
+    what's required, for demoing the combo without the stray and over-held inputs.
+
+    Everything else is neutral. Holds are held over the recording's own longest hold in the window
+    (so a charge lasts right up to its release); exact spans are copied frame for frame; presses
+    come on the first frame the recording completed them, held briefly, with any motion laid out
+    just before. Presses go on last, so they add their buttons to a hold underneath.
+    """
+    track = [{"direction": 5, **{button: 0 for button in LIST_BUTTON_ORDER}} for _ in target]
+
+    def put(frame, direction=None, buttons=()):
+        if 0 <= frame < len(track):
+            if direction is not None:
+                track[frame]["direction"] = direction
+            for button in buttons:
+                track[frame][button] = 1
+
+    key_inputs = sorted((normalized(k) for k in key_inputs), key=lambda k: (k["start"], k["end"]))
+    is_hold = lambda k: k["hold"] and not k["exact"]
+    for key_input in filter(is_hold, key_inputs):
+        start, length = best_hold(key_input, target) or (key_input["start"], key_input["hold"])
+        for frame in range(start, start + max(length, key_input["hold"])):
+            put(frame, key_input["direction"], key_input["buttons"])
+    for key_input in (k for k in key_inputs if k["exact"]):
+        for frame in range(key_input["start"], min(key_input["end"], len(target) - 1) + 1):
+            track[frame] = dict(target[frame])
+    for key_input in (k for k in key_inputs if not is_hold(k) and not k["exact"]):
+        frame = next((f for f in range(key_input["start"], min(key_input["end"], len(target) - 1) + 1)
+                      if satisfied_at(key_input, target, f)), key_input["start"])
+        motion = list(key_input["motion"])
+        direction = key_input["direction"] if key_input["direction"] is not None else (motion[-1] if motion else None)
+        if motion and motion[-1] == direction:
+            motion.pop()  # The motion's last direction is the one held on the press.
+        step_frame = frame - len(motion) * DEMO_MOTION_STEP_FRAMES
+        for step in motion:
+            for _ in range(DEMO_MOTION_STEP_FRAMES):
+                put(step_frame, step)
+                step_frame += 1
+        for offset in range(DEMO_PRESS_FRAMES):
+            put(frame + offset, direction, key_input["buttons"])
+    return track
