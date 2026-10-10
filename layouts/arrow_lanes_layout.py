@@ -4,150 +4,138 @@ of arrows instead of a spiral, like a dance game.
 Each lane holds one or two directions (numpad notation). By default there are five, left to right:
 left, down-left/up-left, down/up, down-right/up-right, right. An arrow falls in its lane pointing its
 own way, so an up arrow comes down the down/up lane pointing up. At the bottom of each lane is its
-receptor: the outline of every arrow the lane holds, merged into one frame (a double-headed arrow
-for down/up), which lights up with the arrow the player is holding.
+receptor: the outline of every arrow the lane holds, centred on each other, which lights up with
+the arrow the player is holding. In a shared lane one arrow is drawn in front, crisp, over a faint
+one behind: the down one (the lane's first) unless an up one is at the receptor or the next to
+arrive. A held input stays in front until its last frame has passed.
 """
-from kivy.core.image import Image as CoreImage
-from kivy.graphics import Color, InstructionGroup, Rectangle
-from kivy.graphics.texture import Texture
+from kivy.graphics import Color, Rectangle
 from kivy.resources import resource_find
 from kivy.uix.relativelayout import RelativeLayout
+from kivy.metrics import dp
 from kivy.uix.widget import Widget
-from PIL import Image, ImageDraw, ImageFilter
+from PIL import Image, ImageChops, ImageFilter
 
 from images import get_standard_button_icon
-from input_list import draw_direction_glyph
-from widgets import BUTTON_PROMPT_OPACITY, BUTTON_RELEASED_OPACITY, OFFSCREEN, ButtonColumn
+from layouts.feedback import FeedbackDisplay
+import theme
+from glyphs import draw_direction_glyph
+from layouts.drawing import OFFSCREEN
+from layouts.falling import ButtonColumn, FallingRuns, HOLD_TAIL_COLOR, Knockout, Prompt, runs_of
 
 DEFAULT_LANES = ((4,), (1, 7), (2, 8), (3, 9), (6,))  # Left to right.
 GLYPH_PIXELS = 128
 
 
-def _texture(image):
-    texture = Texture.create(size=image.size, colorfmt="rgba")
-    texture.blit_buffer(image.transpose(Image.FLIP_TOP_BOTTOM).tobytes(), colorfmt="rgba", bufferfmt="ubyte")
-    return texture
+def draw_arrow(direction, size, font_path):
+    """A lane's arrow: the input list's glyph, white with a dark outline, centred in the square.
+    Arrows sharing a lane overlap at their centres."""
+    return draw_direction_glyph(direction, size, font_path)
 
 
-VECTORS = {1: (-1, -1), 2: (0, -1), 3: (1, -1), 4: (-1, 0), 6: (1, 0), 7: (-1, 1), 8: (0, 1), 9: (1, 1)}
+BACK_ARROW_STRENGTH = 0.3  # How faint the arrow behind is in a shared lane's receptor.
+RECEPTOR_OPACITY = 0.55
+SHARED_RECEPTOR_OPACITY = 0.75  # Brighter, so the arrow in front stands out from the one behind.
 
 
-def _half_arrow_mask(direction, size):
-    """An arrow from the middle of the square out toward direction, as a mask: a thick shaft with a
-    round joint at the middle and a triangular head at the tip. Two of these share the joint, so
-    together they read as one shape (a double-headed arrow for down and up)."""
-    scale = 4
-    s = size * scale
-    mask = Image.new("L", (s, s), 0)
-    draw = ImageDraw.Draw(mask)
-    dx, dy = VECTORS[direction]
-    length = (dx * dx + dy * dy) ** 0.5
-    ux, uy = dx / length, -dy / length  # Image y runs down.
-    px, py = -uy, ux  # Perpendicular.
-    c = s / 2
-    reach = s * (0.44 if dx and dy else 0.46)  # Diagonals reach toward the corners a little less.
-    tip = (c + ux * reach, c + uy * reach)
-    base = (c + ux * reach * 0.52, c + uy * reach * 0.52)
-    head, shaft = s * 0.19, s * 0.085
-    draw.polygon([(c + px * shaft, c + py * shaft), (base[0] + px * shaft, base[1] + py * shaft),
-                  (base[0] - px * shaft, base[1] - py * shaft), (c - px * shaft, c - py * shaft)], fill=255)
-    draw.polygon([tip, (base[0] + px * head, base[1] + py * head), (base[0] - px * head, base[1] - py * head)],
-                 fill=255)
-    draw.ellipse([c - shaft, c - shaft, c + shaft, c + shaft], fill=255)  # The joint.
-    return mask.resize((size, size), Image.LANCZOS)
+def _shape(direction, size, font_path):
+    """An arrow's whole shape, outline included, as a mask."""
+    return draw_arrow(direction, size, font_path).getchannel("A").point(lambda value: 255 if value > 96 else 0)
 
 
-def arrow_mask(directions, direction, size, font_path):
-    """The shape an arrow takes in a lane: the whole arrow if the lane has one direction, or the half
-    from the middle out if it shares the lane."""
-    if len(directions) == 1:
-        return draw_direction_glyph(direction, size, font_path).getchannel("A")
-    return _half_arrow_mask(direction, size)
+def _outline(shape, size):
+    """The edge of a shape, as a mask."""
+    return ImageChops.subtract(shape, shape.filter(ImageFilter.MinFilter(max(3, size // 28) * 2 + 1)))
 
 
-def draw_arrow(directions, direction, size, font_path):
-    """A lane's arrow for direction: white with a dark outline, like the input list's glyphs."""
-    if len(directions) == 1:
-        return draw_direction_glyph(direction, size, font_path)
-    mask = arrow_mask(directions, direction, size, font_path).point(lambda v: 255 if v > 96 else 0)
-    border = mask.filter(ImageFilter.MaxFilter(max(3, size // 32) * 2 + 1))
-    image = Image.new("RGBA", (size, size), (30, 30, 34, 0))
-    image.putalpha(border)
-    image.paste((245, 245, 245, 255), mask=mask)
-    return image
-
-
-def draw_receptor(directions, size, font_path):
-    """The outline of every arrow the lane holds, merged into one frame, as an RGBA image."""
-    shape = Image.new("L", (size, size), 0)
+def draw_receptor(directions, size, font_path, front=None):
+    """A lane's receptor as an RGBA image: the outline of its arrow, or with two, both centred on
+    each other with front drawn over the other: front's lines at full strength, the one behind
+    faint and hidden where it passes under front."""
+    front = front or directions[0]
+    front_shape = _shape(front, size, font_path)
+    edge = _outline(front_shape, size)
+    cover = front_shape.filter(ImageFilter.MaxFilter(3))  # A hair wider, for a clean gap.
     for direction in directions:
-        shape = Image.composite(Image.new("L", (size, size), 255), shape,
-                                arrow_mask(directions, direction, size, font_path))
-    shape = shape.point(lambda value: 255 if value > 96 else 0)
-    inside = shape.filter(ImageFilter.MinFilter(max(3, size // 28) * 2 + 1))
-    edge = Image.new("L", (size, size), 0)
-    edge.paste(shape, mask=Image.eval(inside, lambda v: 255 - v))
+        if direction != front:
+            back = _outline(_shape(direction, size, font_path), size)
+            back = ImageChops.subtract(back, cover).point(lambda v: round(v * BACK_ARROW_STRENGTH))
+            edge = ImageChops.lighter(edge, back)
     frame = Image.new("RGBA", (size, size), (235, 235, 240, 0))
     frame.putalpha(edge)
     return frame
 
 
 class ArrowLane(Widget):
-    """One lane: its receptor at the bottom and upcoming arrows falling toward it."""
+    """One lane: its receptor at the bottom and upcoming arrows falling toward it, a held direction
+    as one arrow with a tail as long as it's held."""
 
-    def __init__(self, directions, arrows, receptor, **kwargs):
+    def __init__(self, directions, arrows, receptors, **kwargs):
+        """arrows: direction -> Prompt; receptors: direction in front -> Prompt. The first direction
+        is in front unless another is the next one coming (so down/up shows down until an up is
+        next)."""
         super().__init__(**kwargs)
         self.directions = directions
-        self.arrows = arrows  # Direction -> arrow texture.
-        self.prompts = []
-        self.visible_prompts = 0
+        self.arrows = arrows
+        self.receptors = receptors
+        self.knockout = knockout = Knockout()
+        self.falling = FallingRuns(knockout)
+        # Tails first, then everything else over them with the tails knocked out underneath.
+        self.canvas.add(Color(*HOLD_TAIL_COLOR))
+        self.canvas.add(self.falling.tail_group)
+        self.receptor_knock = knockout.add(receptors[directions[0]].silhouette)
+        self.held_knock = knockout.add(None)
+        self.canvas.add(knockout.group)
         with self.canvas:
-            Color(1, 1, 1, 0.55)
-            self.receptor = Rectangle(texture=receptor)
+            Color(1, 1, 1, RECEPTOR_OPACITY if len(directions) == 1 else SHARED_RECEPTOR_OPACITY)
+            self.receptor = Rectangle(texture=receptors[directions[0]].texture)
             self.held_color = Color(1, 1, 1, 0)
             self.held = Rectangle()
-            Color(1, 1, 1, BUTTON_PROMPT_OPACITY)
-            self.prompt_group = InstructionGroup()
+        self.canvas.add(Color(1, 1, 1, 1))  # Falling arrows are solid.
+        self.canvas.add(self.falling.head_group)
         self.bind(pos=self._layout, size=self._layout)
+
+    def set_background(self, rgb):
+        self.knockout.set_background(rgb)
 
     def _icon(self):
         return self.width, self.width
 
     def _layout(self, *args):
-        self.receptor.pos = self.held.pos = self.pos
-        self.receptor.size = self.held.size = self._icon()
+        self.receptor.pos = self.held.pos = self.receptor_knock.pos = self.pos
+        self.receptor.size = self.held.size = self.receptor_knock.size = self._icon()
 
-    def update_state(self, direction, input_frames):
-        """direction is the one held now; input_frames the upcoming frames' directions."""
+    def update_state(self, direction, input_frames, offset=0.0):
+        """direction is the one held now; input_frames the upcoming frames' directions; offset how
+        far through the current frame the clock is."""
         if direction in self.directions:
-            self.held.texture = self.arrows[direction]
-            self.held_color.a = 1
+            self.held.texture = self.arrows[direction].texture
+            self.held_knock.texture = self.arrows[direction].silhouette
+            # Green while it's the direction the recording wants now: holding it right.
+            on_time = bool(input_frames) and input_frames[0] == direction
+            self.held_color.rgba = (*theme.HIT, 1) if on_time else (1, 1, 1, 1)
+            self.held_knock.pos, self.held_knock.size = self.pos, self._icon()
         else:
             self.held_color.a = 0
+            self.held_knock.pos = OFFSCREEN
         icon = self._icon()
-        travel = self.height - icon[1]
-        count = len(input_frames)
-        shown = 0
-        for i, frame_direction in enumerate(input_frames):
-            if frame_direction not in self.directions:
-                continue
-            if shown == len(self.prompts):
-                prompt = Rectangle()
-                self.prompts.append(prompt)
-                self.prompt_group.add(prompt)
-            prompt = self.prompts[shown]
-            prompt.texture = self.arrows[frame_direction]
-            prompt.pos = (self.x, self.y + travel * i / count)
-            prompt.size = icon
-            shown += 1
-        for prompt in self.prompts[shown:self.visible_prompts]:
-            prompt.pos = OFFSCREEN
-        self.visible_prompts = shown
+        mine = [d if d in self.directions else None for d in input_frames]
+        runs = runs_of(mine)
+        # The arrow in front is the one at the receptor or the next to arrive: one being held (a down
+        # charge, say) stays in front until its last frame has passed. Else the one the player is
+        # holding, else the lane's first.
+        front = next((d for _, _, d in runs),
+                     direction if direction in self.directions else self.directions[0])
+        self.receptor.texture = self.receptors[front].texture
+        self.receptor_knock.texture = self.receptors[front].silhouette
+        self.falling.draw(runs, self.x, self.y, icon, self.height - icon[1], max(1, len(input_frames)),
+                          offset, self.arrows.get)
 
 
-class ArrowLanesLayout(RelativeLayout):
+class ArrowLanesLayout(FeedbackDisplay, RelativeLayout):
     """Direction lanes on the left half, the button columns on the right, all falling toward the
-    bottom. Same update_state as the ring display, so it's driven the same way."""
+    bottom. Same update_state as the ring display, so it's driven the same way, and the same practice
+    feedback as every display (verdicts pop up just above the receptors)."""
 
     button_names = ["A", "X", "B", "Y", "RT", "RB", "LT", "LB"]
 
@@ -157,22 +145,32 @@ class ArrowLanesLayout(RelativeLayout):
         self.lanes = []
         width = 0.44 / len(lanes)
         for i, directions in enumerate(lanes):
-            arrows = {direction: _texture(draw_arrow(directions, direction, GLYPH_PIXELS, font))
-                      for direction in directions}
-            lane = ArrowLane(directions, arrows, _texture(draw_receptor(directions, GLYPH_PIXELS, font)),
+            arrows = {direction: Prompt(draw_arrow(direction, GLYPH_PIXELS, font)) for direction in directions}
+            receptors = {front: Prompt(draw_receptor(directions, GLYPH_PIXELS, font, front)) for front in directions}
+            lane = ArrowLane(directions, arrows, receptors,
                              size_hint=(width * 0.82, 1), pos_hint={"x": 0.03 + i * width, "y": 0})
             self.lanes.append(lane)
             self.add_widget(lane)
         self.button_columns = {}
         for i, name in enumerate(self.button_names):
             column = ButtonColumn(button_source=get_standard_button_icon(controller_type, button_icon_style, name),
-                                  size_hint=(0.07, 1), pos_hint={"x": 0.5 + i * (0.48 / 8), "y": 0})
+                                  size_hint=(0.052, 1), pos_hint={"x": 0.5 + i * (0.48 / 8), "y": 0})
             self.button_columns[name] = column
             self.add_widget(column)
+        self._init_feedback()
 
-    def update_state(self, controller_state, input_track):
+    def set_background(self, rgb):
+        """The window's background colour, which hides hold lines under what's drawn over them."""
+        for part in self.lanes + list(self.button_columns.values()):
+            part.set_background(rgb)
+
+    def verdict_spot(self):
+        receptor_top = self.lanes[0].width if self.lanes else 0
+        return self.width * 0.04, receptor_top + dp(150)
+
+    def update_state(self, controller_state, input_track, offset=0.0):
         directions = [frame["direction"] for frame in input_track]
         for lane in self.lanes:
-            lane.update_state(controller_state["direction"], directions)
+            lane.update_state(controller_state["direction"], directions, offset)
         for name, column in self.button_columns.items():
-            column.update_state(controller_state[name], [frame[name] for frame in input_track])
+            column.update_state(controller_state[name], [frame[name] for frame in input_track], offset)
