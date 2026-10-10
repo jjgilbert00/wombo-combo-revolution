@@ -53,7 +53,6 @@ from playalong import PlayalongController
 from sampler import FPS, InputSampler
 from screen_capture import ScreenRecorder, list_displays, prepare_capture
 from virtual_pad import VirtualPad, VirtualPadError
-from layouts.falling import set_background
 import theme
 import theme
 from theme import markup
@@ -936,10 +935,10 @@ class WomboComboApp(App):
             self.root_layout.remove_widget(self.menu_bar)
             self.root_layout.remove_widget(self.status_bar)
 
-    @staticmethod
-    def set_background(rgb):
-        """The window's background colour changed: what knocks out hold lines follows it."""
-        set_background(rgb)
+    def set_background(self, rgb):
+        """The window's background colour changed: the displays' hold lines are hidden in it."""
+        for display in (self.arrow_lanes_layout, self.ring_layout):
+            display.set_background(rgb)
 
     def show_display(self, mode):
         mode = mode if mode in self.displays else "list"
