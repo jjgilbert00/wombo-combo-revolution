@@ -60,6 +60,15 @@ def steps(h):
             h.app.settings.lookahead == 2.0 and h.app.input_list_layout.lookahead == 2.0,
             (h.app.settings.lookahead, h.app.input_list_layout.lookahead))
     p.dismiss(); yield 0.2
+    # Hovering over a lane's name shows what the lane is.
+    from kivy.core.window import Window
+    from layouts.ui_kit import Tooltip
+    hit = next(hit for hit in h.app.input_list_layout._label_hits if hit[4].startswith("Frame meter"))
+    x, y = h.app.input_list_layout.to_window(hit[0] + 10, hit[1] + hit[3] / 2)
+    Window.mouse_pos = (x, y); yield 0.8
+    h.check("hovering over a lane name shows its tooltip", Tooltip.get().parent is not None and "Frame meter" in
+            Tooltip.get().text, Tooltip.get().text[:40])
+    Window.mouse_pos = (5, 5); yield 0.2
     h.app.show_help(); yield 0.3
     h.check("F1 opens help", popup(h, "HelpPopup") is not None)
     popup(h, "HelpPopup").dismiss(); yield 0.2

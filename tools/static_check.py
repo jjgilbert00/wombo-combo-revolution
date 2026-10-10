@@ -1,7 +1,8 @@
 """Static checks over the app's own modules, quick enough to run before anything else:
 
-- every `from module import name` from the app's modules finds that name (catches a move that
-  missed an import);
+- every import, at the top of a module or inside a function, finds its module, and every
+  `from module import name` from the app's modules finds that name (catches a move that missed an
+  import). Imports inside a `try` that catches ImportError are optional, and not checked;
 - no imported name goes unused;
 - no name is used that's neither defined nor imported anywhere in its module (roughly: it doesn't
   follow scopes, so it catches typos and missed imports, not every shadowing);
@@ -13,6 +14,7 @@ usage: python tools/static_check.py [repository dir]. The exit code is the numbe
 import ast
 import builtins
 import glob
+import importlib.util
 import os
 import sys
 
@@ -51,12 +53,46 @@ def top_level_names(path):
     return names
 
 
+OPTIONAL_ERRORS = {"ImportError", "ModuleNotFoundError", "Exception"}
+
+
+def optional_imports(tree):
+    """Import nodes inside a try that catches a failed import: deliberately optional."""
+    optional = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Try):
+            caught = set()
+            for handler in node.handlers:
+                types = handler.type.elts if isinstance(handler.type, ast.Tuple) else [handler.type]
+                caught |= {getattr(t, "id", None) for t in types if t is not None} | ({"Exception"} if handler.type is None else set())
+            if caught & OPTIONAL_ERRORS:
+                for inner in node.body:
+                    optional |= {id(n) for n in ast.walk(inner) if isinstance(n, (ast.Import, ast.ImportFrom))}
+    return optional
+
+
+def module_exists(module):
+    if module_path(module):
+        return True
+    try:
+        return importlib.util.find_spec(module) is not None
+    except (ImportError, ValueError):
+        return False
+
+
 problems = 0
 for path in files:
     src = open(path, encoding="utf-8").read()
     tree = ast.parse(src)
     imported = {}
+    optional = optional_imports(tree)
     for node in ast.walk(tree):
+        if isinstance(node, (ast.Import, ast.ImportFrom)) and id(node) not in optional and not getattr(node, "level", 0):
+            modules = [node.module] if isinstance(node, ast.ImportFrom) else [a.name for a in node.names]
+            for module in modules:
+                if module and not module_exists(module):
+                    print(f"{path}:{node.lineno}: no module named {module}")
+                    problems += 1
         if isinstance(node, ast.ImportFrom) and node.module and module_path(node.module):
             target = top_level_names(module_path(node.module))
             for alias in node.names:

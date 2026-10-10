@@ -17,6 +17,7 @@ from games import GAMES, draw_action_icon
 from key_inputs import EARLY, LATE, PENDING, describe
 from layouts.drawing import texture_of
 from layouts.feedback import Feedback
+from layouts.ui_kit import Tooltip
 from sampler import FPS
 import theme
 
@@ -590,7 +591,6 @@ class InputListLayout(StencilView):
 
     def _on_mouse_pos(self, window, pos):
         """The full name of a gutter label under the mouse, as a tooltip (long names are cut short)."""
-        from layouts.menu_layout import Tooltip
         if not self.get_root_window():
             return
         x, y = self.to_widget(*pos)

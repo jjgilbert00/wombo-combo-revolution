@@ -22,6 +22,7 @@ Config.set("input", "mouse", "mouse,multitouch_on_demand")  # No red dots on rig
 Config.set("graphics", "vsync", "0")
 
 from kivy.app import App
+from kivy.base import ExceptionHandler, ExceptionManager
 from kivy.clock import Clock
 from kivy.core.window import Window
 from kivy.uix.boxlayout import BoxLayout
@@ -60,6 +61,18 @@ from video_writer import nvenc_available, resolve_encoder, video_size, write_cap
 from layouts.export_frames import DisplayFrames
 
 logger = logging.getLogger(__name__)
+
+
+class KeepRunning(ExceptionHandler):
+    """An error in one event handler is logged and reported, and the app carries on: left to Kivy,
+    it would stop the event loop, leaving the window up but frozen."""
+
+    def handle_exception(self, inst):
+        logger.exception("Unhandled error in an event handler")
+        app = App.get_running_app()
+        if app and hasattr(app, "flash"):
+            app.flash(f"Something went wrong ({type(inst).__name__}: {inst}); it's in the log", "error", 10)
+        return ExceptionManager.PASS
 
 
 def write_tick(path):
@@ -121,13 +134,22 @@ class WomboComboApp(App):
         return False  # Disable Kivy's built-in F1 settings panel; F1 shows hotkeys instead.
 
     def build(self):
+        ExceptionManager.add_handler(KeepRunning())
         self.settings = Settings(self.config)
         keys.check_hotkeys(self)
         self.icon = os.path.join(os.path.dirname(os.path.abspath(__file__)), "images", "app_icon.png")
         Window.clearcolor = (*theme.BACKGROUND, 0.5)
-        # Up to 1920x1080, but never bigger than the screen (with room for the taskbar).
-        screen_width, screen_height = win32api.GetSystemMetrics(0), win32api.GetSystemMetrics(1)
-        Window.size = (min(1920, int(screen_width * 0.9)), min(1080, int(screen_height * 0.85)))
+        # Up to 1920x1080, centred in the screen's work area (clear of the taskbar). Windows places a
+        # new window wherever it likes, which can leave the bottom, and the status bar, behind the
+        # taskbar.
+        work_left, work_top, work_right, work_bottom = win32api.GetMonitorInfo(
+            win32api.MonitorFromPoint((0, 0), 1))["Work"]  # 1: the primary monitor.
+        title_bar = 40  # Window.top is the inside of the window; leave room for its title bar.
+        width = min(1920, int((work_right - work_left) * 0.9))
+        height = min(1080, int((work_bottom - work_top - title_bar) * 0.95))
+        Window.size = (width, height)
+        Window.left = work_left + (work_right - work_left - width) // 2
+        Window.top = work_top + title_bar + (work_bottom - work_top - title_bar - height) // 2
         Window.borderless = False
         Window.fullscreen = False
 
