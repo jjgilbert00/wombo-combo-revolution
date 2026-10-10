@@ -19,6 +19,9 @@ DEFAULTS = {
     "opacity": (0.5, "How opaque overlay mode is."),
     "see_through": (True, "Overlay mode: only what's drawn covers the game, not the background."),
     "hit_sound": (False, "A tick for each key input hit while practising."),
+    "show_verdicts": (True, "Grades (HIT, EARLY -2...) pop up as each key input is judged."),
+    "show_score": (True, "A banner with the score after each run."),
+    "show_hints": (True, "The status bar says what to do next."),
     "loop": (True, "Playback repeats."),
     "practice": (True, "Playing scores the player (off: it replays their attempt)."),
     "lookahead": (1.5, "Seconds of input shown ahead of the line: the scroll speed."),
@@ -112,8 +115,14 @@ def dialog_columns(app, readers, displays, games):
         row("Game for new recordings", "pick", [("None", "")] + [(game["name"], key) for key, game in games.items()],
             "default_game"),
     ]
-    sound_and_demo = [
+    apply_feedback = app.apply_feedback_settings
+    feedback = [
+        row("Grade popups", "switch", None, "show_verdicts", apply_feedback),
+        row("Score after each run", "switch", None, "show_score", apply_feedback),
         row("Hit sound", "switch", None, "hit_sound"),
+        row("Hints in the status bar", "switch", None, "show_hints"),
+    ]
+    demo = [
         row("Demo countdown", "step", [("1 s", "60"), ("2 s", "120"), ("3 s", "180"), ("5 s", "300")],
             "demo_countdown"),
     ]
@@ -125,5 +134,5 @@ def dialog_columns(app, readers, displays, games):
         row("Overlay input delay", "step", [(f"{n} frames", str(n)) for n in range(13)], "overlay_delay"),
         row("Export overlay on save", "switch", None, "export_overlay_on_save"),
     ]
-    return [[("Practice", practice), ("Controller and game", controller), ("Sound and demo", sound_and_demo)],
-            [("Recording and video", recording)]]
+    return [[("Practice", practice), ("Feedback", feedback), ("Controller and game", controller)],
+            [("Recording and video", recording), ("Demo", demo)]]

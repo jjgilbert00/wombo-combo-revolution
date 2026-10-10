@@ -184,6 +184,7 @@ class WomboComboApp(App):
         self.set_game(self.default_game(), None, mark_edited=False)
         self.set_actions_visible(self.settings.show_actions)
         self.set_up_next_visible(self.settings.show_next)
+        self.apply_feedback_settings()
         self.menu_bar.set_see_through(self.settings.see_through)
         self.set_lanes_shown(set(filter(None, self.settings.lanes.split(","))))
         self.menu_bar.set_recent(self.recent_recordings())
@@ -348,7 +349,8 @@ class WomboComboApp(App):
                              demoing=bool(controller.demo_kind()))
         card, buttons = guidance.card(self)
         # Over the game, the overlay shows the displays only; the hints are for the app window.
-        hint = "" if self.overlay.active or card else guidance.hint(self)  # The card says it all when shown.
+        # The card says it all when shown.
+        hint = "" if self.overlay.active or card or not self.settings.show_hints else guidance.hint(self)
         self.card_layer.set_card(card, buttons)
         self.status_bar.set(hint, guidance.status_text(self))
         for display in self.displays.values():
@@ -1061,6 +1063,12 @@ class WomboComboApp(App):
                          {key: list(game["actions"]) for key, game in GAMES.items()},
                          {key: game["default_layout"] for key, game in GAMES.items()}, used,
                          lambda game, layout: self.set_game(game, layout)).open()
+
+    def apply_feedback_settings(self):
+        """The grade popups and the score banner, on or off in every display."""
+        for display in self.displays.values():
+            display.feedback.show_verdicts = self.settings.show_verdicts
+            display.feedback.show_score = self.settings.show_score
 
     def set_notes_visible(self, visible):
         self.input_list_layout.show_notes = visible

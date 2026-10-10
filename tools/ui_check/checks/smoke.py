@@ -59,6 +59,18 @@ def steps(h):
     h.check("a setting changed there is saved and applied",
             h.app.settings.lookahead == 2.0 and h.app.input_list_layout.lookahead == 2.0,
             (h.app.settings.lookahead, h.app.input_list_layout.lookahead))
+    # The grade popups can be turned off there, in every display.
+    row = next(w for w in p.walk() if any(getattr(c, "text", "") == "Grade popups" for c in w.children))
+    switch = next(w for w in row.walk() if type(w).__name__ == "OnOffSwitch")
+    switch.active = False; yield 0.1
+    feedback = [display.feedback for display in h.app.displays.values()]
+    feedback[0].draw([("hit", 0, "5LP", 0.1)], None)
+    h.check("Grade popups off hides the grades in every display",
+            not h.app.settings.show_verdicts and not any(f.show_verdicts for f in feedback)
+            and all(color.a == 0 for color, _ in feedback[0].verdicts))
+    switch.active = True; yield 0.1
+    feedback[0].draw([("hit", 0, "5LP", 0.1)], None)
+    h.check("and on shows them again", h.app.settings.show_verdicts and feedback[0].verdicts[0][0].a > 0)
     p.dismiss(); yield 0.2
     # Hovering over a lane's name shows what the lane is.
     from kivy.core.window import Window

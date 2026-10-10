@@ -56,6 +56,8 @@ class Feedback:
         self.verdicts = []  # (Color, Rectangle), pooled.
         self._verdicts_at = (0, 0)
         self._banner_at = (0, 0, False)  # x, top, centred on x
+        self.show_verdicts = True  # Settings: the grade popups, and the score after each pass.
+        self.show_score = True
 
     # ---- Layout ------------------------------------------------------------------------------
 
@@ -68,8 +70,8 @@ class Feedback:
     # ---- Verdicts and the pass banner --------------------------------------------------------
 
     def draw(self, judgements, last_pass):
-        self._draw_verdicts(judgements)
-        self._show_banner(last_pass)
+        self._draw_verdicts(judgements if self.show_verdicts else [])
+        self._show_banner(last_pass if self.show_score else None)
 
     def _draw_verdicts(self, judgements):
         """Verdicts popping up as each key input is settled, newest on top, rising as they fade."""
