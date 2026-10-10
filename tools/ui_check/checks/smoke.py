@@ -40,9 +40,18 @@ def steps(h):
     h.check("S saves the attempt", len(c.get_saved_attempts()) == 1 and p is not None)
     p.dismiss(); yield 0.2
     h.app.toggle_overlay(); yield 0.5
-    h.check("F2 enters overlay mode", h.app.topmost)
+    h.check("F2 enters overlay mode", h.app.overlay.active)
     h.app.toggle_overlay(); yield 0.5
-    h.check("F2 again leaves it", not h.app.topmost)
+    h.check("F2 again leaves it", not h.app.overlay.active)
+    h.app.open_settings_popup(); yield 0.4
+    p = popup(h, "SettingsPopup")
+    h.check("Settings opens", p is not None)
+    stepper = next(w for w in p.walk() if type(w).__name__ == "_Stepper" and "ahead" in w.label.text)
+    stepper._step(1); yield 0.1
+    h.check("a setting changed there is saved and applied",
+            h.app.settings.lookahead == 2.0 and h.app.input_list_layout.lookahead == 2.0,
+            (h.app.settings.lookahead, h.app.input_list_layout.lookahead))
+    p.dismiss(); yield 0.2
     h.app.show_help(); yield 0.3
     h.check("F1 opens help", popup(h, "HelpPopup") is not None)
     popup(h, "HelpPopup").dismiss(); yield 0.2

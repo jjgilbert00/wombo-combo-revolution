@@ -493,7 +493,7 @@ class InputListLayout(StencilView):
         self.scale = 1.0
         self.freeze_scale = False  # Set by the app in overlay mode, where the window fits the list instead.
         self.minimal = False  # A see-through overlay: no lane names or lane backgrounds, just the inputs.
-        self.bind(size=self._rescale)
+        self.bind(size=self.rescale)
         # The verdicts and pass banner, shared with the other displays.
         self.feedback = Feedback(self)
         self.banner = self.feedback.banner
@@ -633,7 +633,7 @@ class InputListLayout(StencilView):
             lowest -= dp(14) + BRACE_HEIGHT + min(note_rows, TOAST_ROWS) * self.toast_row_height
         return self.top - lowest + dp(8)
 
-    def _rescale(self, *args):
+    def rescale(self, *args):
         if self.freeze_scale or not self.height:
             return
         scale = max(1.0, min(MAX_SCALE, self.height / SCALE_HEIGHT))
