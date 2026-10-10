@@ -63,6 +63,31 @@ class Practice(unittest.TestCase):
         self.assertEqual([j[2] for j in self.controller.get_judgements()], [HIT])
 
 
+class EditingKeyInputs(unittest.TestCase):
+    def setUp(self):
+        # Two key inputs: Y at 9-12 (hit) and B at 15-18 (missed).
+        self.target = track((10, 5), (2, 5, "Y"), (4, 5), (2, 5, "B"), (5, 5))
+        self.controller = PlayalongController()
+        self.controller.set_lead_in(0)
+        self.controller.set_input_track(self.target, key_inputs=[key_input(9, 12, buttons=["Y"]),
+                                                                  key_input(15, 18, buttons=["B"])])
+        player(self.controller, track((10, 5), (2, 5, "Y"), (11, 5)))
+
+    def run_grades(self):
+        row = self.controller.list_snapshot(len(self.target), len(self.target)).history[0]
+        return [(start, grade) for start, _, grade, _ in row.grades]
+
+    def test_a_runs_grades_follow_a_deleted_key_input(self):
+        self.assertEqual(self.run_grades(), [(9, HIT), (15, MISS)])
+        self.controller.remove_key_input(0)
+        self.assertEqual(self.run_grades(), [(15, MISS)])  # Not the deleted one's HIT, shifted along.
+
+    def test_verdicts_dont_outlive_the_key_inputs_they_name(self):
+        self.assertTrue(self.controller.get_judgements())
+        self.controller.set_key_input(None, key_input(1, 2, buttons=["X"]))  # Shifts every index.
+        self.assertEqual(self.controller.get_judgements(), [])
+
+
 class ButtonMapping(unittest.TestCase):
     def test_the_player_scores_with_their_own_buttons(self):
         target = track((10, 5), (2, 5, "Y"), (10, 5))

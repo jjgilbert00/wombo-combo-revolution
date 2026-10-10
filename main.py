@@ -56,7 +56,8 @@ from virtual_pad import VirtualPad, VirtualPadError
 import theme
 import theme
 from theme import markup
-from video_writer import nvenc_available, resolve_encoder, write_capture_and_overlay, write_input_video
+from video_writer import nvenc_available, resolve_encoder, video_size, write_capture_and_overlay, write_input_video
+from layouts.export_frames import DisplayFrames
 
 logger = logging.getLogger(__name__)
 
@@ -75,6 +76,7 @@ def write_tick(path):
         out.setframerate(rate)
         out.writeframes(struct.pack(f"<{len(samples)}h", *samples))
 TITLE = "Wombo Combo"
+EXPORT_SIZE = (1600, 900)  # Input videos, in pixels.
 
 
 class WomboComboApp(App):
@@ -91,7 +93,9 @@ class WomboComboApp(App):
         self.track_path = None  # The current track's .json file, once it's been opened or saved.
         self.virtual_pad = None  # Plugged in the first time a demo plays.
         self.coaching = False  # Showing the "press Space" card until the player first plays.
-        self.keys_down = set()  # Game keys held on the keyboard, for playing without a controller.
+        # Game keys held on the keyboard, for playing without a controller. The sampler thread reads it,
+        # so it's replaced rather than changed in place (a set changing while it's copied raises).
+        self.keys_down = frozenset()
         self.unsaved_take = False  # A new take that hasn't been saved anywhere yet.
         self.unsaved_edits = False  # Notes, key inputs or cleaning not yet saved.
         self.temp_dir = tempfile.mkdtemp(prefix="wombo_")
@@ -167,7 +171,7 @@ class WomboComboApp(App):
         self.select_controller()
         self.sampler.extra = self.keyboard_state
         self.sampler.on_menu = lambda name: Clock.schedule_once(lambda dt: self.on_menu_button(name))
-        Window.bind(on_key_up=self.on_key_up, focus=lambda window, focused: focused or self.keys_down.clear())
+        Window.bind(on_key_up=self.on_key_up, focus=lambda window, focused: focused or self._release_keys())
         self.sampler.start()
         if self.settings.first_run:
             # Straight into something to try: nothing to find, open or set up first.
@@ -212,12 +216,15 @@ class WomboComboApp(App):
     def keyboard_state(self):
         """The keyboard as a controller (called from the sampler thread), in the player's buttons."""
         controller = self.playalong_controller
-        return keys.keyboard_state(set(self.keys_down), controller.get_game()[1], controller.get_button_map())
+        return keys.keyboard_state(self.keys_down, controller.get_game()[1], controller.get_button_map())
+
+    def _release_keys(self):
+        self.keys_down = frozenset()
 
     def on_key_up(self, window, key, scancode):
         name = keys.GAME_KEYS.get(key)
         if name:
-            self.keys_down.discard(name)
+            self.keys_down = self.keys_down - {name}
 
     def on_key_down(self, window, key, scancode, codepoint, modifiers):
         """Shortcuts that only apply while the app window is focused (keys.WINDOW_KEYS), and the game
@@ -227,7 +234,7 @@ class WomboComboApp(App):
         held = [modifier for modifier in modifiers if modifier not in keys.LOCKS]
         name = keys.GAME_KEYS.get(key)
         if name and not held:
-            self.keys_down.add(name)
+            self.keys_down = self.keys_down | {name}
             # The arrows always play. While practising the letters do too; when paused, they're shortcuts.
             if key in keys.ARROW_KEYS or self._playing_by_keyboard():
                 return True
@@ -821,8 +828,7 @@ class WomboComboApp(App):
         if self.playalong_controller.is_recording():
             self.stop_recording()
         data = self._track_data()
-        inputs, notes = data["inputs"], data["notes"]
-        if not inputs:
+        if not data["inputs"]:
             self.flash("Nothing to save", "warning")
             return False
         path = file_dialogs.save_file("Save recording", "Recordings (*.mp4)", "*.mp4", "mp4")
@@ -832,6 +838,7 @@ class WomboComboApp(App):
         export_overlay = self.settings.export_overlay_on_save
         self.track_path = base + ".json"  # Later saved attempts go straight into it.
         capture = self.capture_path  # Read now; a new take started before the job runs would reset it.
+        encoder = resolve_encoder(self.settings.encoder)
 
         def save(progress):
             track_file.save(base + ".json", data)
@@ -841,8 +848,7 @@ class WomboComboApp(App):
                 shutil.copyfile(capture, base + ".mp4")
             if export_overlay:
                 self.job_label = "Exporting overlay"
-                write_capture_and_overlay(capture, inputs, base + "_overlay.mp4", notes=notes,
-                                          **self._export_options(progress))
+                self._write_overlay(capture, base + "_overlay.mp4", len(data["inputs"]), encoder, progress)
 
         self.run_job("Saving", save, f"Saved {os.path.basename(base)}")
         self.unsaved_take = self.unsaved_edits = False
@@ -858,38 +864,78 @@ class WomboComboApp(App):
             return
         path = file_dialogs.save_file("Export overlay video", "Videos (*.mp4)", "*.mp4", "mp4")
         if path:
-            inputs = self.playalong_controller.get_input_track()
-            notes = self.playalong_controller.get_notes()
-            capture = self.capture_path
-            self.run_job(
-                "Exporting overlay",
-                lambda progress: write_capture_and_overlay(capture, inputs, path, notes=notes,
-                                                           **self._export_options(progress)),
-                f"Exported {os.path.basename(path)}",
-            )
+            capture, count = self.capture_path, self.playalong_controller.track_length()
+            encoder = resolve_encoder(self.settings.encoder)
+            self.run_job("Exporting overlay", lambda progress: self._write_overlay(capture, path, count, encoder, progress),
+                         f"Exported {os.path.basename(path)}")
 
     def export_input_video(self):
-        inputs = self.playalong_controller.get_input_track()
-        notes = self.playalong_controller.get_notes()
-        key_inputs = self.playalong_controller.get_key_inputs()
-        if not inputs:
+        count = self.playalong_controller.track_length()
+        if not count:
             self.flash("Nothing to export", "warning")
             return
         path = file_dialogs.save_file("Export input video", "Videos (*.mp4)", "*.mp4", "mp4")
         if path:
             encoder = resolve_encoder(self.settings.encoder)
-            self.run_job(
-                "Exporting inputs",
-                lambda progress: write_input_video(inputs, path, encoder=encoder, progress=progress, notes=notes),
-                f"Exported {os.path.basename(path)}",
-            )
 
-    def _export_options(self, progress):
-        return {
-            "delay_frames": self.settings.overlay_delay,
-            "encoder": resolve_encoder(self.settings.encoder),
-            "progress": progress,
-        }
+            def export(progress):
+                frames = self._on_ui(lambda: self._export_frames(EXPORT_SIZE, count, overlay=False))
+                write_input_video(frames.frames(), count, EXPORT_SIZE, path, encoder=encoder, progress=progress)
+
+            self.run_job("Exporting inputs", export, f"Exported {os.path.basename(path)}")
+
+    def _write_overlay(self, capture, path, count, encoder, progress):
+        """On the job thread: the current display drawn over the captured video."""
+        size = video_size(capture)  # Known only once the capture is finished (an earlier job).
+        frames = self._on_ui(lambda: self._export_frames(size, count, overlay=True))
+        write_capture_and_overlay(capture, frames.frames(), count, path, encoder=encoder, progress=progress)
+
+    def _export_frames(self, size, count, overlay):
+        """Frames of the display showing, drawn offscreen for a video (see layouts/export_frames.py),
+        from a copy of the recording: the input list without the player's lanes, or the arrow lanes
+        or ring. An overlay is drawn over a transparent background, delayed by Settings > Overlay
+        input delay to line up with the game."""
+        controller = self.playalong_controller
+        copy = PlayalongController()
+        copy.set_lead_in(0)
+        copy.set_input_track(controller.get_input_track(), notes=controller.get_notes(),
+                             key_inputs=controller.get_key_inputs(), button_map=controller.get_button_map())
+        copy.set_game(*controller.get_game())
+        copy.set_show_actions(controller.is_showing_actions())
+        lookahead = self.input_list_layout.lookahead
+        mode = self.settings.input_display
+        if mode == "lanes" or mode == "ring":
+            display = ArrowLanesLayout() if mode == "lanes" else RingLayout()
+            display.set_background((0, 0, 0) if overlay else theme.BACKGROUND)
+        else:
+            display = InputListLayout()
+            display.lanes_shown = {"meter", "target", "keys"}
+            display.show_notes, display.show_live, display.minimal = self.input_list_layout.show_notes, False, overlay
+            display.textures.buttons.game = copy.get_game()[0]
+            display.set_lookahead(lookahead)
+        background = (0, 0, 0, 0) if overlay else (*theme.BACKGROUND, 1)
+        delay = self.settings.overlay_delay if overlay else 0
+        return DisplayFrames(display, copy, size, count, first=-delay, background=background, lookahead=lookahead)
+
+    @staticmethod
+    def _on_ui(make):
+        """From a job: runs make() on the UI thread (widgets are made there) and returns its result."""
+        done, result = threading.Event(), {}
+
+        def run(dt):
+            try:
+                result["value"] = make()
+            except Exception as e:
+                result["error"] = e
+            finally:
+                done.set()
+
+        Clock.schedule_once(run)
+        if not done.wait(30):
+            raise RuntimeError("the window stopped responding")
+        if "error" in result:
+            raise result["error"]
+        return result["value"]
 
     def run_job(self, label, work, done_message=None):
         """Runs work(progress_callback) on the job thread and reports progress in the status bar."""

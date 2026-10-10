@@ -6,9 +6,13 @@
 python tools/check_all.py
 ```
 
-runs everything: the unit tests, then three UI checks that each open the app for a couple of minutes
+runs everything: the static checks, the unit tests, then four UI checks that each open the app for a couple of minutes
 (leave the mouse and keyboard alone while they run). It ends with "All checks passed." or a list
-of what failed. `--unit` runs just the unit tests, which take about a second.
+of what failed. `--unit` skips the UI checks, which leaves a few seconds' worth.
+
+**Static checks** (`tools/static_check.py`) read the source without running it: imports that
+don't resolve, unused imports, names used but never defined, and widget classes named like one of
+Kivy's built-in style rules (a class called `Switch` would be drawn as Kivy's switch).
 
 **Unit tests** (`tests/`) cover the rules with no UI: grading key inputs (`test_key_inputs.py`),
 runs, matching, button maps and game actions (`test_input_list.py`), and the playalong controller
@@ -27,6 +31,7 @@ from your own. Screenshots and the log land in `tools/ui_check/shots/`.
 | `smoke` | A scored pass, the key input editor, remapping, game actions, saving attempts, overlay mode, help, cycling displays |
 | `displays` | A practice pass in each of the three displays, the score banner, the hit flare |
 | `overlay` | Overlay mode's window size with and without the card, across displays, the see-through background, and putting the window back |
+| `export` | Exporting an input video (from the input list and the arrow lanes) and an overlay over a stand-in capture: a frame per recorded frame, the display drawn, the capture showing through |
 | `docshots` | Not a check: regenerates the user guide's screenshots in `docs/images/` |
 
 Run one with `python tools/ui_check/harness.py tools/ui_check/checks/overlay.py`. To write a new
@@ -49,7 +54,8 @@ one, copy a check: `steps(h)` is a generator that yields how long to wait betwee
 
 **Input and output:** `sampler.py` (the 60 Hz input thread) and `timing.py`, `controller.py`
 (reading pads), `virtual_pad.py` (demos), `screen_capture.py` and `video_writer.py` (recording and
-exporting video), `file_dialogs.py` (Windows' open and save pickers).
+encoding video; exports are drawn by the displays themselves, see `layouts/export_frames.py`),
+`file_dialogs.py` (Windows' open and save pickers).
 
 **The app:**
 
@@ -73,6 +79,7 @@ exporting video), `file_dialogs.py` (Windows' open and save pickers).
 | `ring_layout.py` | The ring display |
 | `falling.py` | Prompts falling down columns, with hold lines (arrow lanes, ring buttons) |
 | `feedback.py` | Verdicts, the pass banner and the getting-started card, for every display |
+| `export_frames.py` | Draws a display offscreen, frame by frame, for exported videos |
 | `menu_bar.py` | The menu bar |
 | `dialogs/` | One module per dialog |
 | `ui_kit.py` | The app's own buttons, toggles, pickers, menus, tooltips, status bar, and `Dialog` |
