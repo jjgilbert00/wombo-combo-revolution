@@ -301,8 +301,7 @@ and a pale bar sits over them.
 
 - To edit or delete a note, click it.
 - **Shift+F3** (View > Hide notes) hides the cards but keeps the bars over their frames, once you know them.
-- Notes are included in exported videos. Each one appears half a second before its frames
-  and stays up for a second after them.
+- Notes are included in videos exported from the input list, as they show in the app.
 
 ## Reviewing your attempts
 
@@ -420,9 +419,12 @@ frame. The window title shows the recording's name.
 
 ## Videos and overlay mode
 
-- **File > Export overlay video...** saves the recording's video with the inputs (and notes) drawn
-  over it. The recording must have video.
+- **File > Export overlay video...** saves the recording's video with the inputs drawn over it.
+  The recording must have video.
 - **File > Export input video...** saves just the inputs as a video.
+- Videos are drawn by the display that's showing, exactly as it looks in the app: the input list
+  (with its key inputs and notes, without your attempt), the arrow lanes or the ring. Switch
+  display (**F3**) before exporting to choose.
 - *Settings > Overlay input delay* shifts the drawn inputs later by a few frames to line up with
   the game's own input lag in the video.
 

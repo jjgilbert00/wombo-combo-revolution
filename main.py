@@ -1,4 +1,3 @@
-import json
 import logging
 import os
 import shutil
@@ -25,34 +24,40 @@ Config.set("graphics", "vsync", "0")
 from kivy.app import App
 from kivy.clock import Clock
 from kivy.core.window import Window
-from kivy.metrics import dp
 from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.floatlayout import FloatLayout
 from kivy.uix.modalview import ModalView
 from kivy.uix.widget import Widget
 import win32api
-import win32con
-import win32gui
-from pynput import keyboard
 
-import dialogs
-from controller import direction_from_axes, find_controllers
-from input_list import LIST_BUTTON_ORDER, full_map, inverse_map, map_key_input, map_state
+import file_dialogs
+from controller import find_controllers
+from button_map import full_map, inverse_map, map_key_input, map_state
+from input_list import LIST_BUTTON_ORDER
 from key_inputs import demo_track, derive, derive_hold, describe, normalized
 from layouts.input_list_layout import LANES, InputListLayout
 from games import GAMES
-from layouts.menu_layout import StatusBar, AttemptsPopup, ButtonMapPopup, GameActionsPopup, HelpPopup, KeyInputPopup, Menu, MenuBar, NotePopup, SettingsPopup
+import guidance
+import help_content
+import keys
+import track_file
+from overlay import Overlay
+from settings import Settings, dialog_columns
+from layouts.dialogs import AttemptsPopup, ButtonMapPopup, GameActionsPopup, HelpPopup, KeyInputPopup, NotePopup, SettingsPopup
+from layouts.menu_bar import MenuBar
+from layouts.ui_kit import Menu, StatusBar
 from layouts.arrow_lanes_layout import ArrowLanesLayout
 from layouts.feedback import CardLayer
-from layouts.playalong_layout import PlayAlongLayout
+from layouts.ring_layout import RingLayout
 from playalong import PlayalongController
 from sampler import FPS, InputSampler
 from screen_capture import ScreenRecorder, list_displays, prepare_capture
 from virtual_pad import VirtualPad, VirtualPadError
-from widgets import BACKGROUND, set_background
+import theme
 import theme
 from theme import markup
-from video_writer import nvenc_available, resolve_encoder, write_capture_and_overlay, write_input_video
+from video_writer import nvenc_available, resolve_encoder, video_size, write_capture_and_overlay, write_input_video
+from layouts.export_frames import DisplayFrames
 
 logger = logging.getLogger(__name__)
 
@@ -71,53 +76,7 @@ def write_tick(path):
         out.setframerate(rate)
         out.writeframes(struct.pack(f"<{len(samples)}h", *samples))
 TITLE = "Wombo Combo"
-
-HOTKEYS = [
-    ("F1", "Help and keys", "show_help"),
-    ("F2", "Overlay mode (on top, borderless)", "toggle_overlay"),
-    ("F3", "Next display: input list, arrow lanes, ring", "toggle_display"),
-    ("Shift+F3", "Show / hide notes", "toggle_notes"),
-    ("F4", "Practice on/off (record your attempt while playing)", "toggle_practice"),
-    ("F5", "Restart playback", "restart_playback"),
-    ("F6", "Play", "play"),
-    ("F7", "Pause (also stops a demo)", "pause"),
-    ("Shift+F6", "Demo the recording in game (virtual controller)", "demo_recording"),
-    ("Shift+F7", "Demo just the key inputs in game", "demo_key_inputs"),
-    ("F8", "Start / stop recording", "toggle_recording"),
-    ("F11", "Open a recording", "open_track"),
-    ("F12", "Save recording as (with its video)", "save_recording"),
-]
-
-WELCOME = (
-    "[size=22sp][b]Wombo Combo[/b][/size]\n\n"
-    "Practise fighting game combos frame by frame. The inputs scroll toward a line, you press them as they "
-    "arrive, and it shows exactly how early or late you were.\n\n"
-    "New here? The warm-up takes ten seconds."
-)
-
-COACH = (
-    "[size=20sp][b]Ready when you are[/b][/size]\n\n"
-    "Press [b]Space[/b] (or [b]Start[/b] on your controller). After a second to get ready, press each input "
-    "as it reaches the white line.\n\n"
-    "{controller}"
-)
-
-# Playing without a controller: SF6's PC keyboard layout. Key codes are Kivy's.
-KEYBOARD_KEYS = {
-    273: "up", 274: "down", 275: "right", 276: "left",
-    ord("w"): "up", ord("s"): "down", ord("d"): "right", ord("a"): "left",
-    ord("u"): "u", ord("i"): "i", ord("o"): "o", ord("j"): "j", ord("k"): "k", ord("l"): "l",
-}
-ARROW_KEYS = (273, 274, 275, 276)
-KEYBOARD_ACTIONS = {"u": "LP", "i": "MP", "o": "HP", "j": "LK", "k": "MK", "l": "HK"}
-
-VIDEO_HEIGHTS = [("Native", 0), ("1080p", 1080), ("720p", 720)]
-ENCODERS = [("Auto", "auto"), ("CPU (x264)", "x264"), ("NVIDIA (NVENC)", "nvenc")]
-
-
-def format_time(frames):
-    seconds = frames / FPS
-    return f"{int(seconds // 60)}:{seconds % 60:05.2f}"
+EXPORT_SIZE = (1600, 900)  # Input videos, in pixels.
 
 
 class WomboComboApp(App):
@@ -125,7 +84,8 @@ class WomboComboApp(App):
 
     def __init__(self):
         super().__init__()
-        self.topmost = False
+        self.settings = None  # Settings over Kivy's config, once it's loaded (build).
+        self.overlay = Overlay(self)
         self.playalong_controller = PlayalongController()
         self.sampler = InputSampler(self.playalong_controller.tick)
         self.screen_recorder = None
@@ -133,7 +93,9 @@ class WomboComboApp(App):
         self.track_path = None  # The current track's .json file, once it's been opened or saved.
         self.virtual_pad = None  # Plugged in the first time a demo plays.
         self.coaching = False  # Showing the "press Space" card until the player first plays.
-        self.keys_down = set()  # Game keys held on the keyboard, for playing without a controller.
+        # Game keys held on the keyboard, for playing without a controller. The sampler thread reads it,
+        # so it's replaced rather than changed in place (a set changing while it's copied raises).
+        self.keys_down = frozenset()
         self.unsaved_take = False  # A new take that hasn't been saved anywhere yet.
         self.unsaved_edits = False  # Notes, key inputs or cleaning not yet saved.
         self.temp_dir = tempfile.mkdtemp(prefix="wombo_")
@@ -143,36 +105,14 @@ class WomboComboApp(App):
         self.job_progress = None
         self.message = None  # (markup text, expiry time)
         self.selection = None  # (start, end) frames selected in the input list, inclusive.
+        self._hits_heard = 0  # Key input hits already ticked for (Hit sound).
+        self._countdown_second = None  # The demo countdown's last second beeped.
+        self._context_menu = None  # The right-click menu while it's open (Kivy holds callbacks weakly).
 
     # ---- Setup ---------------------------------------------------------------------------------
 
     def build_config(self, config):
-        config.setdefaults("wombo", {
-            "controller": "auto",
-            "capture_video": 1,
-            "display": 0,
-            "video_height": 1080,
-            "encoder": "auto",
-            "overlay_delay": 4,
-            "export_overlay_on_save": 1,
-            "opacity": 0.5,
-            "see_through": 1,  # Overlay mode: only what's drawn covers the game, not the background.
-            "hit_sound": 0,  # A tick for each key input hit while practising.
-            "loop": 1,
-            "practice": 1,
-            "lookahead": 1.5,  # Seconds of input shown ahead of the line: the scroll speed.
-            "input_display": "list",  # The input list is where practice happens; the ring is optional.
-            "show_notes": 1,
-            "show_actions": 1,
-            "show_next": 1,  # The up-next panel left of the hit line.  # Show a game's actions (a medium punch, a Drive Impact) instead of buttons.
-            "default_game": "sf6",  # Game for new recordings, and old ones that don't say.
-            "first_run": 1,  # Opens the warm-up the first time the app starts.
-            "lanes": ",".join(LANES),  # Input list lanes shown.
-            "recent": "",  # Recently opened recordings (.json paths), newest first, separated by "|".
-            "recent_attempts": 5,  # Recent runs shown in the input list.
-            "lead_in": 60,  # Frames of run-up before practice playback, to get ready.
-            "demo_countdown": 180,  # Frames before a demo starts, to switch to the game.
-        })
+        config.setdefaults("wombo", Settings.defaults())
 
     def get_application_config(self):
         return super().get_application_config(os.path.join(self.user_data_dir, "%(appname)s.ini"))
@@ -181,29 +121,31 @@ class WomboComboApp(App):
         return False  # Disable Kivy's built-in F1 settings panel; F1 shows hotkeys instead.
 
     def build(self):
+        self.settings = Settings(self.config)
+        keys.check_hotkeys(self)
         self.icon = os.path.join(os.path.dirname(os.path.abspath(__file__)), "images", "app_icon.png")
-        Window.clearcolor = (*BACKGROUND, 0.5)
+        Window.clearcolor = (*theme.BACKGROUND, 0.5)
         # Up to 1920x1080, but never bigger than the screen (with room for the taskbar).
         screen_width, screen_height = win32api.GetSystemMetrics(0), win32api.GetSystemMetrics(1)
         Window.size = (min(1920, int(screen_width * 0.9)), min(1080, int(screen_height * 0.85)))
         Window.borderless = False
         Window.fullscreen = False
 
-        self.playalong_controller.set_looping(self.config.getboolean("wombo", "loop"))
-        self.playalong_layout = PlayAlongLayout()
+        self.playalong_controller.set_looping(self.settings.loop)
+        self.ring_layout = RingLayout()
         self.arrow_lanes_layout = ArrowLanesLayout()
         self.input_list_layout = InputListLayout()
-        self.displays = {"list": self.input_list_layout, "lanes": self.arrow_lanes_layout, "ring": self.playalong_layout}
-        self.input_list_layout.set_lookahead(self.config.getfloat("wombo", "lookahead"))
+        self.displays = {"list": self.input_list_layout, "lanes": self.arrow_lanes_layout, "ring": self.ring_layout}
+        self.input_list_layout.set_lookahead(self.settings.lookahead)
         self.input_list_layout.on_scrub = self.scrub
         self.input_list_layout.on_zoom = self.set_list_zoom
         self.input_list_layout.on_select = self.set_selection
         self.input_list_layout.on_note_click = self.edit_note
         self.input_list_layout.on_key_input_click = self.edit_key_input
         self.input_list_layout.on_context_menu = self.open_context_menu
-        self.playalong_controller.set_practice(self.config.getboolean("wombo", "practice"))
-        self.playalong_controller.set_history_count(self.config.getint("wombo", "recent_attempts"))
-        self.playalong_controller.lead_in = self.config.getint("wombo", "lead_in")
+        self.playalong_controller.set_practice(self.settings.practice)
+        self.playalong_controller.set_history_count(self.settings.recent_attempts)
+        self.playalong_controller.set_lead_in(self.settings.lead_in)
         self.menu_bar = MenuBar(self)
         self.root_layout = BoxLayout(orientation="vertical")
         self.root_layout.add_widget(self.menu_bar)
@@ -215,13 +157,13 @@ class WomboComboApp(App):
         self.status_bar = StatusBar()
         self.root_layout.add_widget(self.status_bar)
         self.display = None
-        self.show_display(self.config.get("wombo", "input_display"))
-        self.set_notes_visible(self.config.getboolean("wombo", "show_notes"))
+        self.show_display(self.settings.input_display)
+        self.set_notes_visible(self.settings.show_notes)
         self.set_game(self.default_game(), None, mark_edited=False)
-        self.set_actions_visible(self.config.getboolean("wombo", "show_actions"))
-        self.set_up_next_visible(self.config.getboolean("wombo", "show_next"))
-        self.menu_bar.set_see_through(self.config.getboolean("wombo", "see_through"))
-        self.set_lanes_shown(set(filter(None, self.config.get("wombo", "lanes").split(","))))
+        self.set_actions_visible(self.settings.show_actions)
+        self.set_up_next_visible(self.settings.show_next)
+        self.menu_bar.set_see_through(self.settings.see_through)
+        self.set_lanes_shown(set(filter(None, self.settings.lanes.split(","))))
         self.menu_bar.set_recent(self.recent_recordings())
         return self.root_layout
 
@@ -229,45 +171,26 @@ class WomboComboApp(App):
         self.select_controller()
         self.sampler.extra = self.keyboard_state
         self.sampler.on_menu = lambda name: Clock.schedule_once(lambda dt: self.on_menu_button(name))
-        Window.bind(on_key_up=self.on_key_up, focus=lambda window, focused: focused or self.keys_down.clear())
+        Window.bind(on_key_up=self.on_key_up, focus=lambda window, focused: focused or self._release_keys())
         self.sampler.start()
-        if self.config.getboolean("wombo", "first_run"):
+        if self.settings.first_run:
             # Straight into something to try: nothing to find, open or set up first.
-            self.config.set("wombo", "first_run", 0)
+            self.settings.set("first_run", 0)
             self.config.write()
             Clock.schedule_once(lambda dt: self.try_warm_up())
         Clock.schedule_interval(self.refresh, 0)  # Every rendered frame.
         Clock.schedule_interval(self.update_status, 0.1)
         Clock.schedule_interval(self.check_controller, 1.0)
-        if self.config.get("wombo", "encoder") == "auto":
+        if self.settings.encoder == "auto":
             threading.Thread(target=nvenc_available, daemon=True).start()  # Warm the cached probe.
-        if self.config.getboolean("wombo", "capture_video"):
+        if self.settings.capture_video:
             # Creating the capture device takes ~100 ms; do it now rather than when recording starts.
-            prepare_capture(self.config.getint("wombo", "display"))
+            prepare_capture(self.settings.display)
 
-        # Global keyboard listener for when the window isn't selected. The callback runs inside a
-        # system-wide keyboard hook, so it only hands the action to the UI thread and returns.
-        # Keyed by (shift held, key), e.g. "Shift+F3" -> (True, Key.f3).
-        actions = {}
-        for key, _, action in HOTKEYS:
-            *modifiers, name = key.lower().split("+")
-            actions[("shift" in modifiers, getattr(keyboard.Key, name))] = action
-        shift_keys = {keyboard.Key.shift, keyboard.Key.shift_l, keyboard.Key.shift_r}
-        held_shift = set()
-
-        # Neither callback may return False: that stops the listener.
-        def on_press(key):
-            if key in shift_keys:
-                held_shift.add(key)
-            action = actions.get((bool(held_shift), key))
-            if action:
-                Clock.schedule_once(lambda dt: getattr(self, action)())
-
-        def on_release(key):
-            held_shift.discard(key)
-
-        self.listener = keyboard.Listener(on_press=on_press, on_release=on_release)
-        self.listener.start()
+        # Hotkeys work while the game has focus. The listener runs inside a system-wide keyboard hook,
+        # so it only hands the call to the UI thread.
+        self.listener = keys.listen_for_hotkeys(
+            lambda method: Clock.schedule_once(lambda dt: getattr(self, method)()))
         Window.bind(on_key_down=self.on_key_down)
         Window.bind(on_request_close=lambda *args: not self._keep_unsaved_work("quitting"))
         Window.bind(on_drop_file=lambda window, filename, *args: self.open_track(filename.decode("utf-8")))
@@ -288,71 +211,41 @@ class WomboComboApp(App):
 
     def _playing_by_keyboard(self):
         controller = self.playalong_controller
-        return controller.is_playing() and controller.practice and not controller.demo_kind()
+        return controller.is_playing() and controller.is_practicing() and not controller.demo_kind()
 
     def keyboard_state(self):
-        """The keyboard as a controller (from the sampler thread), in the player's buttons: SF6's PC
-        layout of WASD or arrows to move, U I O punches, J K L kicks."""
-        keys = set(self.keys_down)
-        if not keys:
-            return None
-        x = (keys & {"right"} and 1 or 0) - (keys & {"left"} and 1 or 0)
-        y = (keys & {"up"} and 1 or 0) - (keys & {"down"} and 1 or 0)
-        state = {"direction": direction_from_axes(x, y)}
+        """The keyboard as a controller (called from the sampler thread), in the player's buttons."""
         controller = self.playalong_controller
-        layout = controller.action_layout or GAMES["sf6"]["default_layout"]
-        by_action = {action: recorded for recorded, action in layout.items()}
-        mapping = full_map(controller.get_button_map())
-        for key, action in KEYBOARD_ACTIONS.items():
-            if key in keys and action in by_action:
-                state[mapping[by_action[action]]] = 1  # The recorded button, then the player's for it.
-        return state
+        return keys.keyboard_state(self.keys_down, controller.get_game()[1], controller.get_button_map())
+
+    def _release_keys(self):
+        self.keys_down = frozenset()
 
     def on_key_up(self, window, key, scancode):
-        name = KEYBOARD_KEYS.get(key)
+        name = keys.GAME_KEYS.get(key)
         if name:
-            self.keys_down.discard(name)
+            self.keys_down = self.keys_down - {name}
 
     def on_key_down(self, window, key, scancode, codepoint, modifiers):
-        """Shortcuts that only apply while the app window is focused."""
+        """Shortcuts that only apply while the app window is focused (keys.WINDOW_KEYS), and the game
+        keys for playing without a controller."""
         if any(isinstance(child, ModalView) for child in Window.children):
             return False  # A popup is open; let it have the keys.
-        # Num Lock (usually on) and the other locks come through as modifiers; they aren't keys held down.
-        modifiers = [modifier for modifier in modifiers if modifier not in ("numlock", "capslock", "scrolllock")]
-        name = KEYBOARD_KEYS.get(key)
-        if name and not modifiers:
-            self.keys_down.add(name)
+        held = [modifier for modifier in modifiers if modifier not in keys.LOCKS]
+        name = keys.GAME_KEYS.get(key)
+        if name and not held:
+            self.keys_down = self.keys_down | {name}
             # The arrows always play. While practising the letters do too; when paused, they're shortcuts.
-            if key in ARROW_KEYS or self._playing_by_keyboard():
+            if key in keys.ARROW_KEYS or self._playing_by_keyboard():
                 return True
-        if key == 27:  # Esc
-            self.set_selection(None)
-            return True
-        if key == 32 and not modifiers:  # Space
-            self.toggle_playback()
-            return True
-        if key == 278 and not modifiers:  # Home
-            self.restart_playback()
-            return True
-        if codepoint == "o" and modifiers == ["ctrl"]:
-            self.open_track()
-            return True
-        if codepoint == "s" and modifiers == ["ctrl"]:
-            self.save()
-            return True
-        if codepoint == "n" and not modifiers:
-            self.add_note()
-            return True
-        if codepoint == "k" and not modifiers:
-            self.mark_key_input()
-            return True
-        if codepoint == "s" and not modifiers:
-            self.save_attempt()
-            return True
-        if codepoint == "a" and not modifiers:
-            self.open_attempts()
+        method = keys.window_shortcut(key, codepoint, modifiers)
+        if method:
+            getattr(self, method)()
             return True
         return False
+
+    def clear_selection(self):
+        self.set_selection(None)
 
     def on_stop(self):
         self.listener.stop()
@@ -372,23 +265,23 @@ class WomboComboApp(App):
     def refresh(self, dt):
         self._tick_on_hits()  # Every frame, so the tick comes with the hit.
         if self.display is self.input_list_layout:
-            self.input_list_layout.dim_non_key = bool(self.playalong_controller.key_inputs)
+            self.input_list_layout.dim_non_key = self.playalong_controller.has_key_inputs()
             frames_before, frames_after = self.input_list_layout.frames_needed()
             self.input_list_layout.update_state(self.playalong_controller.list_snapshot(frames_before, frames_after))
-            if self.topmost:
-                self._fit_overlay()
+            if self.overlay.active:
+                self.overlay.fit()
         else:  # The arrow lanes and the ring are drawn from the same upcoming frames.
             # As much time ahead as the scroll speed setting says, like the input list.
             count = max(10, round(self.input_list_layout.lookahead * FPS))
             controller_state, upcoming_frames, offset = self.playalong_controller.snapshot(count)
             self.display.update_state(controller_state, upcoming_frames, offset)
             self.display.show_feedback(*self.playalong_controller.feedback())
-            if self.topmost:
-                self._fit_overlay()
+            if self.overlay.active:
+                self.overlay.fit()
 
     def select_controller(self):
         readers = find_controllers()
-        wanted = self.config.get("wombo", "controller")
+        wanted = self.settings.controller
         self.sampler.reader = next((r for r in readers if r.name == wanted), readers[0] if readers else None)
         return readers
 
@@ -413,8 +306,8 @@ class WomboComboApp(App):
     def _tick_on_hits(self):
         """With Hit sound on, a short tick for each key input hit (heard even with the game in front)."""
         controller = self.playalong_controller
-        hits, _ = controller.key_input_score() if controller.is_playing() and controller.practice else (0, 0)
-        if hits > getattr(self, "_hits_heard", 0) and self.config.getboolean("wombo", "hit_sound"):
+        hits, _ = controller.key_input_score() if controller.is_playing() and controller.is_practicing() else (0, 0)
+        if hits > self._hits_heard and self.settings.hit_sound:
             path = os.path.join(self.temp_dir, "tick.wav")
             if not os.path.exists(path):
                 write_tick(path)
@@ -426,127 +319,22 @@ class WomboComboApp(App):
         # A demo's countdown ticks once a second, so it can be followed without seeing the app.
         if controller.demo_kind() and controller.get_lead():
             second = -(-controller.get_lead() // FPS)
-            if second != getattr(self, "_countdown_second", None):
+            if second != self._countdown_second:
                 self._countdown_second = second
                 self.beep()
-        stats = self.sampler.stats
-        frames = len(controller.input_track)
-        parts = []
-        if controller.is_recording():
-            parts.append(f"{markup('REC', theme.DANGER, bold=True)} {format_time(frames)}")
-            if controller.filled_frames:
-                parts.append(markup(f"{controller.filled_frames} late frames", theme.WARNING))
-            backlog = self.screen_recorder.backlog() if self.screen_recorder else 0
-            if backlog > FPS // 2:
-                parts.append(markup(f"encoder {backlog / FPS:.1f}s behind", theme.WARNING))
-        elif frames:
-            if controller.demo_kind():
-                lead = controller.get_lead()
-                state = f"DEMO IN {lead / FPS:.1f}s" if lead else f"DEMO ({controller.demo_kind()})"
-            elif controller.get_lead():
-                state = "GET READY"
-            elif controller.is_playing():
-                state = "PRACTICE" if controller.practice else "REVIEW"
-            else:
-                state = "PAUSED"
-            parts.append(f"{state} {format_time(controller.get_current_frame())} / {format_time(frames)}")
-            hits, total = controller.key_input_score()
-            if total:
-                # With key inputs marked, only they count; other frames are non-essential.
-                parts.append(f"Key inputs {hits}/{total}")
-            elif controller.attempted_frames:
-                accuracy = controller.matched_frames / controller.attempted_frames
-                parts.append(f"Match {accuracy:.0%} of {controller.attempted_frames}f")
-            if controller.button_map:
-                parts.append(markup("Buttons remapped", theme.INFO))
-            if self.unsaved_take or self.unsaved_edits:
-                parts.append(markup("Unsaved", theme.WARNING))
-        else:
-            parts.append("No track")
-        if self.job_label:
-            progress = f" {int(self.job_progress * 100)}%" if self.job_progress is not None else "..."
-            parts.append(f"{self.job_label}{progress}")
-        if self.selection:
-            start, end = self.selection
-            span = f"frame {start}" if start == end else f"frames {start}-{end} ({end - start + 1}f)"
-            parts.append(markup(f"Selected {span}", theme.INFO))
-        if self.message and time.time() < self.message[1]:
-            parts.append(self.message[0])
-        reader = self.sampler.reader
-        parts.append(reader.name if reader and reader.connected else markup("No controller", theme.WARNING))
-        if stats.rate and abs(stats.rate - FPS) > 2:  # Only when input timing is off.
-            parts.append(markup(f"Input at {stats.rate:.0f} Hz", theme.WARNING))
-        self.menu_bar.update(controller.is_recording(), controller.is_playing(), controller.loop, controller.practice,
+        self.menu_bar.update(controller.is_recording(), controller.is_playing(), controller.is_looping(), controller.is_practicing(),
                              demoing=bool(controller.demo_kind()))
-        separator = markup("  \u00b7  ", theme.TEXT_FAINT)
-        card, buttons = self._card(frames)
-        # Over the game, the overlay shows the list only; the hints are for the app window.
-        hint = "" if self.topmost or card else self._next_step_hint()  # The card says it all when shown.
+        card, buttons = guidance.card(self)
+        # Over the game, the overlay shows the displays only; the hints are for the app window.
+        hint = "" if self.overlay.active or card else guidance.hint(self)  # The card says it all when shown.
         self.card_layer.set_card(card, buttons)
-        self.status_bar.set(hint, separator.join(parts))
+        self.status_bar.set(hint, guidance.status_text(self))
         for display in self.displays.values():
             display.card_up = bool(card)
-
-    def _card(self, frames):
-        """The card in the middle of the list: getting started with nothing loaded, or a first go at
-        the warm-up until the player starts playing. Returns (text, buttons)."""
-        controller = self.playalong_controller
-        if controller.is_recording():
-            return "", ()
-        if not frames:
-            return WELCOME, (("Try the warm-up", self.try_warm_up, True),
-                             ("Open a recording...", self.open_track, False),
-                             ("Record your own (F8)", self.toggle_recording, False))
-        if self.coaching and not controller.is_playing():
-            reader = self.sampler.reader
-            if reader and reader.connected:
-                note = f"Using [b]{reader.name}[/b]: press a button and it shows up under the line."
-            else:
-                note = (f"{markup('No controller found.', theme.WARNING, bold=True)} Plug one in (it's picked up by itself), "
-                        "or play on the keyboard: [b]WASD[/b] to move, [b]U I O[/b] punches, [b]J K L[/b] kicks.")
-            return COACH.format(controller=note), (("Start", self.play, True), ("Not now", self.skip_coaching, False))
-        return "", ()
 
     def skip_coaching(self):
         """Closes the coach card without starting, to look around first."""
         self.coaching = False
-
-    def _next_step_hint(self):
-        """One line on what to do next, for where the player is right now."""
-        controller = self.playalong_controller
-        if controller.is_recording():
-            return ("[b]Recording.[/b] Perform the combo, then press [b]F8[/b] (or Stop) to finish. "
-                    "F-key hotkeys work while the game has focus.")
-        if not controller.input_track:
-            return ""
-        if controller.demo_kind():
-            if controller.get_lead():
-                return (f"[b]Demo of the {controller.demo_kind()}[/b] starts in {controller.get_lead() / FPS:.1f}s. "
-                        "Switch to the game: the virtual controller has to be the one playing your character. "
-                        "[b]Space[/b] / [b]F7[/b] stops.")
-            return (f"[b]Demo:[/b] the virtual controller is playing the {controller.demo_kind()}; the You lane "
-                    "shows what it presses. [b]Space[/b] / [b]F7[/b] stops.")
-        if self.selection:
-            return ("[b]Frames selected.[/b] [b]N[/b] adds a note, [b]K[/b] marks what must be pressed there "
-                    "(a key input), right-click for more, [b]Esc[/b] clears.")
-        if controller.get_lead():
-            return f"[b]Get ready.[/b] The first input reaches the line in {controller.get_lead() / FPS:.1f}s."
-        if controller.is_playing():
-            if controller.practice:
-                reader = self.sampler.reader
-                keys = ("" if reader and reader.connected else
-                        " No controller: [b]WASD[/b] moves, [b]U I O[/b] punch, [b]J K L[/b] kick.")
-                return ("[b]Practising.[/b] Press each input as it reaches the line. [b]Start[/b] / [b]Space[/b] "
-                        "pauses, [b]Back[/b] / [b]Home[/b] starts over." + keys)
-            return "[b]Reviewing[/b] your attempt against the recording. [b]F4[/b] goes back to practice."
-        if controller.attempted_frames:
-            return ("Scroll or drag to look back at your attempt. [b]S[/b] saves it, [b]A[/b] lists all "
-                    "attempts, [b]Space[/b] practises again.")
-        if not controller.key_inputs:
-            return ("Press [b]Space[/b] (or [b]F6[/b] in game) to practise. Tip: drag in the frame meter to select "
-                    "frames and press [b]K[/b] to mark what really matters; only those are scored then.")
-        return ("Press [b]Space[/b] (or [b]F6[/b] in game) to practise. Hit the key inputs (outlined) as they "
-                "reach the line.")
 
     # ---- Transport -----------------------------------------------------------------------------
 
@@ -584,12 +372,12 @@ class WomboComboApp(App):
 
     def _demo(self, kind):
         controller = self.playalong_controller
-        if controller.is_recording() or not controller.input_track:
+        if controller.is_recording() or not controller.track_length():
             self.flash("Open or record something to demo first", "warning")
             self.beep(False)
             return
         if kind == "key inputs":
-            if not controller.key_inputs:
+            if not controller.has_key_inputs():
                 self.flash("No key inputs to demo: select frames and press K to mark them", "warning", 6)
                 self.beep(False)
                 return
@@ -604,7 +392,7 @@ class WomboComboApp(App):
                 self.beep(False)
                 return
         controller.pause()  # Also ends a demo already playing.
-        countdown = self.config.getint("wombo", "demo_countdown")
+        countdown = self.settings.demo_countdown
         mapping, pad = controller.get_button_map(), self.virtual_pad
         # The game reads the player's own layout, so the demo presses the player's buttons.
         controller.start_demo(track, lambda state: pad.send(map_state(state, mapping)), countdown, kind)
@@ -620,12 +408,12 @@ class WomboComboApp(App):
             controller.set_frame(controller.get_current_frame() + frames)
 
     def set_list_zoom(self, lookahead):
-        self.config.set("wombo", "lookahead", round(lookahead, 2))
+        self.settings.set("lookahead", round(lookahead, 2))
 
     def set_selection(self, start, end=None):
         """Selects frames start..end (inclusive, either order) of the track, or clears with None."""
         if start is not None:
-            last = len(self.playalong_controller.input_track) - 1
+            last = self.playalong_controller.track_length() - 1
             start, end = sorted((start, start if end is None else end))
             start, end = max(0, start), min(end, last)
             if start > end:
@@ -637,9 +425,9 @@ class WomboComboApp(App):
         """Right-click menu in the input list, for the selection (or the frame clicked, if it's
         outside the selection)."""
         controller = self.playalong_controller
-        if controller.is_recording() or not controller.input_track:
+        if controller.is_recording() or not controller.track_length():
             return
-        frame = max(0, min(frame, len(controller.input_track) - 1))
+        frame = max(0, min(frame, controller.track_length() - 1))
         if not self.selection or not self.selection[0] <= frame <= self.selection[1]:
             self.set_selection(frame, frame)
         start = self.selection[0]
@@ -661,7 +449,7 @@ class WomboComboApp(App):
     def add_note(self):
         """Opens the note editor for the selected frames, or the frame on the line if none are selected."""
         controller = self.playalong_controller
-        if controller.is_recording() or not controller.input_track:
+        if controller.is_recording() or not controller.track_length():
             return
         start, end = self.selection or (controller.get_current_frame(),) * 2
         existing = next((i for i, note in enumerate(controller.get_notes())
@@ -697,7 +485,7 @@ class WomboComboApp(App):
         """Marks the selected frames (or the frame on the line) as a key input, guessing the
         requirement from the target, and opens it for review. Edits an overlapping one instead."""
         controller = self.playalong_controller
-        if controller.is_recording() or not controller.input_track:
+        if controller.is_recording() or not controller.track_length():
             return
         start, end = self.selection or (controller.get_current_frame(),) * 2
         existing = next((i for i, k in enumerate(controller.get_key_inputs())
@@ -748,7 +536,7 @@ class WomboComboApp(App):
         """Opens the button map for this recording: which of the player's buttons does what each
         recorded button did."""
         controller = self.playalong_controller
-        if controller.is_recording() or not controller.input_track:
+        if controller.is_recording() or not controller.track_length():
             self.flash("Open a recording to remap its buttons", "warning")
             return
         track = controller.get_input_track()
@@ -761,9 +549,9 @@ class WomboComboApp(App):
         self.unsaved_edits = True
 
     def toggle_practice(self):
-        practice = not self.playalong_controller.practice
+        practice = not self.playalong_controller.is_practicing()
         self.playalong_controller.set_practice(practice)
-        self.config.set("wombo", "practice", int(practice))
+        self.settings.set("practice", int(practice))
         self.flash("Practice: playing records your attempt" if practice else "Review: playing replays your attempt")
 
     def save_attempt(self):
@@ -786,16 +574,7 @@ class WomboComboApp(App):
             return
         path, saved_attempts = self.track_path, self.playalong_controller.get_saved()
 
-        def write(progress):
-            with open(path, "r") as fin:
-                data = json.load(fin)
-            if not isinstance(data, dict):
-                data = {"fps": FPS, "inputs": data}  # Older saves are a bare list of frames.
-            data["saved_attempts"] = saved_attempts
-            with open(path, "w") as fout:
-                json.dump(data, fout, indent=1, sort_keys=True)
-
-        self.run_job("Saving attempts", write, message)
+        self.run_job("Saving attempts", lambda progress: track_file.update(path, saved_attempts=saved_attempts), message)
 
     def open_attempts(self):
         AttemptsPopup(self).open()
@@ -806,7 +585,7 @@ class WomboComboApp(App):
 
         def describe(kind, item, name):
             done, total = controller.score(item["attempt"])
-            if controller.key_inputs:
+            if controller.has_key_inputs():
                 score = f"Key inputs {done}/{total}"
             else:
                 score = f"Match {done / total:.0%}" if total else "Not played"
@@ -849,7 +628,7 @@ class WomboComboApp(App):
         item = next((item for item in items if item["id"] == attempt_id), None)
         if item is None or controller.is_recording():
             return
-        if controller.practice:
+        if controller.is_practicing():
             self.toggle_practice()
         controller.pause()
         controller.set_attempt_track(item["attempt"])
@@ -861,9 +640,9 @@ class WomboComboApp(App):
         self.playalong_controller.clear_attempt()
 
     def toggle_loop(self):
-        loop = not self.playalong_controller.loop
+        loop = not self.playalong_controller.is_looping()
         self.playalong_controller.set_looping(loop)
-        self.config.set("wombo", "loop", int(loop))
+        self.settings.set("loop", int(loop))
 
     def toggle_recording(self):
         if self.playalong_controller.is_recording():
@@ -881,12 +660,12 @@ class WomboComboApp(App):
         self.playalong_controller.pause()
         self.capture_path = None
         frame_sink = None
-        if self.config.getboolean("wombo", "capture_video"):
+        if self.settings.capture_video:
             self.take += 1
             self.screen_recorder = ScreenRecorder(
-                output_idx=self.config.getint("wombo", "display"),
-                max_height=self.config.getint("wombo", "video_height") or None,
-                encoder=resolve_encoder(self.config.get("wombo", "encoder")),
+                output_idx=self.settings.display,
+                max_height=self.settings.video_height or None,
+                encoder=resolve_encoder(self.settings.encoder),
             )
             try:
                 self.screen_recorder.start(os.path.join(self.temp_dir, f"take_{self.take}.mp4"))
@@ -900,7 +679,7 @@ class WomboComboApp(App):
 
     def stop_recording(self):
         self.playalong_controller.stop_recording()
-        self.unsaved_take = bool(self.playalong_controller.input_track)
+        self.unsaved_take = bool(self.playalong_controller.track_length())
         recorder, self.screen_recorder = self.screen_recorder, None
         if recorder:
             recorder.stop()
@@ -939,7 +718,7 @@ class WomboComboApp(App):
         self.track_path = None
 
     def recent_recordings(self):
-        return [path for path in self.config.get("wombo", "recent").split("|") if path and os.path.exists(path)]
+        return [path for path in self.settings.recent.split("|") if path and os.path.exists(path)]
 
     def sample_recordings(self):
         """The sample recordings that come with the app (samples/*.json), the warm-up first."""
@@ -957,11 +736,11 @@ class WomboComboApp(App):
             self.flash("The warm-up sample is missing from the samples folder", "error", 6)
             return
         self.open_track(warm_up)
-        self.coaching = bool(self.playalong_controller.input_track)
+        self.coaching = bool(self.playalong_controller.track_length())
 
     def _remember_recent(self, path):
         recent = [path] + [p for p in self.recent_recordings() if os.path.normcase(p) != os.path.normcase(path)]
-        self.config.set("wombo", "recent", "|".join(recent[:5]))
+        self.settings.set("recent", "|".join(recent[:5]))
         self.menu_bar.set_recent(recent[:5])
 
     def open_track(self, path=None):
@@ -971,7 +750,7 @@ class WomboComboApp(App):
             return
         self.playalong_controller.stop_demo()
         if path is None:
-            path = dialogs.open_file("Open recording", "Recordings (*.json, *.mp4)", "*.json;*.mp4")
+            path = file_dialogs.open_file("Open recording", "Recordings (*.json, *.mp4)", "*.json;*.mp4")
         if not path:
             return
         if path.lower().endswith(".mp4"):
@@ -983,21 +762,16 @@ class WomboComboApp(App):
             self.flash("Open a recording's .json or .mp4 file", "warning")
             return
         try:
-            with open(path, "r") as fin:
-                data = json.load(fin)
-        except (OSError, ValueError) as e:
+            data = track_file.load(path)
+        except (OSError, track_file.TrackFileError) as e:
             self.flash(f"Couldn't open {os.path.basename(path)}: {e}", "error", 8)
             return
         if self.playalong_controller.is_recording():
             self.stop_recording()
-        if isinstance(data, dict):
-            self.playalong_controller.set_input_track(data["inputs"], data.get("attempt"), data.get("notes"),
-                                                      data.get("key_inputs"), data.get("saved_attempts"),
-                                                      data.get("button_map"))
-            self.set_game(data.get("game", self.default_game()), data.get("action_layout"), mark_edited=False)
-        else:
-            self.playalong_controller.set_input_track(data)  # Older saves are a bare list of frames.
-            self.set_game(self.default_game(), None, mark_edited=False)
+        self.playalong_controller.set_input_track(data["inputs"], data.get("attempt"), data.get("notes"),
+                                                  data.get("key_inputs"), data.get("saved_attempts"),
+                                                  data.get("button_map"))
+        self.set_game(data.get("game", self.default_game()), data.get("action_layout"), mark_edited=False)
         self.track_path = path
         video = os.path.splitext(path)[0] + ".mp4"
         self.capture_path = video if os.path.exists(video) else None
@@ -1006,24 +780,21 @@ class WomboComboApp(App):
         self._remember_recent(path)
         # Straight into practice: the input list, practice on, from the first frame.
         self.show_display("list")
-        if not self.playalong_controller.practice:
+        if not self.playalong_controller.is_practicing():
             self.toggle_practice()
         Window.set_title(f"{TITLE} - {os.path.splitext(os.path.basename(path))[0]}")
         self.flash(f"Opened {os.path.basename(path)}", "info", 6)
 
     def _track_data(self):
-        """The track and everything made for it, as saved in its .json."""
+        """The track and everything made for it, for track_file.save()."""
         controller = self.playalong_controller
-        data = {"fps": FPS, "inputs": controller.get_input_track()}
         attempt = controller.get_attempt_track()
-        if any(frame is not None for frame in attempt):
-            data["attempt"] = attempt
-        for key, value in (("notes", controller.get_notes()), ("key_inputs", controller.get_key_inputs()),
-                           ("saved_attempts", controller.get_saved()), ("button_map", controller.get_button_map()),
-                           ("game", controller.game), ("action_layout", controller.action_layout if controller.game else None)):
-            if value:
-                data[key] = value
-        return data
+        game, action_layout = controller.get_game()
+        return {"inputs": controller.get_input_track(),
+                "attempt": attempt if any(frame is not None for frame in attempt) else None,
+                "notes": controller.get_notes(), "key_inputs": controller.get_key_inputs(),
+                "saved_attempts": controller.get_saved(), "button_map": controller.get_button_map(),
+                "game": game, "action_layout": action_layout if game else None}
 
     def save(self):
         """Saves into the open recording's file, or for a new take asks where to save it (with its
@@ -1034,20 +805,16 @@ class WomboComboApp(App):
             return self.save_recording()
         data, path = self._track_data(), self.track_path
 
-        def write(progress):
-            with open(path, "w") as fout:
-                json.dump(data, fout, indent=1, sort_keys=True)
-
-        self.run_job("Saving", write, f"Saved {os.path.basename(path)}")
+        self.run_job("Saving", lambda progress: track_file.save(path, data), f"Saved {os.path.basename(path)}")
         self.unsaved_edits = False
         return True
 
     def _keep_unsaved_work(self, doing, edits_only=False):
         """Before something replaces the track, offers to save unsaved work. Returns False to stop."""
         unsaved = self.unsaved_edits or (self.unsaved_take and not edits_only)
-        if not unsaved or not self.playalong_controller.input_track:
+        if not unsaved or not self.playalong_controller.track_length():
             return True
-        answer = dialogs.ask_save("Unsaved changes", f"Save the current recording before {doing}?")
+        answer = file_dialogs.ask_save("Unsaved changes", f"Save the current recording before {doing}?")
         if answer == "save":
             return self.save()
         return answer == "discard"
@@ -1061,29 +828,27 @@ class WomboComboApp(App):
         if self.playalong_controller.is_recording():
             self.stop_recording()
         data = self._track_data()
-        inputs, notes = data["inputs"], data.get("notes", [])
-        if not inputs:
+        if not data["inputs"]:
             self.flash("Nothing to save", "warning")
             return False
-        path = dialogs.save_file("Save recording", "Recordings (*.mp4)", "*.mp4", "mp4")
+        path = file_dialogs.save_file("Save recording", "Recordings (*.mp4)", "*.mp4", "mp4")
         if not path:
             return False
         base = os.path.splitext(path)[0]
-        export_overlay = self.config.getboolean("wombo", "export_overlay_on_save")
+        export_overlay = self.settings.export_overlay_on_save
         self.track_path = base + ".json"  # Later saved attempts go straight into it.
         capture = self.capture_path  # Read now; a new take started before the job runs would reset it.
+        encoder = resolve_encoder(self.settings.encoder)
 
         def save(progress):
-            with open(base + ".json", "w") as fout:
-                json.dump(data, fout, indent=1, sort_keys=True)
+            track_file.save(base + ".json", data)
             if not capture:
                 return
             if os.path.abspath(capture) != os.path.abspath(base + ".mp4"):
                 shutil.copyfile(capture, base + ".mp4")
             if export_overlay:
                 self.job_label = "Exporting overlay"
-                write_capture_and_overlay(capture, inputs, base + "_overlay.mp4", notes=notes,
-                                          **self._export_options(progress))
+                self._write_overlay(capture, base + "_overlay.mp4", len(data["inputs"]), encoder, progress)
 
         self.run_job("Saving", save, f"Saved {os.path.basename(base)}")
         self.unsaved_take = self.unsaved_edits = False
@@ -1097,40 +862,80 @@ class WomboComboApp(App):
         if not self.capture_path:
             self.flash("No video for this track. Record with video capture on, or open a saved recording.", "warning", 6)
             return
-        path = dialogs.save_file("Export overlay video", "Videos (*.mp4)", "*.mp4", "mp4")
+        path = file_dialogs.save_file("Export overlay video", "Videos (*.mp4)", "*.mp4", "mp4")
         if path:
-            inputs = self.playalong_controller.get_input_track()
-            notes = self.playalong_controller.get_notes()
-            capture = self.capture_path
-            self.run_job(
-                "Exporting overlay",
-                lambda progress: write_capture_and_overlay(capture, inputs, path, notes=notes,
-                                                           **self._export_options(progress)),
-                f"Exported {os.path.basename(path)}",
-            )
+            capture, count = self.capture_path, self.playalong_controller.track_length()
+            encoder = resolve_encoder(self.settings.encoder)
+            self.run_job("Exporting overlay", lambda progress: self._write_overlay(capture, path, count, encoder, progress),
+                         f"Exported {os.path.basename(path)}")
 
     def export_input_video(self):
-        inputs = self.playalong_controller.get_input_track()
-        notes = self.playalong_controller.get_notes()
-        key_inputs = self.playalong_controller.get_key_inputs()
-        if not inputs:
+        count = self.playalong_controller.track_length()
+        if not count:
             self.flash("Nothing to export", "warning")
             return
-        path = dialogs.save_file("Export input video", "Videos (*.mp4)", "*.mp4", "mp4")
+        path = file_dialogs.save_file("Export input video", "Videos (*.mp4)", "*.mp4", "mp4")
         if path:
-            encoder = resolve_encoder(self.config.get("wombo", "encoder"))
-            self.run_job(
-                "Exporting inputs",
-                lambda progress: write_input_video(inputs, path, encoder=encoder, progress=progress, notes=notes),
-                f"Exported {os.path.basename(path)}",
-            )
+            encoder = resolve_encoder(self.settings.encoder)
 
-    def _export_options(self, progress):
-        return {
-            "delay_frames": self.config.getint("wombo", "overlay_delay"),
-            "encoder": resolve_encoder(self.config.get("wombo", "encoder")),
-            "progress": progress,
-        }
+            def export(progress):
+                frames = self._on_ui(lambda: self._export_frames(EXPORT_SIZE, count, overlay=False))
+                write_input_video(frames.frames(), count, EXPORT_SIZE, path, encoder=encoder, progress=progress)
+
+            self.run_job("Exporting inputs", export, f"Exported {os.path.basename(path)}")
+
+    def _write_overlay(self, capture, path, count, encoder, progress):
+        """On the job thread: the current display drawn over the captured video."""
+        size = video_size(capture)  # Known only once the capture is finished (an earlier job).
+        frames = self._on_ui(lambda: self._export_frames(size, count, overlay=True))
+        write_capture_and_overlay(capture, frames.frames(), count, path, encoder=encoder, progress=progress)
+
+    def _export_frames(self, size, count, overlay):
+        """Frames of the display showing, drawn offscreen for a video (see layouts/export_frames.py),
+        from a copy of the recording: the input list without the player's lanes, or the arrow lanes
+        or ring. An overlay is drawn over a transparent background, delayed by Settings > Overlay
+        input delay to line up with the game."""
+        controller = self.playalong_controller
+        copy = PlayalongController()
+        copy.set_lead_in(0)
+        copy.set_input_track(controller.get_input_track(), notes=controller.get_notes(),
+                             key_inputs=controller.get_key_inputs(), button_map=controller.get_button_map())
+        copy.set_game(*controller.get_game())
+        copy.set_show_actions(controller.is_showing_actions())
+        lookahead = self.input_list_layout.lookahead
+        mode = self.settings.input_display
+        if mode == "lanes" or mode == "ring":
+            display = ArrowLanesLayout() if mode == "lanes" else RingLayout()
+            display.set_background((0, 0, 0) if overlay else theme.BACKGROUND)
+        else:
+            display = InputListLayout()
+            display.lanes_shown = {"meter", "target", "keys"}
+            display.show_notes, display.show_live, display.minimal = self.input_list_layout.show_notes, False, overlay
+            display.textures.buttons.game = copy.get_game()[0]
+            display.set_lookahead(lookahead)
+        background = (0, 0, 0, 0) if overlay else (*theme.BACKGROUND, 1)
+        delay = self.settings.overlay_delay if overlay else 0
+        return DisplayFrames(display, copy, size, count, first=-delay, background=background, lookahead=lookahead)
+
+    @staticmethod
+    def _on_ui(make):
+        """From a job: runs make() on the UI thread (widgets are made there) and returns its result."""
+        done, result = threading.Event(), {}
+
+        def run(dt):
+            try:
+                result["value"] = make()
+            except Exception as e:
+                result["error"] = e
+            finally:
+                done.set()
+
+        Clock.schedule_once(run)
+        if not done.wait(30):
+            raise RuntimeError("the window stopped responding")
+        if "error" in result:
+            raise result["error"]
+        return result["value"]
 
     def run_job(self, label, work, done_message=None):
         """Runs work(progress_callback) on the job thread and reports progress in the status bar."""
@@ -1151,145 +956,35 @@ class WomboComboApp(App):
 
     # ---- View ----------------------------------------------------------------------------------
 
-    def get_opacity(self):
-        return self.config.getfloat("wombo", "opacity")
-
-    def set_opacity(self, opacity):
-        self.config.set("wombo", "opacity", round(opacity, 2))
-        self._apply_window_alpha(opacity)
-
-    def preview_opacity(self, active):
-        # The window is only see-through in overlay mode; the slider previews it while adjusting.
-        self._apply_window_alpha(self.get_opacity() if active or self.topmost else 1)
-
-    def _see_through(self):
-        return self.topmost and self.config.getboolean("wombo", "see_through")
-
-    def _apply_window_alpha(self, alpha):
-        """The window's opacity, and in a see-through overlay, the background colour made transparent
-        (Windows' colour key) so the game shows through around what's drawn."""
-        Window.opacity = alpha
-        if not self._see_through():
-            return
-        hwnd = Window.get_window_info().window
-        style = win32gui.GetWindowLong(hwnd, win32con.GWL_EXSTYLE)
-        if not style & win32con.WS_EX_LAYERED:
-            win32gui.SetWindowLong(hwnd, win32con.GWL_EXSTYLE, style | win32con.WS_EX_LAYERED)
-        key = win32api.RGB(*(round(c * 255) for c in theme.OVERLAY_KEY))
-        win32gui.SetLayeredWindowAttributes(hwnd, key, round(alpha * 255),
-                                            win32con.LWA_COLORKEY | win32con.LWA_ALPHA)
-
-    def _set_overlay_background(self):
-        """In a see-through overlay the background is the colour key; otherwise the usual grey."""
-        see_through = self._see_through()
-        background = theme.OVERLAY_KEY if see_through else BACKGROUND
-        Window.clearcolor = (*background, 1 if see_through else 0.5)
-        set_background(background)
-        self.input_list_layout.minimal = see_through
+    def toggle_overlay(self):
+        self.overlay.toggle()
 
     def toggle_see_through(self):
-        self.config.set("wombo", "see_through", int(not self.config.getboolean("wombo", "see_through")))
-        self.menu_bar.set_see_through(self.config.getboolean("wombo", "see_through"))
-        if self.topmost:
-            self._set_overlay_background()
-            hwnd = Window.get_window_info().window
-            if not self._see_through():  # Back to plain opacity.
-                win32gui.SetLayeredWindowAttributes(hwnd, 0, round(self.get_opacity() * 255), win32con.LWA_ALPHA)
-            self.preview_opacity(False)
+        self.overlay.toggle_see_through()
+        self.menu_bar.set_see_through(self.settings.see_through)
 
-    def toggle_overlay(self):
-        self.topmost = not self.topmost
-        hwnd = Window.get_window_info().window
-        if self.topmost:
-            # Windows' own record of where the window was (maximized or not), to put it back exactly.
-            self._normal_placement = win32gui.GetWindowPlacement(hwnd)
-            left, top = win32gui.ClientToScreen(hwnd, (0, 0))
-            _, _, width, height = win32gui.GetClientRect(hwnd)
-            # The overlay sits where the window's content was, at the same width; _fit_overlay (every
-            # frame) trims its height and puts it back there if the style change nudged it. Set before
-            # anything below, which can run frames from inside Windows' message handling.
-            self._overlay_origin = (left, top, width)
-            self._overlay_full_height = height  # For the displays that use the whole window.
-            self._overlay_note_rows = 0
-            # The window fits the list from here on, so the list keeps the size it has now.
-            self.input_list_layout.freeze_scale = True
-            if self._normal_placement[1] == win32con.SW_SHOWMAXIMIZED:
-                win32gui.ShowWindow(hwnd, win32con.SW_RESTORE)  # A maximized window can't be resized.
-            Window.borderless = True
-            self._set_overlay_background()
-            self.root_layout.remove_widget(self.menu_bar)
-            self.root_layout.remove_widget(self.status_bar)
-            self._place_window(left, top, width, height)
-            Window.bind(on_draw=self._keep_on_top)
-        else:
-            Window.unbind(on_draw=self._keep_on_top)
-            Window.borderless = False
+    def get_opacity(self):
+        return self.settings.opacity
+
+    def set_opacity(self, opacity):
+        self.overlay.set_opacity(opacity)
+
+    def preview_opacity(self, previewing):
+        self.overlay.preview_opacity(previewing)
+
+    def set_bars_visible(self, visible):
+        """The menu and status bars (hidden in overlay mode)."""
+        if visible:
             self.root_layout.add_widget(self.menu_bar, index=len(self.root_layout.children))
             self.root_layout.add_widget(self.status_bar, index=0)
-            self._set_on_top(False)
-            self._overlay_origin = None
-            self._set_overlay_background()
-            self.input_list_layout.freeze_scale = False
-            Clock.schedule_once(lambda dt: self.input_list_layout._rescale(), 0.3)
-            # Put back exactly where it was. Again shortly after, as the border comes back after a delay
-            # and would otherwise grow the window by its own size.
-            placement = self._normal_placement
-            win32gui.SetWindowPlacement(hwnd, placement)
-            Clock.schedule_once(lambda dt: self.topmost or win32gui.SetWindowPlacement(hwnd, placement), 0.15)
-        self.preview_opacity(False)
+        else:
+            self.root_layout.remove_widget(self.menu_bar)
+            self.root_layout.remove_widget(self.status_bar)
 
-    @staticmethod
-    def _place_window(left, top, width, height):
-        """Moves and sizes the window (in screen pixels) through Windows directly; Kivy follows along."""
-        win32gui.SetWindowPos(Window.get_window_info().window, win32con.HWND_TOPMOST, left, top, width, height,
-                              win32con.SWP_NOACTIVATE)
-
-    def _fit_overlay(self):
-        """Trims the overlay window to what the input list draws, so no empty space covers the game.
-        It keeps its top edge and grows again when more is shown (e.g. another attempt row)."""
-        if not getattr(self, "_overlay_origin", None):
-            return  # Overlay mode is still being set up (or torn down).
-        left, top, width = self._overlay_origin
-        layout = self.input_list_layout
-        # The arrow lanes and ring fill their space, falling from the top, and the getting-started
-        # card needs room too: those keep the full height.
-        if self.display is not layout or layout.content_height(0) is None:
-            self._keep_window(left, top, width, self._overlay_full_height)
-            return
-        # Room for as many rows of notes as have been needed so far: one to start with if there are
-        # notes, more only if overlapping notes stack up. It doesn't shrink back, so the window
-        # doesn't jump as notes scroll by.
-        wanted = 1 if layout.show_notes and self.playalong_controller.notes else 0
-        self._overlay_note_rows = max(getattr(self, "_overlay_note_rows", 0), wanted, layout.note_rows_used)
-        if not layout.show_notes:
-            self._overlay_note_rows = 0
-        # Kivy measures in its own units; scale to pixels by the width, which doesn't change.
-        pixels = width / Window.width if Window.width else 1
-        # In overlay mode the list is the whole window (no bars), so its content is the window's
-        # height. (Window and list sizes can disagree for a frame while the style changes; going by
-        # the content alone keeps that from flinging the window to a huge size.)
-        height = round(layout.content_height(self._overlay_note_rows) * pixels)
-        height = max(dp(60), min(height, win32api.GetSystemMetrics(1)))
-        self._keep_window(left, top, width, height)
-
-    def _keep_window(self, left, top, width, height):
-        """Moves the window there unless it's already (near enough) there."""
-        actual = win32gui.GetWindowRect(Window.get_window_info().window)
-        if max(abs(a - b) for a, b in zip(actual, (left, top, left + width, top + height))) > 2:
-            self._place_window(left, top, width, height)
-
-    @staticmethod
-    def _set_on_top(on_top):
-        hwnd = Window.get_window_info().window  # The window's own handle; its title changes with the recording.
-        flags = win32con.SWP_NOMOVE | win32con.SWP_NOSIZE | win32con.SWP_NOACTIVATE
-        win32gui.SetWindowPos(hwnd, win32con.HWND_TOPMOST if on_top else win32con.HWND_NOTOPMOST, 0, 0, 0, 0, flags)
-
-    def _keep_on_top(self, *args):
-        """Keeps overlay mode on top. Checked every frame, since changing the window (e.g. borderless) can
-        drop it, but only reapplied when it has been dropped."""
-        hwnd = Window.get_window_info().window
-        if not win32gui.GetWindowLong(hwnd, win32con.GWL_EXSTYLE) & win32con.WS_EX_TOPMOST:
-            self._set_on_top(True)
+    def set_background(self, rgb):
+        """The window's background colour changed: the displays' hold lines are hidden in it."""
+        for display in (self.arrow_lanes_layout, self.ring_layout):
+            display.set_background(rgb)
 
     def show_display(self, mode):
         mode = mode if mode in self.displays else "list"
@@ -1299,11 +994,11 @@ class WomboComboApp(App):
         display.pos_hint = {"x": 0, "y": 0}  # Fill the stage, between the bars.
         self.stage.add_widget(display, index=len(self.stage.children))  # Under the card.
         self.display = display
-        self.config.set("wombo", "input_display", mode)
+        self.settings.set("input_display", mode)
         self.menu_bar.set_display_mode(mode)
 
     def default_game(self):
-        game = self.config.get("wombo", "default_game")
+        game = self.settings.default_game
         return game if game in GAMES else None
 
     def set_game(self, game, action_layout=None, mark_edited=True):
@@ -1315,43 +1010,44 @@ class WomboComboApp(App):
 
     def set_up_next_visible(self, visible):
         self.input_list_layout.show_next = visible
-        self.config.set("wombo", "show_next", int(visible))
+        self.settings.set("show_next", int(visible))
         self.menu_bar.set_up_next_visible(visible)
 
     def toggle_up_next(self):
         self.set_up_next_visible(not self.input_list_layout.show_next)
 
     def set_actions_visible(self, visible):
-        self.playalong_controller.show_actions = visible
-        self.config.set("wombo", "show_actions", int(visible))
+        self.playalong_controller.set_show_actions(visible)
+        self.settings.set("show_actions", int(visible))
         self.menu_bar.set_actions_visible(visible)
 
     def toggle_actions(self):
-        self.set_actions_visible(not self.playalong_controller.show_actions)
-        if self.playalong_controller.show_actions and not self.playalong_controller.game:
+        self.set_actions_visible(not self.playalong_controller.is_showing_actions())
+        if self.playalong_controller.is_showing_actions() and not self.playalong_controller.get_game()[0]:
             self.flash("This recording has no game: choose one in Edit > Game actions...", "warning", 6)
 
     def edit_game_actions(self):
         controller = self.playalong_controller
-        if controller.is_recording() or not controller.input_track:
+        if controller.is_recording() or not controller.track_length():
             self.flash("Open a recording to set its game actions", "warning")
             return
         track = controller.get_input_track()
         used = {button: sum(1 for i, frame in enumerate(track) if frame[button] and (i == 0 or not track[i - 1][button]))
                 for button in LIST_BUTTON_ORDER}
-        GameActionsPopup({key: game["name"] for key, game in GAMES.items()}, controller.game, controller.action_layout,
+        current_game, current_layout = controller.get_game()
+        GameActionsPopup({key: game["name"] for key, game in GAMES.items()}, current_game, current_layout,
                          {key: list(game["actions"]) for key, game in GAMES.items()},
                          {key: game["default_layout"] for key, game in GAMES.items()}, used,
                          lambda game, layout: self.set_game(game, layout)).open()
 
     def set_notes_visible(self, visible):
         self.input_list_layout.show_notes = visible
-        self.config.set("wombo", "show_notes", int(visible))
+        self.settings.set("show_notes", int(visible))
         self.menu_bar.set_notes_visible(visible)
 
     def set_lanes_shown(self, shown):
         self.input_list_layout.lanes_shown = shown
-        self.config.set("wombo", "lanes", ",".join(name for name in LANES if name in shown))
+        self.settings.set("lanes", ",".join(name for name in LANES if name in shown))
         self.menu_bar.set_lanes_shown(shown)
 
     def toggle_lane(self, name):
@@ -1369,69 +1065,7 @@ class WomboComboApp(App):
         self.show_display(modes[(modes.index(current) + 1) % len(modes)])
 
     def show_help(self):
-        steps = [
-            "Open a recording with [b]Ctrl+O[/b] (or drop its .json / .mp4 on the window), or record one with "
-            "[b]F8[/b] and save it with [b]F12[/b]. The File menu has samples to try.",
-            "Press [b]Space[/b] or [b]Start[/b] and play along: press each input as it reaches the line. No "
-            "controller? [b]WASD[/b] + [b]U I O[/b] / [b]J K L[/b].",
-            "Mark what matters: select frames (drag in the frame meter) and press [b]K[/b]. Runs are graded "
-            "below your attempt.",
-            "Look back: scroll or drag the list, [b]S[/b] saves an attempt, [b]A[/b] lists and replays attempts. "
-            "[b]F3[/b] tries another display.",
-        ]
-        legends = [
-            ("How an input went", [
-                (theme.HIT, "Hit", "On time (in a row of runs, with a tick)"),
-                (theme.EARLY, "Early", "Too soon, by the frames shown"),
-                (theme.LATE, "Late", "Too late, by the frames shown"),
-                (theme.MISS, "Missed", "Not done (with a cross)"),
-                (theme.PENDING, "Waiting", "Not reached yet"),
-            ]),
-            ("What the colours mark", [
-                (theme.ACCENT, "Key input", "Must be pressed somewhere in its window"),
-                (theme.HOLD, "Hold", "A key input held for a number of frames"),
-                (theme.EXACT, "Exact span", "A key input matched frame for frame"),
-                (theme.METER_BUTTON, "Button", "Frame meter: a button is down on that frame"),
-                (theme.METER_DIRECTION, "Stick", "Frame meter: the stick is off neutral"),
-            ]),
-        ]
-        hotkey = {action: key for key, _, action in HOTKEYS}
-        practise = [
-            ("Space / Start", "Play or pause", False),
-            (hotkey["play"] + " / " + hotkey["pause"], "Play / pause", True),
-            ("Home / Back", "Restart: a fresh attempt while practising", False),
-            (hotkey["restart_playback"], "Restart", True),
-            (hotkey["toggle_practice"], "Practice or review (replay your attempt)", True),
-            ("S", "Save the attempt with the recording", False),
-            ("A", "Attempts: rename, show, replay, delete", False),
-        ]
-        edit = [
-            ("Click", "Select a frame (Shift+click extends)", False),
-            ("Drag in Frames", "Select a range of frames", False),
-            ("Right-click", "Menu for the selection", False),
-            ("K", "Mark the selection as a key input", False),
-            ("N", "Add a note to the selection", False),
-            ("Click a tag", "Edit a note or key input", False),
-            ("Esc", "Clear the selection", False),
-        ]
-        record = [
-            (hotkey["toggle_recording"], "Start / stop recording", True),
-            ("Ctrl+O / " + hotkey["open_track"], "Open a recording", True),
-            ("Ctrl+S", "Save changes to the recording", False),
-            (hotkey["save_recording"], "Save recording as (with its video)", True),
-            (hotkey["demo_recording"], "Demo the recording in game", True),
-            (hotkey["demo_key_inputs"], "Demo just the key inputs in game", True),
-        ]
-        view = [
-            (hotkey["show_help"], "This help", True),
-            (hotkey["toggle_overlay"], "Overlay mode: on top of the game", True),
-            (hotkey["toggle_display"], "Next display: input list, arrow lanes, ring", True),
-            (hotkey["toggle_notes"], "Show / hide notes", True),
-            ("Wheel / drag", "Move through the list, a frame per notch", False),
-            ("Ctrl+Wheel", "Scroll speed (zoom)", False),
-        ]
-        columns = [[("Practise", practise), ("Edit", edit)], [("Record, files and demos", record), ("View", view)]]
-        HelpPopup(steps, legends, columns, self.open_user_guide).open()
+        HelpPopup(help_content.STEPS, help_content.LEGENDS, help_content.key_columns(), self.open_user_guide).open()
 
     def open_user_guide(self):
         path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "docs", "USER_GUIDE.md")
@@ -1442,57 +1076,7 @@ class WomboComboApp(App):
 
     def open_settings_popup(self):
         readers = self.select_controller()
-
-        def setter(key, apply=None):
-            def on_change(value):
-                self.config.set("wombo", key, int(value) if isinstance(value, bool) else value)
-                self.config.write()
-                if apply:
-                    apply()
-            return on_change
-
-        displays = list_displays() or [(0, "")]
-        config = self.config
-        practice = [
-            ("Scroll speed", "step", [("Fast: 0.75 s ahead", "0.75"), ("1 s ahead", "1.0"), ("1.5 s ahead", "1.5"),
-                                      ("2 s ahead", "2.0"), ("Slow: 3 s ahead", "3.0")],
-             str(config.getfloat("wombo", "lookahead")),
-             setter("lookahead", lambda: self.input_list_layout.set_lookahead(config.getfloat("wombo", "lookahead")))),
-            ("Lead-in", "step", [("Off", "0"), ("0.5 s", "30"), ("1 s", "60"), ("2 s", "120")],
-             config.get("wombo", "lead_in"),
-             setter("lead_in", lambda: setattr(self.playalong_controller, "lead_in", config.getint("wombo", "lead_in")))),
-            ("Recent attempts shown", "step", [(str(n), str(n)) for n in (0, 1, 2, 3, 5, 8, 10, 15, 20)],
-             config.get("wombo", "recent_attempts"),
-             setter("recent_attempts", lambda: self.playalong_controller.set_history_count(
-                 config.getint("wombo", "recent_attempts")))),
-        ]
-        controller = [
-            ("Controller", "pick", [("First connected", "auto")] + [(r.name, r.name) for r in readers],
-             config.get("wombo", "controller"), setter("controller", self.select_controller)),
-            ("Game for new recordings", "pick", [("None", "")] + [(game["name"], key) for key, game in GAMES.items()],
-             config.get("wombo", "default_game"), setter("default_game")),
-        ]
-        demo = [
-            ("Hit sound", "switch", None, config.getboolean("wombo", "hit_sound"), setter("hit_sound")),
-            ("Demo countdown", "step", [("1 s", "60"), ("2 s", "120"), ("3 s", "180"), ("5 s", "300")],
-             config.get("wombo", "demo_countdown"), setter("demo_countdown")),
-        ]
-        recording = [
-            ("Record video", "switch", None, config.getboolean("wombo", "capture_video"), setter("capture_video")),
-            ("Capture display", "pick", [(f"Display {i + 1}  {size}", str(i)) for i, size in displays],
-             config.get("wombo", "display"), setter("display")),
-            ("Video size", "pick", [(label, str(h)) for label, h in VIDEO_HEIGHTS],
-             config.get("wombo", "video_height"), setter("video_height")),
-            ("Encoder", "pick", ENCODERS, config.get("wombo", "encoder"), setter("encoder")),
-            ("Overlay input delay", "step", [(f"{n} frames", str(n)) for n in range(13)],
-             config.get("wombo", "overlay_delay"), setter("overlay_delay")),
-            ("Export overlay on save", "switch", None, config.getboolean("wombo", "export_overlay_on_save"),
-             setter("export_overlay_on_save")),
-        ]
-        columns = [[("Practice", practice), ("Controller and game", controller), ("Sound and demo", demo)],
-                   [("Recording and video", recording)]]
-        SettingsPopup(columns).open()
-
+        SettingsPopup(dialog_columns(self, readers, list_displays() or [(0, "")], GAMES)).open()
 
 if __name__ == "__main__":
     # Kivy owns the root logger, so module logs (including late sampler ticks) go to ~/.kivy/logs.

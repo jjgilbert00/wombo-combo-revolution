@@ -3,9 +3,16 @@ import os
 import sys
 
 # Tests import the app's modules from the repository root.
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, ROOT)
 
 from input_list import LIST_BUTTON_ORDER  # noqa: E402
+
+
+def source(*path):
+    """A file of the app's source, as text."""
+    with open(os.path.join(ROOT, *path), encoding="utf-8") as f:
+        return f.read()
 
 
 def state(direction=5, *buttons):

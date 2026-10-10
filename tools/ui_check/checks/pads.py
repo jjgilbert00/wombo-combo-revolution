@@ -24,18 +24,6 @@ class WarmUpPad:
         return next((state for first, last, state in self.PRESSES if first <= frame <= last), st(5))
 
 
-class HoldPad:
-    """Holds one direction the whole time."""
-
-    name, connected, menu = "Hold pad", True, (False, False)
-
-    def __init__(self, direction):
-        self.direction = direction
-
-    def poll(self):
-        return st(self.direction)
-
-
 def use_pad(app, pad):
     app.sampler.reader = pad
     app.check_controller = lambda dt: None  # Keep the stand-in; don't look for real pads.
