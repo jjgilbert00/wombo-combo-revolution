@@ -166,9 +166,14 @@ class Packs(unittest.TestCase):
                 rules = resolve(pack=pack, character=character)
                 for motion in rules.motions:
                     self.assertTrue(all(step and all(d in range(1, 10) for d in step) for step in motion.steps), name)
-                    # Its written form, done cleanly, is recognised as itself.
-                    clean = [state(d) for d in motion.written] + [state(motion.written[-1], "X")]
-                    found = input_rules.recognise_motion(clean, 0, len(clean) - 1, motion.written[-1], rules)
+                    # Done cleanly (each step's first direction; a charge held as long as it needs), it's
+                    # recognised as a motion (another one may fit too: 360 also passes through 623).
+                    first = [step[0] for step in motion.steps]
+                    if motion.charge:
+                        clean = [state(first[0])] * motion.charge.frames + [state(first[1], "X")]
+                    else:
+                        clean = [state(d) for d in first] + [state(first[-1], "X")]
+                    found = input_rules.recognise_motion(clean, 0, len(clean) - 1, first[-1], rules)
                     self.assertIsNotNone(found, (name, motion.name))
 
 

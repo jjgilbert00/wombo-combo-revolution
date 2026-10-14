@@ -1,6 +1,9 @@
 # Input rules: how each game reads inputs (design)
 
-Status: proposal, for review. Nothing here is built yet.
+Status: built so far: the engine (`input_rules.py`), the generic pack, and the SF6 pack for Classic
+controls (every character's command normals, motions and charge timings). Not yet: SF6 Modern
+controls, the key input editor's accept chips, the other games' packs, hub-hosted packs, side-switch
+markers and the calibration mode.
 
 ## The problem
 
@@ -48,7 +51,7 @@ Granblue Fantasy Versus: Rising, **MK1** Mortal Kombat 1, **COTW** Fatal Fury: C
 | # | Rule | Games | Scope | Confidence | Interpreter | Grader |
 |---|---|---|---|---|---|---|
 | A1 | **Crouching normals**: any down direction (1, 2, 3) plus a button is the same crouching normal, except a character's own command normals on 1 or 3. | SF6, GGST, GBVSR, COTW | Game default, character exceptions | Known (SF6); Likely (others) | Writes 1HK and 3HK as `2HK` | 1/2/3 + button satisfy a `2X` key input |
-| A2 | **Standing normals**: back or forward plus a button is the standing normal, except command normals. | SF6, GBVSR, COTW | Game default, character exceptions (e.g. SF6 Ryu's 6HP is a different move) | Known (SF6) | Writes 4MP as `5MP` / `MP` | 4/5/6 + button satisfy a `5X` |
+| A2 | **Standing normals**: back or forward plus a button is the standing normal, except command normals. | SF6, GBVSR, COTW | Game default, character exceptions (e.g. SF6 Ryu's 6MP, Collarbone Breaker, is a different move) | Known (SF6) | Writes 4MP as `5MP` / `MP` | 4/5/6 + button satisfy a `5X` |
 | A3 | **Forward + button is usually its own move**: so A2 is off by default. | GGST (6P for everyone, 6H for most), MK1 (F+button, B+button strings), T8 | Game default | Known (GGST 6P, T8); Likely (MK1) | Keeps 6P distinct | Exact direction |
 | A4 | **Every direction is its own move**: d, df, db, f, b, u, uf, ub + button all differ. | T8 | Game default | Known | Keeps all 8 | Exact direction |
 | A5 | **Neutral is neutral**: a standing normal recorded at 5 needs 5 (or A2's set), not *any* direction. Today a neutral press accepts any direction, so a command normal passes. | All | Game default | Known (it's a bug fix) | `MP` stores direction 5, not "any" | 5 (plus A2's set if on) |
@@ -94,7 +97,7 @@ Granblue Fantasy Versus: Rising, **MK1** Mortal Kombat 1, **COTW** Fatal Fury: C
 
 ### Character-specific rules (examples of the shape)
 
-- **Command normals** that break A1 or A2: SF6 Ryu's 6HP (Collarbone Breaker) isn't his standing HP,
+- **Command normals** that break A1 or A2: SF6 Ryu's 6MP (Collarbone Breaker) isn't his standing MP,
   and the 3HK you mentioned for some SF6 characters isn't their sweep. A character file lists them;
   the game's equivalence rules then leave those direction-and-button pairs exact.
 - **Charge moves** (C7) and **360s** (C6) belong to particular characters.
@@ -102,7 +105,8 @@ Granblue Fantasy Versus: Rising, **MK1** Mortal Kombat 1, **COTW** Fatal Fury: C
 - **Special motions** some characters have that others don't (e.g. 214214, 632146).
 
 Which characters have which command normals should be read from each game's move list or a frame-data
-site when a character file is written. This document doesn't assert any beyond Ryu's 6HP.
+site when a character file is written. (The SF6 pack's come from SuperCombo's Data pages: see
+rule_packs/sf6.json.)
 
 ## Design
 
@@ -170,7 +174,7 @@ stream with the time limits: no regular expressions over strings.
   ],
   "schemes": {"modern": {"rules": [{"id": "sp-specials", "type": "named_buttons", "name": "SP", "buttons": ["RB"]}]}},
   "characters": {
-    "ryu": {"except": [{"rule": "standing-normals", "direction": 6, "button": "HP", "move": "Collarbone Breaker"}]}
+    "ryu": {"except": [{"rule": "standing-normals", "direction": 6, "button": "MP", "move": "Collarbone Breaker"}]}
   }
 }
 ```

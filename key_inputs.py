@@ -145,7 +145,7 @@ def satisfied_at(key_input, attempt, frame, rules=STRICT):
     rules = with_key_input_overrides(rules, key_input)
     motion = key_input["motion"]
     first = max(0, key_input["start"] - rules.buffer)
-    if motion and not motion_done(motion, attempt, first, frame, rules)[0]:
+    if motion and not motion_done(motion, attempt, first, frame, rules, key_input["buttons"])[0]:
         return False
     if motion and not key_input["buttons"] and key_input["direction"] is None:
         return True  # A motion on its own is complete once its last direction is reached.
@@ -275,13 +275,18 @@ def derive(track, start, end, rules=STRICT):
             named = recognise_motion(track, start, frame, direction, rules)
             leading = directions(start, frame)
             motion = named.written if named else (leading if len(leading) >= 2 else [])
+            charge = {"charge": True} if named and named.charge else {}
+            if named and not named.charge and named.name != "".join(str(d) for d in named.written):
+                charge["motion_name"] = named.name  # Written by name: 360, not 6248.
             if rules.strict:
                 written = direction if direction != 5 else None
+            elif named:
+                written = None  # A special move: its motion says what's needed, not the press's direction.
             elif direction == 5 and not rules.neutral_is_neutral:
                 written = None
             else:
                 written = rules.written_direction(direction, pressed)
-            return {"start": start, "end": end, "motion": motion, "direction": written, "buttons": pressed}
+            return {"start": start, "end": end, "motion": motion, "direction": written, "buttons": pressed, **charge}
     held = directions(start, end)
     named = recognise_motion(track, start, end, track[end]["direction"], rules) if len(held) >= 2 else None
     if named:
@@ -317,6 +322,11 @@ def describe(key_input):
         direction = "" if key_input["direction"] is None else str(key_input["direction"])
         return f"[{direction + '+'.join(key_input['buttons']) or 'any'}] {key_input['hold']}f"
     motion = "".join(str(direction) for direction in key_input["motion"])
+    if key_input.get("motion_name") and motion:
+        buttons = "+".join(key_input["buttons"])
+        return f"{key_input['motion_name']}+{buttons}" if buttons else key_input["motion_name"]
+    if key_input.get("charge") and motion:
+        motion = f"[{motion[0]}]{motion[1:]}"  # A charge motion: the first direction is held.
     direction = key_input["direction"]
     # The press direction is usually the motion's last step, so don't repeat it.
     held = "" if direction is None or (motion and motion[-1] == str(direction)) else str(direction)
@@ -363,7 +373,7 @@ def explain(key_input, attempt, target, rules=STRICT, names=None):
                 notes.append(f"{_both(buttons, names)} {gap} frame{'s' * (gap != 1)} apart: counted as together"
                              f"{_unverified(rules, 'simultaneous')}")
         if key_input["motion"]:
-            _, how = motion_done(key_input["motion"], attempt, first, hit, rules)
+            _, how = motion_done(key_input["motion"], attempt, first, hit, rules, buttons)
             if how and how[1] == "shortcut":
                 done = "-".join(str(attempt[f]["direction"]) for f in how[2])
                 notes.append(f"{how[0].name} done as {done} (a shortcut)")
@@ -388,7 +398,11 @@ def explain(key_input, attempt, target, rules=STRICT, names=None):
                 return (f"{_both(buttons, names)} {gap} frames apart; up to {rules.multi_press_window} count as "
                         f"together{_unverified(rules, 'simultaneous')}")
         if key_input["motion"]:
-            done, how = motion_done(key_input["motion"], attempt, first, f, rules)
+            done, how = motion_done(key_input["motion"], attempt, first, f, rules, buttons)
+            if not done and how and how[0].charge:
+                frames, keep = how[0].charge.needs(buttons)
+                return (f"Not enough charge for {how[0].notation()}: hold {how[0].steps[0][0]} for {frames} frames, "
+                        f"and go within {keep} frames of letting go")
             named = how[0] if how else None
             if not done and named and named.max_frames:
                 slow = motion_done(key_input["motion"], attempt, first, f, STRICT)[0]

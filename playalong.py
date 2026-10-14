@@ -348,7 +348,8 @@ class PlayalongController(PlayalongViews):
             return self._character, self._strict_rules, self._rules
 
     def _resolve_rules(self):
-        self._rules = input_rules.resolve(self._game, character=self._character, strict=self._strict_rules)
+        self._rules = input_rules.resolve(self._game, character=self._character, strict=self._strict_rules,
+                                          layout=self._action_layout)
         self._grades_version += 1  # Grades depend on the rules: worked out again.
         self._judgements = []
         self._judged = set()
@@ -380,10 +381,10 @@ class PlayalongController(PlayalongViews):
             if (game if game in GAMES else None) != self._game:
                 self._character = None  # Characters belong to a game.
             self._game = game if game in GAMES else None
-            self._resolve_rules()
             layout = action_layout if action_layout is not None else (GAMES[game]["default_layout"] if self._game else {})
             self._action_layout = {button: action for button, action in layout.items()
                                   if self._game and action in GAMES[self._game]["actions"]}
+            self._resolve_rules()  # Characters' own moves are named by action: the layout says which button.
 
     def score(self, attempt):
         """(hits, total) against the key inputs, or with none, (matched frames, played frames)."""
