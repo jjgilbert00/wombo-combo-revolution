@@ -22,8 +22,13 @@ in the (possibly larger) window, like building charge during a combo: starting a
 first frame is ideal, but any start that still fits the full hold counts. Directions are held the
 way charge works: 2 is any down direction (1, 2 or 3), 4 any back, and so on; a diagonal needs that
 exact diagonal. The motion is ignored.
+
+What counts as the same input is a game's rules (input_rules.py): every function here takes an
+InputRules, STRICT (the literal reading) by default. A key input can narrow what it accepts with
+{"accept": {"directions": [3]}}, or ask to be graded literally with {"accept": {"strict": true}}.
 """
 from input_list import LIST_BUTTON_ORDER
+from input_rules import STRICT, motion_done, recognise_motion, with_key_input_overrides
 
 HIT, MISS, PENDING = "hit", "miss", "pending"
 EARLY, LATE = "early", "late"  # Grades for a miss that was done just outside the window.
@@ -89,54 +94,71 @@ def _hold_result(key_input, attempt):
     return PENDING if possible >= key_input["hold"] else MISS
 
 
-def _pressed_at(key_input, attempt, frame):
+def accepted_directions(key_input, rules=STRICT):
+    """The directions a key input's press accepts: its own, or its class's under the game's rules,
+    or what the key input itself narrows it to."""
+    narrowed = (key_input.get("accept") or {}).get("directions")
+    if narrowed:
+        return frozenset(narrowed)
+    return rules.press_directions(key_input["direction"], key_input["buttons"])[0]
+
+
+def _newly_pressed(attempt, frame, button):
+    previous = attempt[frame - 1] if frame > 0 else None
+    return attempt[frame][button] and not (previous and previous[button])
+
+
+def press_frame(attempt, frame, button):
+    """The frame a button held on this frame was pressed (None if it isn't held)."""
+    if attempt[frame] is None or not attempt[frame][button]:
+        return None
+    while frame > 0 and attempt[frame - 1] is not None and attempt[frame - 1][button]:
+        frame -= 1
+    return frame
+
+
+def _pressed_at(key_input, attempt, frame, rules=STRICT):
     """The buttons are all held on this frame, at least one newly pressed, with the right direction.
 
-    Requiring a new press means a button held down since before the window doesn't count.
+    Requiring a new press means a button held down since before the window doesn't count. With a
+    simultaneous-press window, every button must have been pressed within that many frames.
     """
     state = attempt[frame]
     if state is None:
         return False
-    if key_input["direction"] is not None and state["direction"] != key_input["direction"]:
+    if state["direction"] not in accepted_directions(key_input, rules):
         return False
     buttons = key_input["buttons"]
     if not buttons:
         return True
     if not all(state[button] for button in buttons):
         return False
-    previous = attempt[frame - 1] if frame > 0 else None
-    return any(not (previous and previous[button]) for button in buttons)
+    if not any(_newly_pressed(attempt, frame, button) for button in buttons):
+        return False
+    window = rules.multi_press_window
+    return not window or all(frame - press_frame(attempt, frame, button) <= window for button in buttons)
 
 
-def _motion_done(motion, attempt, start, last):
-    """The directions in motion appear in order somewhere in frames start..last. Other directions
-    in between are allowed, as most games are lenient about that."""
-    step = 0
-    for frame in range(start, last + 1):
-        state = attempt[frame]
-        if state is not None and state["direction"] == motion[step]:
-            step += 1
-            if step == len(motion):
-                return True
-    return False
-
-
-def satisfied_at(key_input, attempt, frame):
+def satisfied_at(key_input, attempt, frame, rules=STRICT):
     """Whether the attempt completes the key input on this frame."""
     key_input = normalized(key_input)
+    rules = with_key_input_overrides(rules, key_input)
     motion = key_input["motion"]
-    if motion and not _motion_done(motion, attempt, key_input["start"], frame):
+    first = max(0, key_input["start"] - rules.buffer)
+    if motion and not motion_done(motion, attempt, first, frame, rules)[0]:
         return False
     if motion and not key_input["buttons"] and key_input["direction"] is None:
         return True  # A motion on its own is complete once its last direction is reached.
-    return _pressed_at(key_input, attempt, frame)
+    return _pressed_at(key_input, attempt, frame, rules)
 
 
-def result(key_input, attempt, target):
+def result(key_input, attempt, target, rules=STRICT):
     """HIT if completed on any eligible frame, MISS once the whole window was played without it,
     otherwise PENDING. An exact key input is a MISS on the first frame that differs from the target
-    and a HIT once every frame has matched."""
+    and a HIT once every frame has matched. Under a game's rules, a press up to its buffer before the
+    window counts too."""
     key_input = normalized(key_input)
+    rules = with_key_input_overrides(rules, key_input)
     frames = range(key_input["start"], min(key_input["end"], len(attempt) - 1) + 1)
     if key_input["hold"] and not key_input["exact"]:
         return _hold_result(key_input, attempt)
@@ -144,7 +166,8 @@ def result(key_input, attempt, target):
         if any(attempt[frame] is not None and attempt[frame] != target[frame] for frame in frames):
             return MISS
         return HIT if all(attempt[frame] is not None for frame in frames) else PENDING
-    if any(satisfied_at(key_input, attempt, frame) for frame in frames):
+    early = range(max(0, key_input["start"] - rules.buffer), key_input["start"])
+    if any(satisfied_at(key_input, attempt, frame, rules) for frame in list(early) + list(frames)):
         return HIT
     if frames and all(attempt[frame] is not None for frame in frames):
         return MISS
@@ -156,7 +179,7 @@ def _nearest(offsets):
     return min(offsets, key=lambda offset: (abs(offset), offset)) if offsets else None
 
 
-def _missed_by(key_input, attempt, target, lo, hi):
+def _missed_by(key_input, attempt, target, lo, hi, rules=STRICT):
     """How many frames outside the window a missed key input was done: negative for early,
     positive for late, None if it wasn't done within lo..hi at all."""
     start, end = key_input["start"], key_input["end"]
@@ -173,28 +196,30 @@ def _missed_by(key_input, attempt, target, lo, hi):
                 offsets.append(run_start - start if run_start < start else run_start + length - 1 - end)
         return _nearest(offsets)
     early = next((frame - start for frame in range(start - 1, lo - 1, -1)
-                  if satisfied_at(dict(key_input, start=lo), attempt, frame)), None)
-    late = next((frame - end for frame in range(end + 1, hi + 1) if satisfied_at(key_input, attempt, frame)), None)
+                  if satisfied_at(dict(key_input, start=lo), attempt, frame, rules)), None)
+    late = next((frame - end for frame in range(end + 1, hi + 1)
+                 if satisfied_at(key_input, attempt, frame, rules)), None)
     return _nearest([offset for offset in (early, late) if offset is not None])
 
 
-def grade(key_input, attempt, target, lo=None, hi=None):
+def grade(key_input, attempt, target, lo=None, hi=None, rules=STRICT):
     """(grade, offset): HIT/PENDING with offset 0, EARLY or LATE with how many frames outside the
     window it was done (-3 = three frames early), or MISS. Early and late are looked for in frames
     lo..hi, by default GRADE_REACH frames either side of the window."""
     key_input = normalized(key_input)
-    outcome = result(key_input, attempt, target)
+    rules = with_key_input_overrides(rules, key_input)
+    outcome = result(key_input, attempt, target, rules)
     if outcome != MISS:
         return outcome, 0
     lo = max(0, key_input["start"] - GRADE_REACH if lo is None else lo)
     hi = min(len(attempt) - 1, key_input["end"] + GRADE_REACH if hi is None else hi)
-    offset = _missed_by(key_input, attempt, target, lo, hi)
+    offset = _missed_by(key_input, attempt, target, lo, hi, rules)
     if offset is None:
         return MISS, 0
     return (EARLY if offset < 0 else LATE), offset
 
 
-def grade_all(key_inputs, attempt, target):
+def grade_all(key_inputs, attempt, target, rules=STRICT):
     """Grades each key input (sorted by start), looking for early and late inputs only up to the
     neighbouring key inputs' windows, so an input that belongs to the next one isn't counted as
     this one done late. Holds are left out of that both ways: other inputs are done during a
@@ -212,17 +237,22 @@ def grade_all(key_inputs, attempt, target):
                 lo = max(lo, other["end"] + 1)
             else:
                 hi = min(hi, other["start"] - 1)
-        grades.append(grade(key_input, attempt, target, lo, hi))
+        grades.append(grade(key_input, attempt, target, lo, hi, rules))
     return grades
 
 
-def derive(track, start, end):
-    """Guesses the key input over track frames start..end, keeping everything the recording shows
-    (the editor makes it easy to drop stray parts).
+def derive(track, start, end, rules=STRICT):
+    """Guesses the key input over track frames start..end.
 
     With a button press in the range: the first press, the direction held at that moment, and any
     motion (two or more directions) leading up to it. Without one: the motion, or the single
     direction, held in the range.
+
+    Under STRICT that's everything the recording shows (the editor makes it easy to drop stray
+    parts). Under a game's rules: buttons pressed within the simultaneous-press window count as one
+    press, the directions before it are recognised as a named motion when they make one (6, 3, 2, 3
+    is 623), a press is written in its class (1HK as 2HK), and a neutral press is neutral (5), not any
+    direction.
     """
     def directions(first, last):
         seen = []
@@ -236,10 +266,26 @@ def derive(track, start, end):
         state, previous = track[frame], track[frame - 1] if frame > 0 else None
         pressed = [b for b in LIST_BUTTON_ORDER if state[b] and not (previous and previous[b])]
         if pressed:
+            if rules.multi_press_window:
+                together = set(pressed)
+                for later in range(frame + 1, min(end, frame + rules.multi_press_window) + 1):
+                    together |= {b for b in LIST_BUTTON_ORDER if _newly_pressed(track, later, b)}
+                pressed = [b for b in LIST_BUTTON_ORDER if b in together]
+            direction = state["direction"]
+            named = recognise_motion(track, start, frame, direction, rules)
             leading = directions(start, frame)
-            return {"start": start, "end": end, "motion": leading if len(leading) >= 2 else [],
-                    "direction": state["direction"] if state["direction"] != 5 else None, "buttons": pressed}
+            motion = named.written if named else (leading if len(leading) >= 2 else [])
+            if rules.strict:
+                written = direction if direction != 5 else None
+            elif direction == 5 and not rules.neutral_is_neutral:
+                written = None
+            else:
+                written = rules.written_direction(direction, pressed)
+            return {"start": start, "end": end, "motion": motion, "direction": written, "buttons": pressed}
     held = directions(start, end)
+    named = recognise_motion(track, start, end, track[end]["direction"], rules) if len(held) >= 2 else None
+    if named:
+        return {"start": start, "end": end, "motion": named.written, "direction": None, "buttons": []}
     if len(held) >= 2:
         return {"start": start, "end": end, "motion": held, "direction": None, "buttons": []}
     return {"start": start, "end": end, "motion": [], "direction": held[0] if held else 5, "buttons": []}
@@ -277,11 +323,87 @@ def describe(key_input):
     return (motion + held + "+".join(key_input["buttons"])) or "any"
 
 
+def _press_text(direction, buttons, names=None):
+    return f"{'' if direction is None else direction}{'+'.join((names or {}).get(b, b) for b in buttons)}"
+
+
+def _both(buttons, names=None):
+    return " and ".join((names or {}).get(b, b) for b in buttons)
+
+
+def _unverified(rules, rule_id):
+    return " (unverified)" if rules.is_unverified(rule_id) else ""
+
+
+def explain(key_input, attempt, target, rules=STRICT, names=None):
+    """Why a key input was graded as it was, when a rule made the difference or a near miss says
+    what to fix: "1HK counted as 2HK (Crouching normals)", "MP and MK 4 frames apart; up to 2 count
+    as together". "" when there's nothing to add (a literal hit, or a miss with nothing close).
+    names: how to show buttons ({"Y": "MP"}), by default as they're recorded."""
+    key_input = normalized(key_input)
+    rules = with_key_input_overrides(rules, key_input)
+    if rules.strict or key_input["exact"] or (key_input["hold"] and not key_input["exact"]):
+        return ""
+    start, end = key_input["start"], min(key_input["end"], len(attempt) - 1)
+    first = max(0, start - rules.buffer)
+    buttons, required = key_input["buttons"], key_input["direction"]
+    hit = next((f for f in range(first, end + 1) if satisfied_at(key_input, attempt, f, rules)), None)
+    if hit is not None:
+        notes = []
+        state = attempt[hit]
+        if buttons and required is not None and state["direction"] != required:
+            _, cls = rules.press_directions(required, buttons)
+            if cls:
+                notes.append(f"{_press_text(state['direction'], buttons, names)} counted as "
+                             f"{_press_text(required, buttons, names)} "
+                             f"({cls.name}{_unverified(rules, cls.id)})")
+        if len(buttons) > 1:
+            gap = max(hit - press_frame(attempt, hit, b) for b in buttons)
+            if gap:
+                notes.append(f"{_both(buttons, names)} {gap} frame{'s' * (gap != 1)} apart: counted as together"
+                             f"{_unverified(rules, 'simultaneous')}")
+        if key_input["motion"]:
+            _, how = motion_done(key_input["motion"], attempt, first, hit, rules)
+            if how and how[1] == "shortcut":
+                done = "-".join(str(attempt[f]["direction"]) for f in how[2])
+                notes.append(f"{how[0].name} done as {done} (a shortcut)")
+        if hit < start:
+            notes.append(f"{start - hit} frame{'s' * (start - hit != 1)} early, within the input buffer"
+                         f"{_unverified(rules, 'buffer')}")
+        return "; ".join(notes)
+    # A miss: look for the press, and say what was wrong with it.
+    for f in range(first, end + 1):
+        state = attempt[f]
+        if state is None or not buttons or not all(state[b] for b in buttons):
+            continue
+        if not any(_newly_pressed(attempt, f, b) for b in buttons):
+            continue
+        accepted = accepted_directions(key_input, rules)
+        if state["direction"] not in accepted:
+            wanted = ", ".join(str(d) for d in sorted(accepted))
+            return f"{_press_text(state['direction'], buttons, names)} pressed; this needs direction {wanted}"
+        if rules.multi_press_window and len(buttons) > 1:
+            gap = max(f - press_frame(attempt, f, b) for b in buttons)
+            if gap > rules.multi_press_window:
+                return (f"{_both(buttons, names)} {gap} frames apart; up to {rules.multi_press_window} count as "
+                        f"together{_unverified(rules, 'simultaneous')}")
+        if key_input["motion"]:
+            done, how = motion_done(key_input["motion"], attempt, first, f, rules)
+            named = how[0] if how else None
+            if not done and named and named.max_frames:
+                slow = motion_done(key_input["motion"], attempt, first, f, STRICT)[0]
+                if slow:
+                    return f"{named.name} too slow: it has to be done within {named.max_frames} frames"
+            if not done:
+                return f"Pressed, but the {''.join(str(d) for d in key_input['motion'])} motion wasn't done"
+    return ""
+
+
 DEMO_PRESS_FRAMES = 3  # How long a demo holds each press; a 1-frame tap can slip between game polls.
 DEMO_MOTION_STEP_FRAMES = 2  # How long a demo holds each direction of a motion.
 
 
-def demo_track(key_inputs, target):
+def demo_track(key_inputs, target, rules=STRICT):
     """The recording cleaned down to its key inputs: a track (as long as the target) that does only
     what's required, for demoing the combo without the stray and over-held inputs.
 
@@ -310,7 +432,7 @@ def demo_track(key_inputs, target):
             track[frame] = dict(target[frame])
     for key_input in (k for k in key_inputs if not is_hold(k) and not k["exact"]):
         frame = next((f for f in range(key_input["start"], min(key_input["end"], len(target) - 1) + 1)
-                      if satisfied_at(key_input, target, f)), key_input["start"])
+                      if satisfied_at(key_input, target, f, rules)), key_input["start"])
         motion = list(key_input["motion"])
         direction = key_input["direction"] if key_input["direction"] is not None else (motion[-1] if motion else None)
         if motion and motion[-1] == direction:

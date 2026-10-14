@@ -77,7 +77,7 @@ class Feedback:
         """Verdicts popping up as each key input is settled, newest on top, rising as they fade."""
         x, top = self._verdicts_at
         recent = list(reversed(judgements[-3:]))
-        for row, (grade, offset, notation, age) in enumerate(recent):
+        for row, (grade, offset, notation, age, *why) in enumerate(recent):
             if row == len(self.verdicts):
                 color, rect = Color(1, 1, 1, 0), Rectangle()
                 self.verdict_layer.add(color)
@@ -85,7 +85,11 @@ class Feedback:
                 self.verdicts.append((color, rect))
             color, rect = self.verdicts[row]
             text = {EARLY: f"EARLY {offset:+d}", LATE: f"LATE {offset:+d}"}.get(grade, grade.upper())
-            texture = _verdict_texture(f"{text}  [size=14sp]{notation}[/size]")
+            reason = why[0] if why else ""
+            if len(reason) > 48:
+                reason = reason[:47] + "…"
+            texture = _verdict_texture(f"{text}  [size=14sp]{notation}[/size]"
+                                       + (f"  [size=11sp]{reason}[/size]" if reason else ""))
             color.rgba = (*GRADE_COLORS[grade], max(0.0, 1 - age * age))
             rect.texture, rect.size = texture, texture.size
             rect.pos = (x, top - texture.height - row * dp(36) + age * dp(14))

@@ -4,7 +4,8 @@ import time
 from controller import get_neutral_controller_state
 from games import GAMES
 from button_map import full_map, inverse_map, map_state
-from key_inputs import GRADE_REACH, HIT, PENDING, describe, grade_all, normalized, result
+import input_rules
+from key_inputs import GRADE_REACH, HIT, PENDING, describe, explain, grade_all, normalized, result
 from playalong_state import PlayalongStatus, RunningState
 from playalong_views import PlayalongViews
 
@@ -87,6 +88,11 @@ class PlayalongController(PlayalongViews):
         self._action_layout = {}  # Recorded button -> the game's action.
         self._show_actions = False  # Set by the app: show actions instead of buttons.
         self._grades_version = 0  # Bumped when key inputs or the target change, invalidating cached grades.
+        # What counts as the same input (input_rules.py): the game's rules, for its character, unless
+        # the recording asks for strict (the literal reading).
+        self._character = None
+        self._strict_rules = False
+        self._rules = input_rules.resolve()
 
     def _fit_key_inputs(self, key_inputs):
         """Drops key inputs that start past the end of the track and trims ones that run off it.
@@ -122,17 +128,18 @@ class PlayalongController(PlayalongViews):
         for i, key_input in enumerate(self._key_inputs):
             if i in self._judged:
                 continue
-            if result(key_input, self._attempt_track, self._input_track) == HIT:
+            if result(key_input, self._attempt_track, self._input_track, self._rules) == HIT:
                 verdict = (HIT, 0)
             elif final or frame > key_input["end"] + GRADE_REACH:
-                grades = grades or grade_all(self._key_inputs, self._attempt_track, self._input_track)
+                grades = grades or grade_all(self._key_inputs, self._attempt_track, self._input_track, self._rules)
                 verdict = grades[i]
                 if verdict[0] == PENDING:
                     continue  # Never reached this pass.
             else:
                 continue
             self._judged.add(i)
-            self._judgements.append((time.monotonic(), i) + tuple(verdict))
+            why = explain(key_input, self._attempt_track, self._input_track, self._rules, self._button_names())
+            self._judgements.append((time.monotonic(), i) + tuple(verdict) + (why,))
         del self._judgements[:-20]
 
     def _summarise(self, run_id):
@@ -140,7 +147,7 @@ class PlayalongController(PlayalongViews):
         "best", "streak", "match", "time"}. Without key inputs, "match" is the share of frames matched."""
         summary = {"run": run_id, "time": time.monotonic(), "hits": 0, "total": 0, "problems": [], "match": None}
         if self._key_inputs:
-            grades = grade_all(self._key_inputs, self._attempt_track, self._input_track)
+            grades = grade_all(self._key_inputs, self._attempt_track, self._input_track, self._rules)
             played = [(k, g) for k, g in zip(self._key_inputs, grades) if g[0] != PENDING]
             summary["hits"] = sum(grade == HIT for _, (grade, _) in played)
             summary["total"] = len(self._key_inputs)
@@ -323,9 +330,36 @@ class PlayalongController(PlayalongViews):
             return bool(self._notes)
 
     def get_judgements(self):
-        """[(time, key input index, grade, offset)], newest last."""
+        """[(time, key input index, grade, offset, why)], newest last: why explains a grade a rule
+        decided (see key_inputs.explain), or is ""."""
         with self._lock:
             return list(self._judgements)
+
+    def set_input_rules(self, character=None, strict=False):
+        """The recording's character (a key of its game's rule pack, or None) and whether it's graded
+        strictly (the literal reading) rather than by its game's rules."""
+        with self._lock:
+            self._character, self._strict_rules = character, bool(strict)
+            self._resolve_rules()
+
+    def get_input_rules(self):
+        """(character, strict, the resolved rules)."""
+        with self._lock:
+            return self._character, self._strict_rules, self._rules
+
+    def _resolve_rules(self):
+        self._rules = input_rules.resolve(self._game, character=self._character, strict=self._strict_rules)
+        self._grades_version += 1  # Grades depend on the rules: worked out again.
+        self._judgements = []
+        self._judged = set()
+        for run in self._runs + self._saved:
+            run.pop("_grades", None)
+
+    def _button_names(self):
+        """How buttons are shown in explanations: the game's actions, or the player's own buttons."""
+        if self._show_actions and self._game in GAMES:
+            return {button: action for button, action in self._action_layout.items()}
+        return dict(self._button_map)
 
     def set_lead_in(self, frames):
         with self._lock:
@@ -343,7 +377,10 @@ class PlayalongController(PlayalongViews):
         """The recording's game (or None) and which recorded button is which action (default: the
         game's usual layout)."""
         with self._lock:
+            if (game if game in GAMES else None) != self._game:
+                self._character = None  # Characters belong to a game.
             self._game = game if game in GAMES else None
+            self._resolve_rules()
             layout = action_layout if action_layout is not None else (GAMES[game]["default_layout"] if self._game else {})
             self._action_layout = {button: action for button, action in layout.items()
                                   if self._game and action in GAMES[self._game]["actions"]}
@@ -352,7 +389,7 @@ class PlayalongController(PlayalongViews):
         """(hits, total) against the key inputs, or with none, (matched frames, played frames)."""
         with self._lock:
             if self._key_inputs:
-                grades = grade_all(self._key_inputs, attempt, self._input_track)
+                grades = grade_all(self._key_inputs, attempt, self._input_track, self._rules)
                 return sum(grade == HIT for grade, _ in grades), len(grades)
             played = [(a, t) for a, t in zip(attempt, self._input_track) if a is not None]
             return sum(a == t for a, t in played), len(played)
@@ -455,7 +492,7 @@ class PlayalongController(PlayalongViews):
             return self._key_input_score()
 
     def _key_input_score(self):
-        results = [result(k, self._attempt_track, self._input_track) for k in self._key_inputs]
+        results = [result(k, self._attempt_track, self._input_track, self._rules) for k in self._key_inputs]
         return sum(r == HIT for r in results), len(results)
 
     def get_notes(self):

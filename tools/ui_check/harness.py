@@ -9,6 +9,7 @@ window pixels with y from the TOP (like screenshots). Logs go to shots/log.txt, 
 shots/<name>.png. Settings come from a fresh harness.ini next to this file each run, so your real
 settings are never touched. The exit code is the number of failed checks.
 """
+import logging
 import os
 import runpy
 import sys
@@ -123,6 +124,20 @@ class Harness:
         self.log("shot", path)
 
 
+class _UnhandledErrors(logging.Handler):
+    """Fails the run for any error the app caught and carried on from (main.KeepRunning): the app
+    survives those, so without this a broken handler would only show as a check that comes out
+    oddly, if at all."""
+
+    def __init__(self, harness):
+        super().__init__(logging.ERROR)
+        self.harness = harness
+
+    def emit(self, record):
+        self.harness.failures += 1
+        self.harness.log("FAIL unhandled error in the app: " + self.format(record))
+
+
 class HarnessApp(main.WomboComboApp):
     def get_application_config(self, *args):
         return os.path.join(HERE, "harness.ini")  # Keep the user's real settings untouched.
@@ -131,6 +146,7 @@ class HarnessApp(main.WomboComboApp):
         super().on_start()
         Window.size = (1880, 960)
         self.harness = Harness(self)
+        logging.getLogger(main.__name__).addHandler(_UnhandledErrors(self.harness))
         self._steps = runpy.run_path(STEPS)["steps"](self.harness)
         Clock.schedule_once(self._advance, 0.5)
 

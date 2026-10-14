@@ -249,6 +249,28 @@ charge you actually held, so a late start shows up as a gap.
 **Exact spans.** Only the frames in the window are checked. To enforce "walk for exactly 3
 frames", include the neutral frame on each side of the walk in the selection.
 
+### What counts as the same input
+
+Games are lenient in their own ways: in Street Fighter, down-back + HK and down-forward + HK do the
+same sweep as down + HK (unless that character has a move of their own there), buttons pressed a
+frame apart count as pressed together, and a dragon punch done as 6-3-2-3 still comes out. Wombo
+Combo reads your inputs, and marks key inputs, by the recording's game's **input rules**:
+
+- A key input you mark is written the way the game reads it: a press a frame after another is part
+  of the same press, the directions before it become the named motion they make (`6323` is `623`),
+  and a neutral press is neutral (`5MP`), so forward + MP, often a different move, doesn't count.
+- Grading accepts what the game would. When a rule decides a grade, the verdict says why ("1HK
+  counted as 2HK"), and a miss says what was off ("MP and MK 4 frames apart; up to 2 count as
+  together"). Rules marked *unverified* use a cautious value nobody has measured yet.
+- Pick the recording's **character** in *Edit > Game actions and character...*. A character's own
+  moves (a 3HK that isn't a sweep) are then exact. Without a character, only what's the same for
+  every character is treated as the same.
+- *Edit > Strict input rules* grades the recording literally instead: exact directions, every
+  direction of a motion, buttons on the same frame. It's saved with the recording.
+
+Games without rules of their own get the ones that hold for any game: neutral is neutral, presses a
+couple of frames apart are together, and motions are recognised by name.
+
 ### Numpad notation
 
 ```
@@ -283,7 +305,7 @@ verdict.
 
 **Which button is which action** depends on the layout the recording was made with. By default
 that's SF6's Xbox Classic layout. If the recording used another layout, set it once in
-**Edit > Game actions...**: pick the game, then the action for each recorded button (unused
+**Edit > Game actions and character...**: pick the game, then the action for each recorded button (unused
 buttons are greyed). Giving an action to a button takes it off the one that had it. **Default
 layout** puts the usual one back. It's saved with the recording.
 

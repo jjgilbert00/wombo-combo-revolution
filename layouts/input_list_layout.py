@@ -1083,7 +1083,7 @@ class InputListLayout(StencilView):
         matched = not snapshot.recording and live_key == target_key
         self.line_color.rgba = (*MATCH_COLOR, 1) if matched else LINE_COLOR
         # A hit just now: the line flares, wide and bright, for a moment.
-        flare = max((max(0.0, 1 - age / 0.25) for grade, _, _, age in snapshot.judgements if grade == "hit"),
+        flare = max((max(0.0, 1 - age / 0.25) for grade, _, _, age, *_ in snapshot.judgements if grade == "hit"),
                     default=0.0)
         width = dp(2) + dp(4) * flare
         self.line.pos = (self._line_x() - width / 2, self.line.pos[1])

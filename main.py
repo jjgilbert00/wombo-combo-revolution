@@ -39,6 +39,7 @@ from key_inputs import demo_track, derive, derive_hold, describe, normalized
 from layouts.input_list_layout import LANES, InputListLayout
 from games import GAMES
 import guidance
+import input_rules
 import help_content
 import keys
 import track_file
@@ -412,7 +413,7 @@ class WomboComboApp(App):
                            "warning", 6)
                 self.beep(False)
                 return
-            track = demo_track(controller.get_key_inputs(), controller.get_input_track())
+            track = demo_track(controller.get_key_inputs(), controller.get_input_track(), controller.get_input_rules()[2])
         else:
             track = controller.get_input_track()
         if self.virtual_pad is None:
@@ -524,7 +525,7 @@ class WomboComboApp(App):
         if existing is not None:
             self.edit_key_input(existing)
             return
-        self._open_key_input_popup(None, derive(controller.get_input_track(), start, end))
+        self._open_key_input_popup(None, derive(controller.get_input_track(), start, end, controller.get_input_rules()[2]))
 
     def edit_key_input(self, index):
         self._open_key_input_popup(index, self.playalong_controller.get_key_inputs()[index])
@@ -805,6 +806,7 @@ class WomboComboApp(App):
                                                   data.get("key_inputs"), data.get("saved_attempts"),
                                                   data.get("button_map"))
         self.set_game(data.get("game", self.default_game()), data.get("action_layout"), mark_edited=False)
+        self.playalong_controller.set_input_rules(data.get("character"), (data.get("input_rules") or {}).get("strict"))
         self.track_path = path
         video = os.path.splitext(path)[0] + ".mp4"
         self.capture_path = video if os.path.exists(video) else None
@@ -823,11 +825,13 @@ class WomboComboApp(App):
         controller = self.playalong_controller
         attempt = controller.get_attempt_track()
         game, action_layout = controller.get_game()
+        character, strict, _ = controller.get_input_rules()
         return {"inputs": controller.get_input_track(),
                 "attempt": attempt if any(frame is not None for frame in attempt) else None,
                 "notes": controller.get_notes(), "key_inputs": controller.get_key_inputs(),
                 "saved_attempts": controller.get_saved(), "button_map": controller.get_button_map(),
-                "game": game, "action_layout": action_layout if game else None}
+                "game": game, "action_layout": action_layout if game else None,
+                "character": character, "input_rules": {"strict": True} if strict else None}
 
     def save(self):
         """Saves into the open recording's file, or for a new take asks where to save it (with its
@@ -1071,7 +1075,25 @@ class WomboComboApp(App):
         GameActionsPopup({key: game["name"] for key, game in GAMES.items()}, current_game, current_layout,
                          {key: list(game["actions"]) for key, game in GAMES.items()},
                          {key: game["default_layout"] for key, game in GAMES.items()}, used,
-                         lambda game, layout: self.set_game(game, layout)).open()
+                         lambda game, layout: self.set_game(game, layout),
+                         {key: input_rules.pack_characters(key) for key in GAMES}, controller.get_input_rules()[0],
+                         self.set_character).open()
+
+    def set_character(self, character):
+        """The recording's character, for its game's input rules (a character's own moves)."""
+        _, strict, _ = self.playalong_controller.get_input_rules()
+        self.playalong_controller.set_input_rules(character, strict)
+        self.unsaved_edits = True
+
+    def toggle_strict_rules(self):
+        """Grades this recording literally (exact directions, every direction of a motion, buttons on
+        the same frame) instead of by its game's rules, or back."""
+        character, strict, _ = self.playalong_controller.get_input_rules()
+        self.playalong_controller.set_input_rules(character, not strict)
+        self.unsaved_edits = True
+        _, _, rules = self.playalong_controller.get_input_rules()
+        self.flash("Strict input rules: exact directions, motions and timing" if not strict
+                   else f"Input rules: {rules.name}")
 
     def apply_feedback_settings(self):
         """The grade popups and the score banner, on or off in every display."""

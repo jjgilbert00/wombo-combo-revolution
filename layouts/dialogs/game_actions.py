@@ -12,18 +12,21 @@ from layouts.ui_kit import (
 
 
 NO_ACTION = "None"
+NO_CHARACTER = "Not set (only rules true for everyone)"
 
 
 class GameActionsPopup(Dialog):
     """Picks the recording's game and which recorded button is which of its actions, so the input
-    list can show actions (a medium punch, a Drive Impact) instead of buttons. Changes apply at once
-    through on_change(game, layout)."""
+    list can show actions (a medium punch, a Drive Impact) instead of buttons, and its character,
+    for the game's input rules (a character's own moves). Changes apply at once through
+    on_change(game, layout) and on_character(character)."""
 
     ROW_HEIGHT = dp(34)
 
-    def __init__(self, game_names, game, layout, actions, default_layouts, used, on_change, **kwargs):
+    def __init__(self, game_names, game, layout, actions, default_layouts, used, on_change, characters=None,
+                 character=None, on_character=None, **kwargs):
         from images import get_standard_button_icon
-        super().__init__(size_hint=(None, None), size=(dp(520), dp(200) + self.ROW_HEIGHT * 8),
+        super().__init__(size_hint=(None, None), size=(dp(520), dp(200) + self.ROW_HEIGHT * 9),
                          background="", background_color=(0, 0, 0, 0.5), **kwargs)
         self.game_names, self.actions, self.default_layouts = game_names, actions, default_layouts
         self.game, self.layout = game, dict(layout)
@@ -45,6 +48,14 @@ class GameActionsPopup(Dialog):
         self.game_spinner = dropdown(names, game_names.get(game, NO_ACTION), self._choose_game)
         self.game_spinner.size_hint_y = 1
         row.add_widget(self.game_spinner)
+        panel.add_widget(row)
+        self.characters, self.character, self.on_character = characters or {}, character, on_character
+        row = BoxLayout(size_hint_y=None, height=self.ROW_HEIGHT, spacing=dp(10))
+        row.add_widget(Label(text="Character", font_size=FONT_SIZE, color=TEXT_COLOR, halign="left",
+                             valign="middle", size_hint_x=None, width=dp(120), text_size=(dp(120), self.ROW_HEIGHT)))
+        self.character_spinner = dropdown([NO_CHARACTER], NO_CHARACTER, self._choose_character)
+        self.character_spinner.size_hint_y = 1
+        row.add_widget(self.character_spinner)
         panel.add_widget(row)
         for recorded in ("X", "Y", "A", "B", "LB", "RB", "LT", "RT"):
             row = BoxLayout(size_hint_y=None, height=self.ROW_HEIGHT, spacing=dp(10))
@@ -77,6 +88,10 @@ class GameActionsPopup(Dialog):
             spinner.values = choices
             spinner.text = self.layout.get(recorded, NO_ACTION)
             spinner.disabled = not self.game
+        names = self.characters.get(self.game, {})
+        self.character_spinner.values = [NO_CHARACTER] + sorted(names.values())
+        self.character_spinner.text = names.get(self.character, NO_CHARACTER)
+        self.character_spinner.disabled = not names
         self._updating = False
 
     def _choose_game(self, name):
@@ -85,6 +100,7 @@ class GameActionsPopup(Dialog):
         game = next((key for key, value in self.game_names.items() if value == name), None)
         if game != self.game:
             self.game = game
+            self.character = None  # Characters belong to a game.
             self.layout = dict(self.default_layouts.get(game, {}))
             self._changed()
 
@@ -98,6 +114,14 @@ class GameActionsPopup(Dialog):
                 del self.layout[holder]
             self.layout[recorded] = action
         self._changed()
+
+    def _choose_character(self, name):
+        if self._updating:
+            return
+        names = self.characters.get(self.game, {})
+        self.character = next((key for key, value in names.items() if value == name), None)
+        if self.on_character:
+            self.on_character(self.character)
 
     def _reset(self):
         self.layout = dict(self.default_layouts.get(self.game, {}))
