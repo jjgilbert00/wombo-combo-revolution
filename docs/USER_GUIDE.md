@@ -24,8 +24,9 @@ Frame by frame, and attempt after attempt.
 
 ## Quick start
 
-Wombo Combo runs on Windows. Any controller works (Xbox-style ones directly, others through SDL),
-or the keyboard.
+Wombo Combo runs on Windows. Any controller works, or the keyboard: Xbox-style pads directly;
+PlayStation, Switch and most other pads and fight sticks through SDL, which reads their buttons by
+position, like an Xbox pad's (Cross is A, Square X, L1 LB and so on).
 
 1. Download **WomboCombo-windows.zip** and unzip it anywhere.
 2. Run **WomboCombo.exe**. Nothing else to install.
@@ -260,6 +261,20 @@ frames", include the neutral frame on each side of the walk in the selection.
 These assume your character is facing right: `236` is down, down-forward, forward (a
 quarter-circle forward), and `[2]` means hold down.
 
+### Playing from the right side
+
+Recordings are always written as if facing right, so they read the usual way and work from either
+side. If your character is on the right (facing left), set *Settings > Your side* to *Right*: the app
+mirrors what you do as it comes in, so pushing toward the opponent still reads as 6, your attempts
+are graded the right way round, and demos are mirrored back for the game. Recording from the right
+side stores the combo facing right too. *Switch sides* can be given a key (see
+[Keys and mouse reference](#keys-and-mouse-reference)), and the status bar says when you're on the
+right.
+
+A recording made from the right side before this, which reads backwards (`214` for a fireball), can
+be turned round once with *Edit > Flip sides*; its key inputs and saved attempts flip with it. A
+combo that crosses up keeps the side it started on.
+
 ## Game actions
 
 The input list can show what inputs **do** in the game instead of which buttons were pressed. Use
@@ -472,6 +487,7 @@ Settings are in groups: Practice, Feedback, Demo, Recording and video, and Contr
 | Overlay input delay | Frames to delay drawn inputs in overlay videos. |
 | Export overlay on save | Also write `name_overlay.mp4` when saving a recording. |
 | Scroll speed | How far ahead of the line inputs appear: 0.75 s (fast) to 3 s (slow), 1.5 s by default. |
+| Your side | Left (facing right, the usual) or right (facing left): see [Playing from the right side](#playing-from-the-right-side). |
 | Lead-in | The run-up before practice playback: off, 0.5 s, 1 s or 2 s. |
 | Grade popups | HIT, EARLY -1, LATE +2 or MISS pops up as each key input is judged (on by default). |
 | Score after each run | The banner with a run's score and what went wrong (on by default). |
@@ -541,6 +557,9 @@ on the keyboard; as shortcuts, they work when you aren't.
 
 - **"No controller" in the status bar.** Plug the controller in; the app checks every second. If
   you have several, pick one in *Settings > Controller*.
+- **A controller's buttons come out wrong.** One listed as *(joystick: buttons may need remapping)*
+  is one SDL doesn't know the layout of, so its buttons are guessed. Fix a recording with
+  *Edit > Remap buttons*, or use the pad's XInput or PC mode if it has one (most fight sticks do).
 - **The F-keys don't work in game.** If the game runs as administrator, run Wombo Combo as
   administrator too. Windows doesn't pass keys from an elevated window to non-elevated apps.
 - **"late frames" while recording, or "Input at ... Hz" in the status bar.** The PC is too busy to sample

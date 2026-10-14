@@ -38,6 +38,7 @@ from input_list import LIST_BUTTON_ORDER
 from key_inputs import demo_track, derive, derive_hold, describe, normalized
 from layouts.input_list_layout import LANES, InputListLayout
 from games import GAMES
+import facing
 import guidance
 import help_content
 import keys
@@ -171,6 +172,7 @@ class WomboComboApp(App):
         self.playalong_controller.set_practice(self.settings.practice)
         self.playalong_controller.set_history_count(self.settings.recent_attempts)
         self.playalong_controller.set_lead_in(self.settings.lead_in)
+        self.playalong_controller.set_side(self.settings.side)
         self.menu_bar = MenuBar(self)
         self.root_layout = BoxLayout(orientation="vertical")
         self.root_layout.add_widget(self.menu_bar)
@@ -671,6 +673,28 @@ class WomboComboApp(App):
 
     def clear_attempt(self):
         self.playalong_controller.clear_attempt()
+
+    def apply_side(self):
+        self.playalong_controller.set_side(self.settings.side)
+
+    def toggle_side(self):
+        """Switches which side the player is on (when the game has them on the other side)."""
+        side = facing.RIGHT if self.settings.side == facing.LEFT else facing.LEFT
+        self.settings.set("side", side, write=True)
+        self.apply_side()
+        self.flash(f"You're on the {facing.SIDE_NAMES[side].lower()}: "
+                   + ("your inputs are mirrored, so forward is still 6" if side == facing.RIGHT
+                      else "inputs as they are"))
+
+    def flip_recording(self):
+        """Mirrors a recording made from the right side before the app knew (see facing.py)."""
+        if self.playalong_controller.is_recording() or not self.playalong_controller.track_length():
+            self.flash("Open a recording to flip it", "warning")
+            return
+        self.playalong_controller.stop_demo()
+        self.playalong_controller.flip_recording()
+        self.unsaved_edits = True
+        self.flash("Flipped: the recording now reads as if facing right (forward is 6). Save to keep it.")
 
     def toggle_loop(self):
         loop = not self.playalong_controller.is_looping()

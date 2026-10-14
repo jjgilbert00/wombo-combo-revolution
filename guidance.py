@@ -129,6 +129,8 @@ def status_text(app):
             parts.append(f"Match {matched / attempted:.0%} of {attempted}f")
         if status.remapped:
             parts.append(markup("Buttons remapped", theme.INFO))
+        if app.settings.side == "right":
+            parts.append(markup("Right side (mirrored)", theme.INFO))
         if app.unsaved_take or app.unsaved_edits:
             parts.append(markup("Unsaved", theme.WARNING))
     else:

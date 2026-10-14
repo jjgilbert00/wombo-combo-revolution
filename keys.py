@@ -23,6 +23,7 @@ ACTION_GROUPS = [
         ("pause", "Pause (also stops a demo)", "F7", ""),
         ("restart_playback", "Restart: a fresh attempt while practising", "F5", "Home"),
         ("toggle_practice", "Practice or review (replay your attempt)", "F4", ""),
+        ("toggle_side", "Switch sides (you're on the left or the right)", "", ""),
         ("save_attempt", "Save the attempt with the recording", "", "S"),
         ("open_attempts", "Attempts: rename, show, replay, delete", "", "A"),
     ]),

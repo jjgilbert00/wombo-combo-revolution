@@ -10,7 +10,8 @@
      "button_map": {...},                 # recorded button -> the player's
      "game": "sf6", "action_layout": {...}}
 
-Only "inputs" is required; empty parts are left out. Version 1 files are the same without
+Directions are numpad notation as if the character faces right (6 is forward), whichever side the
+recording was made from (see facing.py). Only "inputs" is required; empty parts are left out. Version 1 files are the same without
 "version"; the oldest saves are a bare list of frames. load() reads all of them.
 
 Reading and writing the file happens here and only here.

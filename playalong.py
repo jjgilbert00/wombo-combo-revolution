@@ -2,6 +2,7 @@ import threading
 import time
 
 from controller import get_neutral_controller_state
+from facing import RIGHT, mirror_key_input, mirror_state, mirror_track
 from games import GAMES
 from button_map import full_map, inverse_map, map_state
 from key_inputs import GRADE_REACH, HIT, PENDING, describe, grade_all, normalized, result
@@ -87,6 +88,9 @@ class PlayalongController(PlayalongViews):
         self._action_layout = {}  # Recorded button -> the game's action.
         self._show_actions = False  # Set by the app: show actions instead of buttons.
         self._grades_version = 0  # Bumped when key inputs or the target change, invalidating cached grades.
+        # The player is on the right side (facing left): their input is mirrored as it comes in, and
+        # demos as they go out, since recordings are kept facing right (see facing.py).
+        self._mirrored = False
 
     def _fit_key_inputs(self, key_inputs):
         """Drops key inputs that start past the end of the track and trims ones that run off it.
@@ -184,6 +188,9 @@ class PlayalongController(PlayalongViews):
         sink = None
         demo_output = demo_state = None
         with self._lock:
+            mirrored = self._mirrored
+            if mirrored:
+                controller_state = mirror_state(controller_state)
             self._live_state = controller_state
             self._last_tick = time.perf_counter()
             if self._running_state == RunningState.PLAYING and self._demo:
@@ -215,7 +222,7 @@ class PlayalongController(PlayalongViews):
         if sink:
             sink(ticks)
         if demo_output:
-            demo_output(demo_state)
+            demo_output(mirror_state(demo_state) if mirrored else demo_state)
 
     def _demo_frame(self, ticks):
         """The demo frame due on this tick (None, neutral, during the countdown), or ends the demo
@@ -326,6 +333,24 @@ class PlayalongController(PlayalongViews):
         """[(time, key input index, grade, offset)], newest last."""
         with self._lock:
             return list(self._judgements)
+
+    def set_side(self, side):
+        """Which side the player is on: facing.LEFT (facing right, as recordings are) or facing.RIGHT."""
+        with self._lock:
+            self._mirrored = side == RIGHT
+
+    def flip_recording(self):
+        """Mirrors the recording and everything made for it (attempts, key inputs), for one recorded
+        from the right side before the app knew which side the player was on."""
+        with self._lock:
+            self._running_state = RunningState.STOPPED
+            self._input_track = mirror_track(self._input_track)
+            self._current_frame = 0
+            self._reset_attempt(mirror_track(self._attempt_track))
+            for run in self._runs + self._saved:
+                run["attempt"] = mirror_track(run["attempt"])
+                run.pop("_grades", None)
+            self._fit_key_inputs([mirror_key_input(k) for k in self._key_inputs])
 
     def set_lead_in(self, frames):
         with self._lock:

@@ -109,6 +109,19 @@ def steps(h):
     h.check("Reset puts every key back, and asks again next time",
             keys.current.keys == keys.Bindings().keys and h.app.settings.keys == "" and reset.text == "Reset all to defaults")
     k.dismiss(); yield 0.3
+    # Playing from the right side: switching sides is saved, set on the controller, and said in the
+    # status bar; a recording made from the right side can be flipped round.
+    h.app.toggle_side(); yield 0.3
+    h.check("Switch sides puts you on the right, mirrored",
+            h.app.settings.side == "right" and "Right side" in h.app.status_bar.status.text,
+            h.app.status_bar.status.text[-60:])
+    h.app.toggle_side(); yield 0.1
+    before = [s["direction"] for s in h.app.playalong_controller.get_input_track()]
+    h.app.flip_recording(); yield 0.2
+    after = [s["direction"] for s in h.app.playalong_controller.get_input_track()]
+    h.check("Flip sides mirrors the recording", after == [{4: 6, 6: 4, 1: 3, 3: 1, 7: 9, 9: 7}.get(d, d) for d in before]
+            and h.app.unsaved_edits)
+    h.app.flip_recording(); yield 0.2
     # Hovering over a lane's name shows what the lane is.
     from kivy.core.window import Window
     from layouts.ui_kit import Tooltip

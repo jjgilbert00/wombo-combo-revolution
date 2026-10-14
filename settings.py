@@ -4,6 +4,8 @@ Settings live in Kivy's config file, in the [wombo] section. Read and change the
 Settings, by name: settings.lookahead, settings.set("lookahead", 2.0). A name that isn't listed here
 is an error, rather than a silent fallback to a default.
 """
+from facing import SIDE_NAMES
+
 
 SECTION = "wombo"
 
@@ -24,6 +26,7 @@ DEFAULTS = {
     "show_hints": (True, "The status bar says what to do next."),
     "loop": (True, "Playback repeats."),
     "practice": (True, "Playing scores the player (off: it replays their attempt)."),
+    "side": ("left", "The side of the screen the player is on: left (facing right) or right (facing left)."),
     "lookahead": (1.5, "Seconds of input shown ahead of the line: the scroll speed."),
     "input_display": ("list", "The display showing: list, lanes or ring."),
     "show_notes": (True, "Notes show as cards (off: just bars over their frames)."),
@@ -105,6 +108,7 @@ def dialog_columns(app, readers, displays, games):
         row("Scroll speed", "step", [("Fast: 0.75 s ahead", "0.75"), ("1 s ahead", "1.0"), ("1.5 s ahead", "1.5"),
                                      ("2 s ahead", "2.0"), ("Slow: 3 s ahead", "3.0")],
             "lookahead", lambda: app.input_list_layout.set_lookahead(settings.lookahead)),
+        row("Your side", "pick", [(name, side) for side, name in SIDE_NAMES.items()], "side", app.apply_side),
         row("Lead-in", "step", [("Off", "0"), ("0.5 s", "30"), ("1 s", "60"), ("2 s", "120")],
             "lead_in", lambda: setattr(app.playalong_controller, "lead_in", settings.lead_in)),
         row("Recent attempts shown", "step", [(str(n), str(n)) for n in (0, 1, 2, 3, 5, 8, 10, 15, 20)],

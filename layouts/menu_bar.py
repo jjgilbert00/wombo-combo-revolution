@@ -78,6 +78,7 @@ class MenuBar(BoxLayout):
         edit_menu.add_item("Attempts...", app.open_attempts, key_of("open_attempts"))
         edit_menu.add_item("Clear attempt", app.clear_attempt)
         edit_menu.add_separator()
+        edit_menu.add_item("Flip sides (recorded on the right)", app.flip_recording)
         edit_menu.add_item("Clean track (presses only)", app.clean_track)
         edit_menu.add_item("Clear track", app.clear_track)
 
