@@ -161,7 +161,8 @@ stream with the time limits: no regular expressions over strings.
      "classes": [[1, 2, 3]], "enabled": true},
     {"id": "standing-normals", "type": "direction_classes", "button_scope": "ground",
      "classes": [[4, 5, 6]], "enabled": true},
-    {"id": "simultaneous", "type": "multi_press", "window": 2},
+    {"id": "simultaneous", "type": "multi_press", "window": 2,
+     "source": {"verified": false, "note": "placeholder until measured"}},
     {"id": "punches", "type": "button_classes", "classes": {"P": ["LP", "MP", "HP"], "K": ["LK", "MK", "HK"]}},
     {"id": "dp", "type": "motion", "name": "623", "pattern": [[6], [1, 2, 3], [3]],
      "shortcuts": [[[3], [2], [3]]], "max_frames": 15},
@@ -236,15 +237,26 @@ character exception, gets noticed.
    scheme pickers; the key input editor's chips.
 4. **Packs for the other hub games**, starting with T8 (mostly exact: little to add) and GGST.
 5. **Hub-hosted packs**, side-switch markers (D3), and B5/B6 where games use them.
+6. **Calibration mode** for measuring frame values with the virtual controller.
 
 ## Decisions
 
 - **Defaults**: the game's rules, with *Strict* (today's behaviour) available per recording and per
   game.
+- **Frame values** (the timing numbers in rules: simultaneous-press windows, motion time limits and
+  step gaps, charge times and how long charge lasts after release, dash windows, tap-vs-hold
+  thresholds, input buffers, just-frame timing, mash counts) come from, in order of preference:
+  1. the developers' own documentation and patch notes;
+  2. community frame-data resources (SuperCombo, Dustloop and similar);
+  3. measuring them with the app: a calibration mode uses the virtual controller to send a move with
+     a 1, 2, 3... frame gap while the user watches in training mode and marks which attempts came
+     out, which finds the real window for their game version.
+
+  Every value in a pack records its source and the game version it applies to. A value nobody has
+  confirmed yet uses a cautious default and is marked **unverified**, and grade explanations say so
+  ("allowed: 2 frames (unverified)"), so a doubtful grade can be traced to the number behind it.
 
 ## Open questions
 
-- Where do frame values (windows, charge times, buffers) come from, and who keeps them current across
-  patches? Proposed: moderators on the hub, with each value citing its source.
 - Should the interpreter rename moves ("Collarbone Breaker") once character files list them? Cheap
   once character files exist, but a lot of data.
