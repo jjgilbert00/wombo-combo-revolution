@@ -89,9 +89,11 @@ class PlayalongController(PlayalongViews):
         self._show_actions = False  # Set by the app: show actions instead of buttons.
         self._grades_version = 0  # Bumped when key inputs or the target change, invalidating cached grades.
         # What counts as the same input (input_rules.py): the game's rules, for its character, unless
-        # the recording asks for strict (the literal reading).
+        # the recording asks for strict (the literal reading), with the recording's own changes to them
+        # (a layer: see input_rules.layered).
         self._character = None
         self._strict_rules = False
+        self._rule_changes = {}
         self._rules = input_rules.resolve()
 
     def _fit_key_inputs(self, key_inputs):
@@ -347,9 +349,25 @@ class PlayalongController(PlayalongViews):
         with self._lock:
             return self._character, self._strict_rules, self._rules
 
+    def set_rule_changes(self, changes):
+        """The recording's own changes to its rules: {"rules": [...], "except": [...], "allow": [...]},
+        and for a game the app has no pack for, the player's rule set it uses ("pack")."""
+        with self._lock:
+            self._rule_changes = {key: value for key, value in (changes or {}).items() if value}
+            self._resolve_rules()
+
+    def get_rule_changes(self):
+        with self._lock:
+            return dict(self._rule_changes)
+
+    def reload_rules(self):
+        """Resolves the rules again, after the player's own rules (their packs) changed."""
+        with self._lock:
+            self._resolve_rules()
+
     def _resolve_rules(self):
         self._rules = input_rules.resolve(self._game, character=self._character, strict=self._strict_rules,
-                                          layout=self._action_layout)
+                                          recording=self._rule_changes, layout=self._action_layout)
         self._grades_version += 1  # Grades depend on the rules: worked out again.
         self._judgements = []
         self._judged = set()

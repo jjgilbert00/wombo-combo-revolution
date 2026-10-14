@@ -35,18 +35,20 @@ import file_dialogs
 from controller import find_controllers
 from button_map import full_map, inverse_map, map_key_input, map_state
 from input_list import LIST_BUTTON_ORDER
-from key_inputs import demo_track, derive, derive_hold, describe, normalized
+from key_inputs import acceptance, demo_track, derive, derive_hold, describe, normalized
 from layouts.input_list_layout import LANES, InputListLayout
 from games import GAMES
 import guidance
 import input_rules
+from rule_edits import RulesSession
 import help_content
 import keys
 import track_file
 from overlay import Overlay
 from settings import Settings, dialog_columns
 from layouts.dialogs import (
-    AttemptsPopup, ButtonMapPopup, GameActionsPopup, HelpPopup, KeyInputPopup, KeysPopup, NotePopup, SettingsPopup
+    AttemptsPopup, ButtonMapPopup, GameActionsPopup, HelpPopup, InputRulesPopup, KeyInputPopup, KeysPopup, NotePopup,
+    SettingsPopup
 )
 from layouts.menu_bar import MenuBar
 from layouts.ui_kit import Menu, StatusBar
@@ -137,6 +139,7 @@ class WomboComboApp(App):
 
     def build(self):
         ExceptionManager.add_handler(KeepRunning())
+        input_rules.USER_PACKS = os.path.join(self.user_data_dir, "rule_packs")  # The player's own input rules.
         self.settings = Settings(self.config)
         keys.check_actions(self)
         keys.use(keys.Bindings.from_setting(self.settings.keys))
@@ -560,9 +563,16 @@ class WomboComboApp(App):
         delete = delete if index is not None else None
         title = "Mark key input" if index is None else "Edit key input"
         track = controller.get_input_track()
+        rules = controller.get_input_rules()[2]
+
+        def accepts(shown):
+            """What the rules accept for the key input, and what it accepts with its own changes."""
+            recorded = map_key_input(shown, to_recorded)
+            return acceptance(dict(recorded, accept=None), rules), acceptance(recorded, rules)
+
         KeyInputPopup(title, map_key_input(normalized(key_input), mapping), len(track) - 1, LIST_BUTTON_ORDER,
                       describe, lambda edited: map_key_input(derive_hold(track, edited["start"], edited["end"]), mapping),
-                      save, delete).open()
+                      save, delete, accepts=accepts).open()
 
     def remap_buttons(self):
         """Opens the button map for this recording: which of the player's buttons does what each
@@ -806,7 +816,9 @@ class WomboComboApp(App):
                                                   data.get("key_inputs"), data.get("saved_attempts"),
                                                   data.get("button_map"))
         self.set_game(data.get("game", self.default_game()), data.get("action_layout"), mark_edited=False)
-        self.playalong_controller.set_input_rules(data.get("character"), (data.get("input_rules") or {}).get("strict"))
+        rules = data.get("input_rules") or {}
+        self.playalong_controller.set_input_rules(data.get("character"), rules.get("strict"))
+        self.playalong_controller.set_rule_changes({key: value for key, value in rules.items() if key != "strict"})
         self.track_path = path
         video = os.path.splitext(path)[0] + ".mp4"
         self.capture_path = video if os.path.exists(video) else None
@@ -826,12 +838,18 @@ class WomboComboApp(App):
         attempt = controller.get_attempt_track()
         game, action_layout = controller.get_game()
         character, strict, _ = controller.get_input_rules()
+        rules = controller.get_rule_changes()
+        if rules.get("pack") and not game:
+            # A custom rule set travels with the recording, for anyone who doesn't have it.
+            rules["pack_data"] = input_rules.load_user_pack(rules["pack"]) or rules.get("pack_data")
+        if strict:
+            rules["strict"] = True
         return {"inputs": controller.get_input_track(),
                 "attempt": attempt if any(frame is not None for frame in attempt) else None,
                 "notes": controller.get_notes(), "key_inputs": controller.get_key_inputs(),
                 "saved_attempts": controller.get_saved(), "button_map": controller.get_button_map(),
                 "game": game, "action_layout": action_layout if game else None,
-                "character": character, "input_rules": {"strict": True} if strict else None}
+                "character": character, "input_rules": {key: value for key, value in rules.items() if value} or None}
 
     def save(self):
         """Saves into the open recording's file, or for a new take asks where to save it (with its
@@ -1084,6 +1102,20 @@ class WomboComboApp(App):
         _, strict, _ = self.playalong_controller.get_input_rules()
         self.playalong_controller.set_input_rules(character, strict)
         self.unsaved_edits = True
+
+    def edit_input_rules(self):
+        """Opens the recording's input rules: what counts as the same input, and the player's changes."""
+        controller = self.playalong_controller
+        if controller.is_recording() or not controller.track_length():
+            self.flash("Open a recording to see its input rules", "warning")
+            return
+
+        def changed():
+            self.unsaved_edits = True
+
+        session = RulesSession(controller, {key: list(game["actions"]) for key, game in GAMES.items()}, changed)
+        game = controller.get_game()[0]
+        InputRulesPopup(session, GAMES[game]["name"] if game else "").open()
 
     def toggle_strict_rules(self):
         """Grades this recording literally (exact directions, every direction of a motion, buttons on
