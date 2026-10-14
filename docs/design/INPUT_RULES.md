@@ -30,7 +30,8 @@ them to both the interpreter and the grader, which users can see, switch and tun
    between MP and MK; this game allows 2".
 4. Data, not code: adding a game, a character or a patch change means editing a rule pack, not
    Python. Packs can be shared through the hub.
-5. Today's behaviour stays available as a preset ("Exact"), so nothing changes until a rule is on.
+5. **Game rules by default** (decided): recordings are interpreted and graded with their game's rules
+   unless the user turns on *Strict*, which is today's literal behaviour, for a recording or for a game.
 
 ## Rule catalog
 
@@ -236,11 +237,13 @@ character exception, gets noticed.
 4. **Packs for the other hub games**, starting with T8 (mostly exact: little to add) and GGST.
 5. **Hub-hosted packs**, side-switch markers (D3), and B5/B6 where games use them.
 
+## Decisions
+
+- **Defaults**: the game's rules, with *Strict* (today's behaviour) available per recording and per
+  game.
+
 ## Open questions
 
-- Should the defaults be the game's rules (more forgiving, closer to the game) or strict, with game
-  rules switched on per recording? This document proposes game rules by default, with *Strict* a
-  click away.
 - Where do frame values (windows, charge times, buffers) come from, and who keeps them current across
   patches? Proposed: moderators on the hub, with each value citing its source.
 - Should the interpreter rename moves ("Collarbone Breaker") once character files list them? Cheap
