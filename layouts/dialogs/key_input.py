@@ -170,7 +170,12 @@ class KeyInputPopup(Dialog):
             self._refresh()
 
     def _set_motion(self, text):
-        self.key_input["motion"] = [int(c) for c in text]
+        motion = [int(c) for c in text]
+        if motion != self.key_input["motion"]:
+            # A motion typed in is read as written: whatever it was recognised as no longer applies.
+            self.key_input.pop("charge", None)
+            self.key_input.pop("motion_name", None)
+        self.key_input["motion"] = motion
         self._refresh()
 
     def _set_direction(self, direction):

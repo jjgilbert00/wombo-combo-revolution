@@ -109,6 +109,20 @@ def steps(h):
     h.check("Reset puts every key back, and asks again next time",
             keys.current.keys == keys.Bindings().keys and h.app.settings.keys == "" and reset.text == "Reset all to defaults")
     k.dismiss(); yield 0.3
+    # Input rules: the game's by default; a character's own moves once it's picked; strict on request.
+    c = h.app.playalong_controller
+    h.app.set_game("sf6"); yield 0.1
+    h.app.edit_game_actions(); yield 0.4
+    dialog = popup(h, "GameActionsPopup")
+    h.check("Game actions offers SF6's characters", dialog is not None and "Ryu" in dialog.character_spinner.values,
+            dialog.character_spinner.values[:4] if dialog else None)
+    dialog.character_spinner.text = "Ryu"; yield 0.1
+    h.check("picking a character gives its rules", c.get_input_rules()[0] == "ryu"
+            and "Ryu" in c.get_input_rules()[2].name, c.get_input_rules()[2].name)
+    dialog.dismiss(); yield 0.2
+    h.app.toggle_strict_rules(); yield 0.1
+    h.check("Strict input rules grades literally", c.get_input_rules()[2].strict)
+    h.app.toggle_strict_rules(); yield 0.1
     # Hovering over a lane's name shows what the lane is.
     from kivy.core.window import Window
     from layouts.ui_kit import Tooltip

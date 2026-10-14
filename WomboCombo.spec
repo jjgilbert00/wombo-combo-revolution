@@ -16,6 +16,7 @@ a = Analysis(
         ("images", "images"),  # Button icons.
         ("samples/*.json", "samples"),  # The warm-up and sample combos.
         ("docs", "docs"),  # The user guide, opened from F1.
+        ("rule_packs", "rule_packs"),  # Each game's input rules.
     ] + ffmpeg_datas,
     hiddenimports=kivy_deps["hiddenimports"] + ffmpeg_hidden + [
         "pynput.keyboard._win32", "pynput.mouse._win32",  # Chosen at runtime, so not found by analysis.

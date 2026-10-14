@@ -8,7 +8,9 @@
      "key_inputs": [...],                 # see key_inputs.py
      "saved_attempts": [...],             # attempts the player kept
      "button_map": {...},                 # recorded button -> the player's
-     "game": "sf6", "action_layout": {...}}
+     "game": "sf6", "action_layout": {...},
+     "character": "ryu",                  # for the game's input rules (rule_packs/)
+     "input_rules": {"strict": true}}     # graded literally, not by the game's rules
 
 Only "inputs" is required; empty parts are left out. Version 1 files are the same without
 "version"; the oldest saves are a bare list of frames. load() reads all of them.
@@ -20,7 +22,8 @@ import json
 from sampler import FPS
 
 VERSION = 2
-PARTS = ("attempt", "notes", "key_inputs", "saved_attempts", "button_map", "game", "action_layout")
+PARTS = ("attempt", "notes", "key_inputs", "saved_attempts", "button_map", "game", "action_layout", "character",
+         "input_rules")
 
 
 class TrackFileError(ValueError):

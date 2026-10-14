@@ -102,7 +102,7 @@ class PlayalongViews:
                 [] if self._demo else match_runs(self._input_track, self._attempt_track, lo, hi),
                 [(i, note["start"], note["end"], note["text"]) for i, note in enumerate(self._notes)
                  if note["start"] < hi and note["end"] >= lo],
-                [(i, self._shown_key_input(k), result(k, self._attempt_track, self._input_track),
+                [(i, self._shown_key_input(k), result(k, self._attempt_track, self._input_track, self._rules),
                   best_hold(k, self._attempt_track) if k["hold"] and not k["exact"] else None)
                  for i, k in enumerate(self._key_inputs)
                  if k["start"] < hi and k["end"] >= lo],
@@ -120,8 +120,9 @@ class PlayalongViews:
     def _recent_judgements(self, seconds=1.2):
         """(grade, offset, notation, age from 0 to 1) for judgements made in the last moment."""
         now = time.monotonic()
-        return [(grade, offset, describe(self._shown_key_input(self._key_inputs[i])), (now - at) / seconds)
-                for at, i, grade, offset in self._judgements if now - at < seconds and i < len(self._key_inputs)]
+        return [(grade, offset, describe(self._shown_key_input(self._key_inputs[i])), (now - at) / seconds, why)
+                for at, i, grade, offset, why in self._judgements
+                if now - at < seconds and i < len(self._key_inputs)]
 
     def _actions_on(self):
         return self._show_actions and self._game in GAMES
@@ -166,7 +167,8 @@ class PlayalongViews:
     def _grades(self, run):
         """The run's key input grades, cached until the key inputs or target change."""
         if run.get("_grades", (None,))[0] != self._grades_version:
-            run["_grades"] = (self._grades_version, grade_all(self._key_inputs, run["attempt"], self._input_track))
+            run["_grades"] = (self._grades_version, grade_all(self._key_inputs, run["attempt"], self._input_track,
+                                                             self._rules))
         return run["_grades"][1]
 
     def _history_row(self, run, label, saved, lo, hi):

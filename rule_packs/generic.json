@@ -1,0 +1,19 @@
+{
+  "name": "Any game",
+  "about": "Rules that hold whatever the game: used for games without a pack of their own. No direction classes (whether 1HK is 2HK depends on the game), and no time limits on motions (they differ by game). Frame values that nobody has measured are marked unverified.",
+  "rules": [
+    {"id": "neutral", "type": "neutral", "name": "Neutral is neutral",
+     "about": "A press recorded at neutral needs neutral, not any direction: forward + a button is often a different move."},
+    {"id": "simultaneous", "type": "multi_press", "name": "Simultaneous presses", "window": 2,
+     "about": "Buttons pressed this many frames apart still count as pressed together.",
+     "source": {"verified": false, "note": "A cautious value; each game's pack sets its own."}},
+    {"id": "qcf", "type": "motion", "name": "236", "steps": [[2], [3], [6]]},
+    {"id": "qcb", "type": "motion", "name": "214", "steps": [[2], [1], [4]]},
+    {"id": "dp", "type": "motion", "name": "623", "steps": [[6], [2, 1], [3]]},
+    {"id": "rdp", "type": "motion", "name": "421", "steps": [[4], [2, 3], [1]]},
+    {"id": "hcf", "type": "motion", "name": "41236", "steps": [[4], [1], [2], [3], [6]]},
+    {"id": "hcb", "type": "motion", "name": "63214", "steps": [[6], [3], [2], [1], [4]]},
+    {"id": "double-qcf", "type": "motion", "name": "236236", "steps": [[2], [3], [6], [2], [3], [6]]},
+    {"id": "double-qcb", "type": "motion", "name": "214214", "steps": [[2], [1], [4], [2], [1], [4]]}
+  ]
+}
