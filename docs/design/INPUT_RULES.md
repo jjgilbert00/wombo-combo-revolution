@@ -1,9 +1,11 @@
 # Input rules: how each game reads inputs (design)
 
-Status: built so far: the engine (`input_rules.py`), the generic pack, and the SF6 pack for Classic
-controls (every character's command normals, motions and charge timings). Not yet: SF6 Modern
-controls, the key input editor's accept chips, the other games' packs, hub-hosted packs, side-switch
-markers and the calibration mode.
+Status: built so far: the engine (`input_rules.py`), the generic pack, the SF6 pack for Classic
+controls (every character's command normals, motions and charge timings), and the player's own
+rules: *Edit > Input rules...* (rule edits for the recording, the game or a character, custom rule
+sets for games without a pack) and the key input editor's *Accepts* (one input's own leniency). Not
+yet: SF6 Modern controls, the other games' packs, hub-hosted packs, side-switch markers and the
+calibration mode.
 
 ## The problem
 
@@ -123,6 +125,25 @@ and add exceptions. Lower layers win:
 5. **Recording**: the user's choices for this recording ("treat this as strict").
 6. **Key input**: per-move overrides in the key input editor (accept only 3HK here; any punch here).
 
+As built, the player's own rules sit between the pack and the recording: the pack (and scheme), then
+**your rules** for the game, the pack's character, **your rules** for that character, then the
+recording's changes, then the key input's. Your rules are files in the settings folder
+(`%APPDATA%\wombocomboule_packs\<game>.json`), the same shape as a recording's changes:
+
+```json
+{"rules": [{"id": "buffer", "frames": 6}, {"id": "dp", "enabled": false},
+           {"id": "my-hcf", "type": "motion", "name": "41236", "steps": [[4], [1], [2], [3], [6]]}],
+ "except": [{"rule": "crouching", "direction": 3, "button": "HK"}],
+ "allow": [{"rule": "standing", "direction": 6, "button": "MP"}],
+ "characters": {"ryu": {"name": "Ryu", "rules": [], "except": [], "allow": []}}}
+```
+
+A change names a rule by id and gives only what differs; a whole rule (with `type`) adds one; `allow`
+undoes an exception from a layer below. For a game with no pack, a **custom rule set** is such a
+file with `"custom": true` and a name, built on the generic pack; a recording using one names it
+(`"pack"`) and carries a copy (`"pack_data"`), used where the set isn't installed. Motions a player
+adds survive a character's motion list (which only filters the pack's own).
+
 Without a character, the app uses only the rules that hold for **every** character in the game pack
 (computed: a direction-and-button pair stays exact if any character has a command normal on it) and
 suggests picking the character. That's safe by construction: it never accepts an input as equivalent
@@ -221,6 +242,11 @@ character exception, gets noticed.
 - **Edit > Game actions...** gains **Character** and **Control scheme**, which pick the layers.
 - **Key input editor**: "Accepts: 1HK 2HK 3HK" as chips that can be switched off one by one; the motion
   shown with its accepted forms; "any strength" for B2. Changes there are key-input overrides.
+  As built: an *Accepts* line and a dialog with the directions as a numpad, the simultaneous-press
+  window, the buffer, the motion's time limit, the charge and strict; "any strength" isn't built.
+- As built, **Edit > Input rules...** (rather than Settings) shows the recording's rules layer by
+  layer with where each came from, and edits them in a chosen scope: this recording, all recordings
+  of the game, or all of the character's.
 - **Grades**: the explanation on hover, as above.
 
 ### Testing

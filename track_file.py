@@ -10,7 +10,9 @@
      "button_map": {...},                 # recorded button -> the player's
      "game": "sf6", "action_layout": {...},
      "character": "ryu",                  # for the game's input rules (rule_packs/)
-     "input_rules": {"strict": true}}     # graded literally, not by the game's rules
+     "input_rules": {"strict": true,      # graded literally, not by the game's rules
+                     "rules": [...], "except": [...], "allow": [...],   # the recording's own changes
+                     "pack": "my-game", "pack_data": {...}}}           # a custom rule set, and a copy
 
 Only "inputs" is required; empty parts are left out. Version 1 files are the same without
 "version"; the oldest saves are a bare list of frames. load() reads all of them.

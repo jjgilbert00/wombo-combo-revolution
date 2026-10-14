@@ -73,6 +73,7 @@ class MenuBar(BoxLayout):
         edit_menu.add_item("Mark key input", app.mark_key_input, key_of("mark_key_input"))
         edit_menu.add_item("Remap buttons...", app.remap_buttons)
         edit_menu.add_item("Game actions and character...", app.edit_game_actions)
+        edit_menu.add_item("Input rules...", app.edit_input_rules)
         edit_menu.add_item("Strict input rules", app.toggle_strict_rules,
                            lambda: "on" if app.playalong_controller.get_input_rules()[1] else "off")
         edit_menu.add_separator()

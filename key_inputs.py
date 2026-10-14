@@ -24,8 +24,10 @@ way charge works: 2 is any down direction (1, 2 or 3), 4 any back, and so on; a 
 exact diagonal. The motion is ignored.
 
 What counts as the same input is a game's rules (input_rules.py): every function here takes an
-InputRules, STRICT (the literal reading) by default. A key input can narrow what it accepts with
-{"accept": {"directions": [3]}}, or ask to be graded literally with {"accept": {"strict": true}}.
+InputRules, STRICT (the literal reading) by default. A key input can change what it accepts with
+"accept": the directions its press takes ({"directions": [3]}), to be graded literally ({"strict":
+true}), or its own simultaneous-press window, buffer, motion time limit or charge (see
+input_rules.with_key_input_overrides).
 """
 from input_list import LIST_BUTTON_ORDER
 from input_rules import STRICT, motion_done, recognise_motion, with_key_input_overrides
@@ -96,11 +98,29 @@ def _hold_result(key_input, attempt):
 
 def accepted_directions(key_input, rules=STRICT):
     """The directions a key input's press accepts: its own, or its class's under the game's rules,
-    or what the key input itself narrows it to."""
+    or the ones the key input itself says."""
     narrowed = (key_input.get("accept") or {}).get("directions")
     if narrowed:
         return frozenset(narrowed)
     return rules.press_directions(key_input["direction"], key_input["buttons"])[0]
+
+
+def acceptance(key_input, rules=STRICT):
+    """What a key input accepts under these rules, its own changes included, for the editor:
+    {"strict", "directions" (None: any), "group" (the direction class's name, or None),
+    "simultaneous", "buffer", "motion" (the named motion, or None), "max_frames", "charge" ((frames,
+    keep), or None)}."""
+    key_input = normalized(key_input)
+    rules = with_key_input_overrides(rules, key_input)
+    named = rules.motion_named(key_input["motion"])
+    _, group = rules.press_directions(key_input["direction"], key_input["buttons"])
+    directions = accepted_directions(key_input, rules)
+    return {"strict": rules.strict,
+            "directions": None if len(directions) == 9 else sorted(directions),
+            "group": group.name if group and not (key_input.get("accept") or {}).get("directions") else None,
+            "simultaneous": rules.multi_press_window, "buffer": rules.buffer,
+            "motion": named.name if named else None, "max_frames": named.max_frames if named else 0,
+            "charge": named.charge.needs(key_input["buttons"]) if named and named.charge else None}
 
 
 def _newly_pressed(attempt, frame, button):

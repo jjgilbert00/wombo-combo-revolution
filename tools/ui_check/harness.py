@@ -12,6 +12,7 @@ settings are never touched. The exit code is the number of failed checks.
 import logging
 import os
 import runpy
+import shutil
 import sys
 import traceback
 
@@ -27,6 +28,7 @@ sys.path.insert(0, WORKTREE)
 sys.path.insert(1, HERE)
 sys.path.insert(2, os.path.join(HERE, "checks"))
 
+import input_rules  # noqa: E402
 import main  # noqa: E402
 from kivy.base import EventLoop  # noqa: E402
 from kivy.clock import Clock  # noqa: E402
@@ -144,6 +146,9 @@ class HarnessApp(main.WomboComboApp):
 
     def on_start(self):
         super().on_start()
+        # The player's own input rules go in the shots folder, not the real settings folder.
+        input_rules.USER_PACKS = os.path.join(SHOTS, "rule_packs")
+        shutil.rmtree(input_rules.USER_PACKS, ignore_errors=True)
         Window.size = (1880, 960)
         self.harness = Harness(self)
         logging.getLogger(main.__name__).addHandler(_UnhandledErrors(self.harness))

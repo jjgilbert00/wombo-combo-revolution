@@ -13,7 +13,7 @@ class NotePopup(Dialog):
     """Edits a note's text. on_save(text) is called with the new text; saving empty text counts as a
     delete. on_delete is only offered when editing an existing note."""
 
-    def __init__(self, title, text, on_save, on_delete=None, **kwargs):
+    def __init__(self, title, text, on_save, on_delete=None, hint="e.g. hit confirm here", **kwargs):
         super().__init__(size_hint=(None, None), size=(dp(420), dp(150)), background="",
                          background_color=(0, 0, 0, 0.5), **kwargs)
         panel = BoxLayout(orientation="vertical", padding=dp(16), spacing=dp(12))
@@ -22,7 +22,7 @@ class NotePopup(Dialog):
                                height=dp(22), halign="left", text_size=(dp(388), None)))
         self.input = TextInput(text=text, multiline=False, size_hint_y=None, height=dp(34), font_size=FONT_SIZE,
                                background_color=(1, 1, 1, 0.08), foreground_color=TEXT_COLOR,
-                               cursor_color=TEXT_COLOR, hint_text="e.g. hit confirm here")
+                               cursor_color=TEXT_COLOR, hint_text=hint)
         self.input.bind(on_text_validate=lambda *_: self._save(on_save))
         panel.add_widget(self.input)
 

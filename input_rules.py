@@ -20,9 +20,12 @@ input can change them again. resolve() layers them into one InputRules.
 Every match can say why (explain()), so a lenient grade, or a near miss, can be traced to its rule.
 """
 import json
+import logging
 import os
+import re
 from dataclasses import dataclass, field, replace
 
+logger = logging.getLogger(__name__)
 PACKS = os.path.join(os.path.dirname(os.path.abspath(__file__)), "rule_packs")
 DIRECTIONS = frozenset(range(1, 10))
 
@@ -152,9 +155,99 @@ def load_pack(game):
     raise FileNotFoundError("rule_packs/generic.json is missing")
 
 
-def pack_characters(game):
-    """{character key: name} that a game's pack has rules for."""
-    return {key: c.get("name", key) for key, c in load_pack(game).get("characters", {}).items()}
+def has_pack(game):
+    """Whether the app has a rule pack of its own for a game."""
+    return bool(game) and os.path.exists(os.path.join(PACKS, f"{game}.json"))
+
+
+# --- Your rules -----------------------------------------------------------------------------------
+#
+# Rules the player adds live in their own packs (USER_PACKS, set by the app to a folder of its
+# settings), one per game: corrections to a game the app has a pack for, or a whole rule set for one
+# it doesn't (a custom rule set, built on the generic pack). Either is a layer:
+#
+#     {"name": "My game",                          # custom rule sets only
+#      "custom": true,                             # a rule set of its own, not changes to a game's
+#      "rules": [{"id": "buffer", "frames": 6}, {"id": "dp", "enabled": false}, {new rule}, ...],
+#      "except": [{"rule": "crouching", "direction": 3, "button": "HK"}],   # moves of their own
+#      "allow": [{"rule": "standing", "direction": 6, "button": "MP"}],     # ...that aren't after all
+#      "characters": {"ryu": {"name": "Ryu", "rules": [...], "except": [...], "allow": [...]}}}
+#
+# A recording's own changes ("input_rules" in its file) are a layer of the same shape, applied last.
+
+USER_PACKS = None  # The folder of the player's packs; None: none (tests, and before the app sets it).
+LAYER_PARTS = ("rules", "except", "allow")
+_KEY = re.compile(r"[a-z0-9][a-z0-9-]{0,40}")
+
+
+def _user_path(key):
+    return os.path.join(USER_PACKS, f"{key}.json") if USER_PACKS and key and _KEY.fullmatch(key) else None
+
+
+def load_user_pack(key):
+    """The player's pack for a game or custom rule set ({} if there's none, or it can't be read)."""
+    path = _user_path(key)
+    if not path or not os.path.exists(path):
+        return {}
+    try:
+        with open(path, encoding="utf-8") as f:
+            pack = json.load(f)
+        return pack if isinstance(pack, dict) else {}
+    except (OSError, ValueError) as e:
+        logger.warning("Couldn't read your input rules %s: %s", path, e)
+        return {}
+
+
+def save_user_pack(key, pack):
+    """Writes the player's pack for a game or custom rule set; an empty one is removed."""
+    path = _user_path(key)
+    if not path:
+        raise ValueError(f"Not a rule set name: {key!r}")
+    if not is_empty(pack) or pack.get("custom"):
+        os.makedirs(USER_PACKS, exist_ok=True)
+        temporary = path + ".tmp"
+        with open(temporary, "w", encoding="utf-8", newline="\n") as f:
+            json.dump(pack, f, indent=1)
+            f.write("\n")
+        os.replace(temporary, path)
+    elif os.path.exists(path):
+        os.remove(path)
+
+
+def custom_rule_sets():
+    """{key: name} of the player's rule sets for games the app has no pack for."""
+    found = {}
+    if USER_PACKS and os.path.isdir(USER_PACKS):
+        for file in sorted(os.listdir(USER_PACKS)):
+            key, extension = os.path.splitext(file)
+            if extension == ".json" and _KEY.fullmatch(key) and not has_pack(key):
+                pack = load_user_pack(key)
+                if pack.get("custom"):
+                    found[key] = pack.get("name", key)
+    return found
+
+
+def new_key(name, taken=()):
+    """A file-safe key for a new rule set or character called name, not one of taken."""
+    base = re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-")[:30] or "custom"
+    key, n = base, 2
+    while key in taken or has_pack(key) or key == "generic":
+        key, n = f"{base}-{n}", n + 1
+    return key
+
+
+def is_empty(layer):
+    """A layer with no changes in it (a character's name alone isn't one)."""
+    return not any(layer.get(part) for part in LAYER_PARTS) and not any(
+        not is_empty(c) for c in layer.get("characters", {}).values())
+
+
+def pack_characters(game, user=None):
+    """{character key: name} that a game's pack, or the player's own rules for it, have rules for."""
+    names = {key: c.get("name", key) for key, c in load_pack(game).get("characters", {}).items()} if game else {}
+    user = load_user_pack(game) if user is None else user
+    names.update({key: c.get("name", key) for key, c in user.get("characters", {}).items()})
+    return names
 
 
 def _apply(rules, layer):
@@ -166,47 +259,116 @@ def _apply(rules, layer):
             rules.pop(rule_id, None)
         elif rule_id in rules:
             rules[rule_id] = {**rules[rule_id], **entry}
-        else:
+        elif "type" in entry:
             rules[rule_id] = dict(entry)
+        # A change to a rule that isn't there (a character without it) changes nothing.
 
 
-def resolve(game=None, scheme=None, character=None, recording=None, strict=False, pack=None, layout=None):
-    """The rules for a recording: the game's pack, then its control scheme, then the character
-    (exceptions), then the recording's own changes ({"rules": [...]}). strict, or a recording that
-    asks for it, gives STRICT. pack: a pack to use instead of the game's file (for tests). layout:
-    which recorded button is which action, for exceptions that name actions.
+# Where a rule or exception came from, for the editor.
+BUILT_IN, YOURS, YOURS_CHARACTER, RECORDING = "built in", "your rules", "your character rules", "this recording"
+
+
+@dataclass
+class Layered:
+    """The rules for a recording as entries before they're built (resolve builds them): each rule by
+    id, each rule's exceptions as (direction, action) pairs, and which layers set or changed each."""
+    name: str
+    rules: dict
+    exceptions: dict
+    origins: dict
+    exception_origins: dict
+    builtin_rules: dict  # The rules as they were before any of the player's changes.
+
+
+def layered(game=None, scheme=None, character=None, recording=None, pack=None, user=None):
+    """The rules for a recording, layer by layer: the game's pack (the generic one for a custom rule
+    set), its control scheme, the player's rules for the game, the character (the pack's, then the
+    player's), then the recording's own changes. pack and user replace the game's pack and the
+    player's (for tests); a recording made with a custom rule set that isn't installed here uses the
+    copy it carries ("pack_data")."""
+    recording = recording or {}
+    key = game or recording.get("pack")
+    pack = pack if pack is not None else load_pack(key)
+    if user is None:
+        user = load_user_pack(key)
+        if not user and not game and recording.get("pack_data"):
+            user = recording["pack_data"]
+    rules, origins = {}, {}
+    exceptions, exception_origins = {}, {}
+
+    def apply(entries, origin):
+        _apply(rules, entries)
+        for entry in entries:
+            if entry["id"] in rules:
+                origins.setdefault(entry["id"], [])
+                if origin not in origins[entry["id"]]:
+                    origins[entry["id"]].append(origin)
+            else:
+                origins.pop(entry["id"], None)
+
+    def except_(entries, origin, allow=False):
+        for e in entries:
+            pair = (int(e["direction"]), e["button"])
+            if allow:
+                exceptions.get(e["rule"], set()).discard(pair)
+                exception_origins.pop((e["rule"], *pair), None)
+            else:
+                exceptions.setdefault(e["rule"], set()).add(pair)
+                exception_origins.setdefault((e["rule"], *pair), origin)
+
+    apply(pack.get("rules", []), BUILT_IN)
+    sources = [user.get("name", key) if user.get("custom") else pack.get("name", game or "generic")]
+    if scheme and scheme in pack.get("schemes", {}):
+        apply(pack["schemes"][scheme].get("rules", []), BUILT_IN)
+        sources.append(scheme)
+    char = pack.get("characters", {}).get(character) if character else None
+    if char and "motions" in char:
+        # A character's motion list says which of the game's motions it has; ones the player adds stay.
+        keep = set(char["motions"])
+        for rule_id in [i for i, r in rules.items() if r["type"] == "motion" and i not in keep]:
+            del rules[rule_id]
+            origins.pop(rule_id, None)
+    if char:
+        apply(char.get("rules", []), BUILT_IN)
+        except_(char.get("except", []), BUILT_IN)
+    builtin_rules = {i: dict(r) for i, r in rules.items()}
+    apply(user.get("rules", []), YOURS)
+    except_(user.get("except", []), YOURS)
+    user_char = user.get("characters", {}).get(character) if character else None
+    if character is None:
+        # No character: a pair stays exact if any character has a move of its own on it, so nothing
+        # that could be a different move is treated as the same.
+        for other in pack.get("characters", {}).values():
+            except_(other.get("except", []), BUILT_IN)
+        for other in user.get("characters", {}).values():
+            except_(other.get("except", []), YOURS_CHARACTER)
+    except_(user.get("allow", []), YOURS, allow=True)
+    if char or user_char:
+        sources.append((char or user_char).get("name", character))
+    if user_char:
+        apply(user_char.get("rules", []), YOURS_CHARACTER)
+        except_(user_char.get("except", []), YOURS_CHARACTER)
+        except_(user_char.get("allow", []), YOURS_CHARACTER, allow=True)
+    apply(recording.get("rules", []), RECORDING)
+    except_(recording.get("except", []), RECORDING)
+    except_(recording.get("allow", []), RECORDING, allow=True)
+    return Layered(" + ".join(sources), rules, exceptions, origins, exception_origins, builtin_rules)
+
+
+def resolve(game=None, scheme=None, character=None, recording=None, strict=False, pack=None, layout=None,
+            user=None):
+    """The rules for a recording, built from its layers (see layered()): the game's pack, then its
+    control scheme, the player's rules, the character, then the recording's own changes ({"rules":
+    [...], "except": [...], "allow": [...]}). strict, or a recording that asks for it, gives STRICT.
+    layout: which recorded button is which action, for exceptions that name actions.
 
     A character can list the motions it has ("motions": ids from the game's), so its inputs are only
     read as motions it can do, and add its own (charge motions, with their timings)."""
     recording = recording or {}
     if strict or recording.get("strict"):
         return STRICT
-    pack = pack if pack is not None else load_pack(game)
-    rules = {}
-    _apply(rules, pack.get("rules", []))
-    sources = [pack.get("name", game or "generic")]
-    if scheme and scheme in pack.get("schemes", {}):
-        _apply(rules, pack["schemes"][scheme].get("rules", []))
-        sources.append(scheme)
-    exceptions = {}
-    char = pack.get("characters", {}).get(character) if character else None
-    if char:
-        if "motions" in char:
-            keep = set(char["motions"])
-            for rule_id in [i for i, r in rules.items() if r["type"] == "motion" and i not in keep]:
-                del rules[rule_id]
-        _apply(rules, char.get("rules", []))
-        for exception in char.get("except", []):
-            exceptions.setdefault(exception["rule"], set()).add((exception["direction"], exception["button"]))
-        sources.append(char.get("name", character))
-    elif character is None:
-        # No character: a pair stays exact if any character has a move of its own on it, so nothing
-        # that could be a different move is treated as the same.
-        for other in pack.get("characters", {}).values():
-            for exception in other.get("except", []):
-                exceptions.setdefault(exception["rule"], set()).add((exception["direction"], exception["button"]))
-    _apply(rules, recording.get("rules", []))
-    built = _build(rules, exceptions, " + ".join(sources))
+    layers = layered(game, scheme, character, recording, pack, user)
+    built = _build(layers.rules, layers.exceptions, layers.name)
     return replace(built, layout=tuple(sorted((layout or {}).items())))
 
 
@@ -247,13 +409,43 @@ def _steps(steps):
     return tuple(tuple(step) for step in steps)
 
 
+# What a key input can change about how it's graded ("accept" in a key input).
+ACCEPT_FIELDS = ("directions", "strict", "simultaneous", "buffer", "max_frames", "charge")
+
+
 def with_key_input_overrides(rules, key_input):
-    """A key input's own changes: {"accept": {"directions": [3]}} narrows what its press accepts
-    (handled by the matcher); {"accept": {"strict": true}} grades it literally."""
+    """A key input's own changes ("accept"):
+
+        {"strict": true}                  graded literally (STRICT), whatever the game's rules;
+        {"directions": [3, 6]}            the directions its press accepts (handled by the matcher);
+        {"simultaneous": 3}               frames apart its buttons can be pressed and count as together;
+        {"buffer": 6}                     frames early it can be done;
+        {"max_frames": 12}                the time limit on its motion (0: none), if a named one;
+        {"charge": {"frames": 30, "keep": 8}}   how long its charge motion is held, and kept after.
+
+    Frame changes apply under STRICT too, so one input can be lenient in a strict recording."""
     accept = key_input.get("accept") or {}
+    if not accept:
+        return rules
     if accept.get("strict"):
-        return STRICT
-    return rules
+        rules = STRICT
+    changes = {}
+    if "simultaneous" in accept:
+        changes["multi_press_window"] = max(0, int(accept["simultaneous"]))
+    if "buffer" in accept:
+        changes["buffer"] = max(0, int(accept["buffer"]))
+    named = rules.motion_named(key_input.get("motion"))
+    if named and ("max_frames" in accept or ("charge" in accept and named.charge)):
+        changed = named
+        if "max_frames" in accept:
+            changed = replace(changed, max_frames=max(0, int(accept["max_frames"])))
+        if "charge" in accept and named.charge:
+            charge = accept["charge"]
+            frames = max(1, int(charge.get("frames", named.charge.frames)))
+            keep = max(0, int(charge.get("keep", named.charge.keep)))
+            changed = replace(changed, charge=Charge(frames, keep))
+        changes["motions"] = tuple(changed if m is named else m for m in rules.motions)
+    return replace(rules, **changes) if changes else rules
 
 
 # --- Matching motions -----------------------------------------------------------------------------

@@ -271,6 +271,33 @@ Combo reads your inputs, and marks key inputs, by the recording's game's **input
 Games without rules of their own get the ones that hold for any game: neutral is neutral, presses a
 couple of frames apart are together, and motions are recognised by name.
 
+#### Changing the rules
+
+When the rules are wrong about something, or the game has none of its own yet, change them in
+*Edit > Input rules...*. It lists every rule with where it came from (built in, your rules, this
+recording); rules marked *unverified* are the likeliest to need it. You can:
+
+- switch a rule off, or change its frames (how far apart buttons count as together, how early a
+  press still counts, a motion's time limit, a charge's time);
+- add a **move of its own**: a direction and button that isn't part of its group (a 3HK that isn't
+  the sweep), or undo one (*Same as its group*);
+- add a rule: a **direction group** (directions that do the same press with a button), a
+  **motion** (steps in order, e.g. `41236`, or `6 21 3` for 6, then 2 or 1, then 3, with other ways of
+  doing it) or a **charge motion** (hold, then release, with its frames).
+
+*Changes go to* says where they're kept: **this recording** (saved with it), **all recordings of
+the game**, or **all of the character's recordings**. The last two are your rules, saved at once in
+the settings folder and used for every recording. *Undo all changes here* clears that scope.
+
+For a game the app doesn't know, set its game to *None* in *Edit > Game actions and character...*,
+then pick *New rule set...* under *Rules for*: it starts from the rules for any game, and you can add
+its characters (*New character...*) and their moves. A recording made with your rule set carries a copy
+of it, so whoever opens it grades it the same way.
+
+One key input can also have its own leniency: in the key input editor, *Accepts* says what counts for
+it, and *Change...* sets which directions its press takes, how far apart its buttons can be, how
+early it can be done, its motion's time limit and its charge, or makes just that input strict.
+
 ### Numpad notation
 
 ```

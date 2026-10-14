@@ -123,6 +123,7 @@ def steps(h):
     h.app.toggle_strict_rules(); yield 0.1
     h.check("Strict input rules grades literally", c.get_input_rules()[2].strict)
     h.app.toggle_strict_rules(); yield 0.1
+    yield from input_rules_steps(h, c)
     # Hovering over a lane's name shows what the lane is.
     from kivy.core.window import Window
     from layouts.ui_kit import Tooltip
@@ -141,3 +142,83 @@ def steps(h):
         order.append(type(h.app.display).__name__)
     h.check("F3 cycles the three displays", order == ["ArrowLanesLayout", "RingLayout", "InputListLayout"],
             order)
+
+
+def press(h, root, text):
+    widget = next(w for w in root.walk() if getattr(w, "text", None) == text)
+    widget.dispatch("on_release")
+    return widget
+
+
+def input_rules_steps(h, c):
+    """Changing the rules: this recording's, the player's for the game and a character, a new rule
+    set for a game the app doesn't know, and one key input's own leniency."""
+    import input_rules
+    from input_rules import RECORDING, YOURS_CHARACTER
+
+    h.app.edit_input_rules(); yield 0.4
+    p = popup(h, "InputRulesPopup")
+    h.check("Edit > Input rules opens on the recording's rules", p is not None and "Ryu" in p.name_label.text,
+            p.name_label.text if p else None)
+    h.shot("input_rules"); yield 0.1
+    buffer = next(w for w in p.walk() if type(w).__name__ == "Stepper" and w.label.text == "4 frames")
+    buffer._step(2); yield 0.2
+    h.check("a rule's frames change for this recording", c.get_input_rules()[2].buffer == 6
+            and c.get_rule_changes() == {"rules": [{"id": "buffer", "frames": 6}]}, c.get_rule_changes())
+    h.check("...and are marked as changed here", any("this recording" in getattr(w, "text", "") for w in p.walk()))
+    p.scope = YOURS_CHARACTER; p.refresh(); yield 0.2
+    p.new_direction.text, p.new_button.text = "3", "MK"
+    press(h, p, "Is its own move"); yield 0.2
+    with open(os.path.join(input_rules.USER_PACKS, "sf6.json"), encoding="utf-8") as f:
+        saved = f.read()
+    h.check("a move of its own for Ryu goes into your rules", '"MK"' in saved and
+            c.get_input_rules()[2].press_directions(3, ["B"])[0] == {3}, saved[:120])
+    p.add_kind = "Motion"; p.refresh(); yield 0.1
+    p.fields["name"].text, p.fields["steps"].text, p.fields["shortcuts"].text = "Hcf", "41236", "426"
+    press(h, p, "Add"); yield 0.2
+    named = c.get_input_rules()[2].motion_named([4, 1, 2, 3, 6])
+    h.check("a motion can be added", named is not None and len(named.shortcuts) == 1, p.message.text)
+    p.fields["steps"].text = "236"
+    press(h, p, "Add"); yield 0.2
+    h.check("...but not one already written that way", "already a motion written 236" in p.message.text, p.message.text)
+    next(w for w in p.walk() if type(w).__name__ == "ScrollView").scroll_y = 0; yield 0.3
+    h.shot("input_rules_yours"); yield 0.1
+    p.scope = RECORDING; p.refresh(); yield 0.1
+    press(h, p, "Undo all changes here"); press(h, p, "Sure?"); yield 0.2
+    h.check("undoing the recording's changes", c.get_rule_changes() == {} and c.get_input_rules()[2].buffer == 4)
+    p.dismiss(); yield 0.2
+
+    # A game the app doesn't know: a rule set of the player's own.
+    h.app.set_game(None); yield 0.1
+    h.app.edit_input_rules(); yield 0.4
+    p = popup(h, "InputRulesPopup")
+    p._new_rule_set("Brawler EX"); yield 0.2
+    h.check("a new rule set for an unknown game", c.get_rule_changes().get("pack") == "brawler-ex"
+            and c.get_input_rules()[2].name == "Brawler EX", c.get_rule_changes())
+    p.add_kind = "Input buffer"; p.refresh(); yield 0.1
+    press(h, p, "Add"); yield 0.2
+    h.check("the generic rules have no buffer; one can be added", c.get_input_rules()[2].buffer == 4)
+    p._new_character("Big Guy"); yield 0.2
+    h.check("...and characters for it", c.get_input_rules()[0] == "big-guy" and p.scope == YOURS_CHARACTER)
+    data = h.app._track_data()
+    h.check("the recording carries its rule set", data["input_rules"]["pack_data"]["name"] == "Brawler EX",
+            data["input_rules"])
+    h.shot("input_rules_custom"); yield 0.1
+    p.dismiss(); yield 0.2
+    h.app.set_game("sf6"); c.set_rule_changes({}); c.set_input_rules("ryu"); yield 0.1
+
+    # One key input's own leniency.
+    h.app.set_selection(40, 46); h.app.mark_key_input(); yield 0.4
+    k = popup(h, "KeyInputPopup")
+    h.check("the key input editor says what it accepts", k is not None and "early" in k.accepts_label.text,
+            k.accepts_label.text if k else None)
+    press(h, k, "Change..."); yield 0.4
+    a = popup(h, "AcceptPopup")
+    a.steppers["buffer"]._step(3); yield 0.1
+    h.shot("accept"); yield 0.1
+    press(h, a, "Done"); yield 0.2
+    h.check("its own buffer", k.key_input.get("accept") == {"buffer": 7}, k.key_input.get("accept"))
+    h.check("...shown in the editor", "7f early" in k.accepts_label.text and "changed" in k.accepts_label.text,
+            k.accepts_label.text)
+    k.dismiss(); yield 0.2
+    h.app.set_selection(None)

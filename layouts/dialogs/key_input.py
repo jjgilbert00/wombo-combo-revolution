@@ -7,6 +7,7 @@ from kivy.uix.textinput import TextInput
 from kivy.uix.widget import Widget
 
 import theme
+from layouts.dialogs.accept import AcceptPopup, summary
 from layouts.ui_kit import (
     DIM_TEXT_COLOR, FONT_SIZE, MINUS, PANEL_COLOR, TEXT_COLOR, Dialog, Toggle, button, confirm_button,
     paint_background
@@ -19,18 +20,23 @@ class KeyInputPopup(Dialog):
     click or keystroke, so stray directions or buttons from the recording are easy to remove.
     on_save(key_input) gets the edited copy; on_delete is only offered for an existing one.
     describe(key_input) supplies the live notation preview, and suggest_hold(key_input) what the
-    recording holds in the window (direction, buttons and length) as a starting point for a hold."""
+    recording holds in the window (direction, buttons and length) as a starting point for a hold.
+    accepts(key_input) gives (what the rules accept for it, what it accepts with its own changes),
+    as key_inputs.acceptance does, for its Accepts row: its own exceptions to the rules."""
 
     ROW_HEIGHT = dp(32)
     NUMPAD_ROWS = ((7, 8, 9), (4, 5, 6), (1, 2, 3))
 
     def __init__(self, title, key_input, last_frame, button_names, describe, suggest_hold, on_save, on_delete=None,
-                 **kwargs):
-        super().__init__(size_hint=(None, None), size=(dp(520), dp(426)), background="",
+                 accepts=None, **kwargs):
+        super().__init__(size_hint=(None, None), size=(dp(520), dp(468 if accepts else 426)), background="",
                          background_color=(0, 0, 0, 0.5), **kwargs)
         self.key_input = dict(key_input, motion=list(key_input["motion"]), buttons=list(key_input["buttons"]))
+        if key_input.get("accept"):
+            self.key_input["accept"] = dict(key_input["accept"])
         self.last_frame = last_frame
         self.describe = describe
+        self.accepts = accepts
         self.suggest_hold = suggest_hold
         panel = BoxLayout(orientation="vertical", padding=dp(16), spacing=dp(10))
         paint_background(panel, PANEL_COLOR)
@@ -106,6 +112,17 @@ class KeyInputPopup(Dialog):
             buttons.add_widget(toggle)
             self.press_widgets.append(toggle)
         panel.add_widget(self._row("Buttons", buttons))
+
+        self.accepts_label = None
+        if accepts:
+            row = BoxLayout(spacing=dp(8))
+            self.accepts_label = Label(font_size=theme.CAPTION, color=TEXT_COLOR, halign="left", valign="middle",
+                                       shorten=True, shorten_from="right")
+            self.accepts_label.bind(size=lambda label, size: setattr(label, "text_size", size))
+            row.add_widget(self.accepts_label)
+            self.accepts_button = button("Change...", self._edit_accepts)
+            row.add_widget(self.accepts_button)
+            panel.add_widget(self._row("Accepts", row))
 
         actions = BoxLayout(size_hint_y=None, height=self.ROW_HEIGHT, spacing=dp(8))
         if on_delete:
@@ -207,3 +224,23 @@ class KeyInputPopup(Dialog):
             + "\nClick the lit key again for any direction."
         )
         self.preview.text = self.describe(self.key_input)
+        if self.accepts_label is not None:
+            self.accepts_button.disabled = kind != "press"
+            if kind != "press":
+                self.accepts_label.text = "Holds and exact spans are matched as they are"
+            else:
+                own = " (changed for this input)" if self.key_input.get("accept") else ""
+                self.accepts_label.text = summary(self.accepts(self.key_input)[1]) + own
+
+    def _edit_accepts(self):
+        game, current = self.accepts(self.key_input)
+        has_press = bool(self.key_input["buttons"]) or self.key_input["direction"] is not None
+        AcceptPopup(self.describe(self.key_input), has_press, game, current, self.key_input.get("accept") or {},
+                    self._set_accept).open()
+
+    def _set_accept(self, accept):
+        if accept:
+            self.key_input["accept"] = accept
+        else:
+            self.key_input.pop("accept", None)
+        self._refresh()
