@@ -28,6 +28,10 @@ class TrackFile(unittest.TestCase):
         self.assertEqual((data["inputs"], data["notes"], data["version"]), (track((3, 2)), notes, track_file.VERSION))
         self.assertNotIn("key_inputs", data)  # Empty parts are left out.
 
+    def test_the_side_it_was_recorded_from_is_kept(self):
+        track_file.save(self.path, {"inputs": track((3, 2)), "recorded_side": "right"})
+        self.assertEqual(track_file.load(self.path)["recorded_side"], "right")
+
     def test_the_oldest_saves_are_a_bare_list_of_frames(self):
         self.write_raw(track((2, 6)))
         self.assertEqual(track_file.load(self.path)["inputs"], track((2, 6)))
