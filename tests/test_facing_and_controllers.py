@@ -81,6 +81,50 @@ class FlippingARecording(unittest.TestCase):
             controller.tick(frame_state)
         self.assertEqual([j[2] for j in controller.get_judgements()], [HIT])
 
+    def test_a_flipped_recording_is_marked_as_made_from_the_right_side(self):
+        controller = PlayalongController()
+        controller.set_input_track(track((3, 4)))  # An old file: its side isn't known.
+        self.assertIsNone(controller.get_recorded_side())
+        controller.flip_recording()
+        self.assertEqual(controller.get_recorded_side(), facing.RIGHT)
+
+
+class KnowingTheSide(unittest.TestCase):
+    """A recording says which side it was made from; a take is all from one side."""
+
+    def record(self, recorder, frames):
+        for frame_state in frames:
+            recorder.tick(frame_state)
+
+    def test_a_recording_knows_the_side_it_was_made_from(self):
+        for side in (facing.LEFT, facing.RIGHT):
+            recorder = PlayalongController()
+            recorder.set_side(side)
+            recorder.start_recording()
+            self.record(recorder, track((3, 6)))
+            recorder.stop_recording()
+            self.assertEqual(recorder.get_recorded_side(), side)
+
+    def test_an_opened_recording_says_its_side_or_none(self):
+        controller = PlayalongController()
+        for saved, side in (("right", facing.RIGHT), ("left", facing.LEFT), (None, None), ("sideways", None)):
+            controller.set_input_track(track((2, 5)), recorded_side=saved)
+            self.assertEqual(controller.get_recorded_side(), side)
+
+    def test_switching_sides_while_recording_waits_for_it_to_stop(self):
+        recorder = PlayalongController()
+        recorder.start_recording()
+        self.record(recorder, track((2, 6)))
+        self.assertFalse(recorder.set_side(facing.RIGHT))  # Not yet...
+        self.record(recorder, track((2, 6)))
+        recorder.stop_recording()
+        self.assertEqual(recorder.get_input_track(), track((4, 6)))  # ...so the take isn't half mirrored,
+        self.assertEqual(recorder.get_recorded_side(), facing.LEFT)
+        recorder.start_recording()  # ...and the next one is from the right side.
+        self.record(recorder, track((2, 4)))
+        recorder.stop_recording()
+        self.assertEqual((recorder.get_input_track(), recorder.get_recorded_side()), (track((2, 6)), facing.RIGHT))
+
 
 class FakePad:
     """Stands in for pygame's SDL Controller: buttons and axes by SDL's constants."""

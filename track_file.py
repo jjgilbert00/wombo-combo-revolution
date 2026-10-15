@@ -8,11 +8,15 @@
      "key_inputs": [...],                 # see key_inputs.py
      "saved_attempts": [...],             # attempts the player kept
      "button_map": {...},                 # recorded button -> the player's
-     "game": "sf6", "action_layout": {...}}
+     "game": "sf6", "action_layout": {...},
+     "recorded_side": "left" or "right"}  # the side of the screen it was recorded from
 
 Directions are numpad notation as if the character faces right (6 is forward), whichever side the
-recording was made from (see facing.py). Only "inputs" is required; empty parts are left out. Version 1 files are the same without
-"version"; the oldest saves are a bare list of frames. load() reads all of them.
+recording was made from (see facing.py): "recorded_side" says which that was, for whoever watches its
+video. A file without it was saved before the app knew sides, so one recorded from the right side
+reads mirrored until it's flipped (Edit > Flip sides). Only "inputs" is required; empty parts are left
+out. Version 1 files are the same without "version"; the oldest saves are a bare list of frames.
+load() reads all of them.
 
 Reading and writing the file happens here and only here.
 """
@@ -21,7 +25,8 @@ import json
 from sampler import FPS
 
 VERSION = 2
-PARTS = ("attempt", "notes", "key_inputs", "saved_attempts", "button_map", "game", "action_layout")
+PARTS = ("attempt", "notes", "key_inputs", "saved_attempts", "button_map", "game", "action_layout",
+         "recorded_side")
 
 
 class TrackFileError(ValueError):

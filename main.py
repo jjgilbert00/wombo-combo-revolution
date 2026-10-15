@@ -675,13 +675,17 @@ class WomboComboApp(App):
         self.playalong_controller.clear_attempt()
 
     def apply_side(self):
-        self.playalong_controller.set_side(self.settings.side)
+        if not self.playalong_controller.set_side(self.settings.side):
+            self.flash("Switching sides once this recording stops (a take is all from one side)", "warning")
 
     def toggle_side(self):
         """Switches which side the player is on (when the game has them on the other side)."""
         side = facing.RIGHT if self.settings.side == facing.LEFT else facing.LEFT
         self.settings.set("side", side, write=True)
-        self.apply_side()
+        if not self.playalong_controller.set_side(side):
+            self.flash(f"Switching to the {facing.SIDE_NAMES[side].lower()} once this recording stops "
+                       "(a take is all from one side)", "warning")
+            return
         self.flash(f"You're on the {facing.SIDE_NAMES[side].lower()}: "
                    + ("your inputs are mirrored, so forward is still 6" if side == facing.RIGHT
                       else "inputs as they are"))
@@ -827,7 +831,7 @@ class WomboComboApp(App):
             self.stop_recording()
         self.playalong_controller.set_input_track(data["inputs"], data.get("attempt"), data.get("notes"),
                                                   data.get("key_inputs"), data.get("saved_attempts"),
-                                                  data.get("button_map"))
+                                                  data.get("button_map"), data.get("recorded_side"))
         self.set_game(data.get("game", self.default_game()), data.get("action_layout"), mark_edited=False)
         self.track_path = path
         video = os.path.splitext(path)[0] + ".mp4"
@@ -851,7 +855,8 @@ class WomboComboApp(App):
                 "attempt": attempt if any(frame is not None for frame in attempt) else None,
                 "notes": controller.get_notes(), "key_inputs": controller.get_key_inputs(),
                 "saved_attempts": controller.get_saved(), "button_map": controller.get_button_map(),
-                "game": game, "action_layout": action_layout if game else None}
+                "game": game, "action_layout": action_layout if game else None,
+                "recorded_side": controller.get_recorded_side()}
 
     def save(self):
         """Saves into the open recording's file, or for a new take asks where to save it (with its
