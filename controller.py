@@ -69,8 +69,8 @@ class XInputReader:
     """Reads an XInput (Xbox-style) controller directly.
 
     XInputGetState is thread safe and takes a few microseconds, so this can be polled from the
-    sampler thread at exactly the moment a frame is due. pygame, by contrast, only refreshes its
-    joystick state when the UI thread pumps SDL events.
+    sampler thread at exactly the moment a frame is due. Other controllers go through SDL
+    (GameControllerReader, RawJoystickReader), which reads their state from the device on each poll.
     """
 
     DPAD_UP, DPAD_DOWN, DPAD_LEFT, DPAD_RIGHT = 0x0001, 0x0002, 0x0004, 0x0008
@@ -113,56 +113,139 @@ class XInputReader:
         return state
 
 
-class PygameReader:
-    """Fallback for controllers XInput can't see.
+def _sdl():
+    """pygame's SDL GameController module, set up (None without pygame)."""
+    try:
+        import pygame
+        from pygame._sdl2 import controller as sdl_controller
+    except ImportError:
+        return None
+    if not pygame.joystick.get_init():
+        pygame.joystick.init()
+    if not sdl_controller.get_init():
+        sdl_controller.init()
+    return sdl_controller
 
-    pygame's joystick state only updates when SDL events are pumped, which happens on the Kivy
-    UI thread, so samples can be up to one UI frame stale. Prefer XInputReader when possible.
-    """
 
-    def __init__(self, joystick):
+def _refresh(sdl_controller):
+    """Reads every controller's state from the device now. Without this, SDL only updates it when
+    something pumps its events (the UI thread), so samples could be a UI frame stale."""
+    sdl_controller.update()
+
+
+class GameControllerReader:
+    """Any controller SDL knows the layout of: PlayStation and Switch pads, and most fight sticks and
+    third-party pads. SDL's GameController interface lays each one out like an Xbox pad, so its
+    buttons are recorded under the same names as an Xbox pad's, by position: Cross is A, Circle B,
+    Square X, Triangle Y, L1 LB, R1 RB, L2 LT, R2 RT. The D-pad, or else the left stick, gives the
+    direction, as for XInput."""
+
+    TRIGGER_THRESHOLD = 16384  # Half pressed (triggers read 0 to 32767).
+
+    def __init__(self, pad, sdl_controller):
+        import pygame
+
+        self.pad = pad
+        self._sdl = sdl_controller
+        self.name = f"{pad.name} (SDL)"
+        self.connected = True
+        self.menu = (False, False)
+        self._buttons = {"A": pygame.CONTROLLER_BUTTON_A, "B": pygame.CONTROLLER_BUTTON_B,
+                         "X": pygame.CONTROLLER_BUTTON_X, "Y": pygame.CONTROLLER_BUTTON_Y,
+                         "LB": pygame.CONTROLLER_BUTTON_LEFTSHOULDER, "RB": pygame.CONTROLLER_BUTTON_RIGHTSHOULDER}
+        self._dpad = (pygame.CONTROLLER_BUTTON_DPAD_LEFT, pygame.CONTROLLER_BUTTON_DPAD_RIGHT,
+                      pygame.CONTROLLER_BUTTON_DPAD_DOWN, pygame.CONTROLLER_BUTTON_DPAD_UP)
+        self._menu = (pygame.CONTROLLER_BUTTON_START, pygame.CONTROLLER_BUTTON_BACK)
+        self._axes = (pygame.CONTROLLER_AXIS_LEFTX, pygame.CONTROLLER_AXIS_LEFTY,
+                      pygame.CONTROLLER_AXIS_TRIGGERLEFT, pygame.CONTROLLER_AXIS_TRIGGERRIGHT)
+
+    def poll(self):
+        try:
+            _refresh(self._sdl)
+            if not self.pad.attached():
+                self.connected = False
+                return None
+            button = lambda b: int(bool(self.pad.get_button(b)))
+            left, right, down, up = (button(b) for b in self._dpad)
+            direction = direction_from_axes(right - left, up - down)
+            stick_x, stick_y, trigger_l, trigger_r = (self.pad.get_axis(a) for a in self._axes)
+            if direction == 5:
+                direction = direction_from_stick(stick_x / 32767, -stick_y / 32767)  # SDL's y is down.
+            self.menu = tuple(bool(button(b)) for b in self._menu)
+            state = {name: button(b) for name, b in self._buttons.items()}
+            state["direction"] = direction
+            state["LT"] = int(trigger_l >= self.TRIGGER_THRESHOLD)
+            state["RT"] = int(trigger_r >= self.TRIGGER_THRESHOLD)
+            self.connected = True
+            return state
+        except Exception:
+            self.connected = False
+            return None
+
+
+class RawJoystickReader:
+    """A controller SDL doesn't know the layout of: read as a plain joystick. The direction comes
+    from its hat (D-pad), or else its first two axes (a stick, or a fight stick in left-stick mode).
+    Buttons are guessed in the usual order (A, B, X, Y, LB, RB); if they come out wrong, Edit > Remap
+    buttons fixes a recording."""
+
+    def __init__(self, joystick, sdl_controller):
         self.joystick = joystick
         self.joystick.init()
-        self.name = f"{joystick.get_name()} (pygame)"
+        self._sdl = sdl_controller
+        self.name = f"{joystick.get_name()} (joystick: buttons may need remapping)"
         self.connected = True
         self.menu = (False, False)
 
     def poll(self):
         try:
-            count = self.joystick.get_numbuttons()
-            self.menu = (count > 7 and bool(self.joystick.get_button(7)), count > 6 and bool(self.joystick.get_button(6)))
-            hat = self.joystick.get_hat(0) if self.joystick.get_numhats() else (0, 0)
+            if self._sdl:
+                _refresh(self._sdl)
+            joystick = self.joystick
+            count, axes = joystick.get_numbuttons(), joystick.get_numaxes()
+            button = lambda index: int(bool(joystick.get_button(index))) if index < count else 0
+            self.menu = (bool(button(7)), bool(button(6)))
+            hat = joystick.get_hat(0) if joystick.get_numhats() else (0, 0)
+            direction = direction_from_axes(hat[0], hat[1])
+            if direction == 5 and axes >= 2:
+                direction = direction_from_stick(joystick.get_axis(0), -joystick.get_axis(1))  # Down is +.
+            trigger = lambda index: int(joystick.get_axis(index) > 0) if axes > index else 0  # Rest at -1.
             return {
-                "direction": direction_from_axes(hat[0], hat[1]),
-                "X": self.joystick.get_button(2),
-                "Y": self.joystick.get_button(3),
-                "A": self.joystick.get_button(0),
-                "B": self.joystick.get_button(1),
-                "LB": self.joystick.get_button(4),
-                "RB": self.joystick.get_button(5),
-                "LT": int((round(self.joystick.get_axis(4)) + 1) / 2),
-                "RT": int((round(self.joystick.get_axis(5)) + 1) / 2),
+                "direction": direction,
+                "A": button(0), "B": button(1), "X": button(2), "Y": button(3),
+                "LB": button(4), "RB": button(5),
+                "LT": trigger(4) if axes >= 6 else 0,
+                "RT": trigger(5) if axes >= 6 else 0,
             }
         except Exception:
             self.connected = False
             return None
 
 
+def _is_xinput(name):
+    """XInput devices also show up through SDL; XInputReader reads those (directly, so each pad is
+    listed once)."""
+    name = name.lower()
+    return "xinput" in name or "xbox" in name
+
+
 def find_controllers():
-    """Returns every usable reader, XInput devices first."""
+    """Returns every usable reader: XInput devices first, then controllers SDL knows, then other
+    joysticks."""
     readers = [XInputReader(slot) for slot in XInputReader.connected_slots()]
     try:
         import pygame
 
-        if not pygame.joystick.get_init():
-            pygame.joystick.init()
-        # XInput devices also show up in pygame; skip those so each pad is listed once.
+        sdl_controller = _sdl()
         for index in range(pygame.joystick.get_count()):
-            joystick = pygame.joystick.Joystick(index)
-            name = joystick.get_name().lower()
-            if _xinput and ("xinput" in name or "xbox" in name):
+            known = sdl_controller is not None and sdl_controller.is_controller(index)
+            name = sdl_controller.name_forindex(index) if known else pygame.joystick.Joystick(index).get_name()
+            if _xinput and _is_xinput(name or ""):
                 continue
-            readers.append(PygameReader(joystick))
+            if known:
+                readers.append(GameControllerReader(sdl_controller.Controller(index), sdl_controller))
+            else:
+                readers.append(RawJoystickReader(pygame.joystick.Joystick(index), sdl_controller))
     except Exception:
         pass
     return readers
